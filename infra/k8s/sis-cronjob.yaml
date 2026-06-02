@@ -1,0 +1,36 @@
+# SIS nightly pull — runs at 02:00 UTC every day.
+# Calls POST /api/v1/import/trigger which initiates the automated SIS pull.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sis-nightly-pull
+  namespace: qaat
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sis-trigger
+              image: curlimages/curl:8.7.1
+              command:
+                - sh
+                - -c
+                - |
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    "${API_GATEWAY_URL}/api/v1/import/trigger" \
+                    && echo "SIS pull triggered" \
+                    || (echo "SIS pull failed" && exit 1)
+              env:
+                - name: API_GATEWAY_URL
+                  value: http://api-gateway.qaat.svc.cluster.local:8443
+                - name: ADMIN_TOKEN
+                  valueFrom:
+                    secretKeyRef: { name: qaat-secrets, key: sis-admin-token }

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qr-generator
+  namespace: qaat
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: qr-generator
+  template:
+    metadata:
+      labels:
+        app: qr-generator
+    spec:
+      containers:
+        - name: qr-generator
+          image: qaat/qr-generator:latest
+          ports:
+            - containerPort: 3002
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits:   { cpu: "1000m", memory: "1Gi" }
+          env:
+            - name: PORT
+              value: "3002"
+            # qaat_app role (RLS enforced); queries run under a tenant GUC.
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: app-db-url }
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: smtp-host }
+            - name: SENDGRID_API_KEY
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: sendgrid-api-key }
+            - name: KEY_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: key-encryption-key }
+            # qr-generator verifies the RS256 JWT itself (update.md H1).
+            - name: RSA_PUBLIC_KEY_PATH
+              value: /run/secrets/auth_public.pem
+            - name: JWT_ISSUER
+              value: qaat-auth
+            - name: JWT_AUDIENCE
+              value: qaat-api
+          volumeMounts:
+            - name: rsa-keys
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: rsa-keys
+          secret:
+            secretName: qaat-rsa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qr-generator
+  namespace: qaat
+spec:
+  selector:
+    app: qr-generator
+  ports:
+    - port: 3002
+      targetPort: 3002

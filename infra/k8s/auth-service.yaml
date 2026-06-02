@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: qaat
+  labels:
+    app: auth-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: qaat/auth-service:latest
+          ports:
+            - containerPort: 8081
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+          env:
+            - name: PORT
+              value: "8081"
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: db-url }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: redis-url }
+            - name: RSA_PRIVATE_KEY_PATH
+              value: /run/secrets/auth_private.pem
+            - name: RSA_PUBLIC_KEY_PATH
+              value: /run/secrets/auth_public.pem
+            - name: JWT_ISSUER
+              value: qaat-auth
+            - name: JWT_AUDIENCE
+              value: qaat-api
+            - name: JWT_TTL_SECONDS
+              value: "86400"
+            - name: ENVIRONMENT
+              value: production
+          volumeMounts:
+            - name: rsa-keys
+              mountPath: /run/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: 8081 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: rsa-keys
+          secret:
+            secretName: qaat-rsa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: qaat
+spec:
+  selector:
+    app: auth-service
+  ports:
+    - port: 8081
+      targetPort: 8081

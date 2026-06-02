@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sync-receiver
+  namespace: qaat
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sync-receiver
+  template:
+    metadata:
+      labels:
+        app: sync-receiver
+    spec:
+      containers:
+        - name: sync-receiver
+          image: qaat/sync-receiver:latest
+          ports:
+            - containerPort: 8084
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "2Gi" }
+          env:
+            - name: PORT
+              value: "8084"
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: db-url }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: redis-url }
+            - name: ENVIRONMENT
+              value: production
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sync-receiver
+  namespace: qaat
+spec:
+  selector:
+    app: sync-receiver
+  ports:
+    - port: 8084
+      targetPort: 8084

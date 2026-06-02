@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: qaat
+  labels:
+    app: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: qaat/api-gateway:latest
+          ports:
+            - containerPort: 8443
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "2Gi" }
+          env:
+            - name: PORT
+              value: "8443"
+            # Tenant data plane: NON-superuser qaat_app role (RLS enforced).
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: app-db-url }
+            # Privileged connection used ONLY by ADMIN-gated cross-tenant handlers.
+            - name: ADMIN_DB_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: db-url }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: redis-url }
+            - name: RSA_PUBLIC_KEY_PATH
+              value: /run/secrets/auth_public.pem
+            - name: JWT_ISSUER
+              value: qaat-auth
+            - name: JWT_AUDIENCE
+              value: qaat-api
+            - name: AUTH_SERVICE_URL
+              value: http://auth-service:8081
+            - name: CORS_ORIGINS
+              value: "https://admin.qaat.platform,https://student.qaat.platform"
+            - name: ENVIRONMENT
+              value: production
+          volumeMounts:
+            - name: rsa-keys
+              mountPath: /run/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health, port: 8443 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: 8443 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: rsa-keys
+          secret:
+            secretName: qaat-rsa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: qaat
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - port: 443
+      targetPort: 8443
+  type: LoadBalancer

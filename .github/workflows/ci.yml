@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PNPM_VERSION: '9.1.0'
+
+jobs:
+
+  # ─── Auth Service ───────────────────────────────────────────────────────────
+  auth-service:
+    name: Auth Service — build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/auth-service
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: qaat_test
+          POSTGRES_USER: qaat
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports: ["5432:5432"]
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: services/auth-service/go.sum
+
+      - name: Generate test RSA keys
+        run: |
+          mkdir -p keys
+          openssl genrsa -out keys/auth_private.pem 2048
+          openssl rsa -in keys/auth_private.pem -pubout -out keys/auth_public.pem
+        working-directory: .
+
+      - name: Run migrations
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
+            -f ../../db/migrations/001_init_schema.sql \
+            -f ../../db/migrations/002_indexes.sql \
+            -f ../../db/migrations/003_rls_policies.sql \
+            -f ../../db/migrations/004_materialized_views.sql \
+            -f ../../db/migrations/005_tenant_rsa_keys.sql \
+            -f ../../db/migrations/006_sync_package_hmac.sql \
+            -f ../../db/migrations/007_integrity_and_scale.sql \
+            -f ../../db/migrations/008_online_checkin.sql \
+            -f ../../db/migrations/009_force_rls_and_app_role.sql
+
+      - name: Tidy and download dependencies
+        run: go mod tidy && go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -race -count=1 -coverprofile=coverage.out
+        env:
+          DB_URL: postgres://qaat:testpass@localhost:5432/qaat_test?sslmode=disable
+          REDIS_URL: redis://:@localhost:6379/0
+          RSA_PRIVATE_KEY_PATH: ../../keys/auth_private.pem
+          RSA_PUBLIC_KEY_PATH:  ../../keys/auth_public.pem
+          JWT_ISSUER: qaat-auth
+          JWT_AUDIENCE: qaat-api
+          JWT_TTL_SECONDS: "3600"
+          PORT: "8081"
+
+  # ─── API Gateway ────────────────────────────────────────────────────────────
+  api-gateway:
+    name: API Gateway — build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api-gateway
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: services/api-gateway/go.sum
+
+      - name: Generate test RSA keys
+        run: |
+          mkdir -p keys
+          openssl genrsa -out keys/auth_private.pem 2048
+          openssl rsa -in keys/auth_private.pem -pubout -out keys/auth_public.pem
+        working-directory: .
+
+      - name: Tidy and download dependencies
+        run: go mod tidy && go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -race -count=1
+        env:
+          DB_URL: postgres://qaat:testpass@localhost:5432/qaat_test?sslmode=disable
+          REDIS_URL: redis://:@localhost:6379/0
+          RSA_PUBLIC_KEY_PATH: ../../keys/auth_public.pem
+          JWT_ISSUER: qaat-auth
+          JWT_AUDIENCE: qaat-api
+          PORT: "8443"
+          CORS_ORIGINS: "http://localhost:3000"
+
+  # ─── Coordinator PWA ────────────────────────────────────────────────────────
+  coordinator-pwa:
+    name: Coordinator PWA — typecheck & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/coordinator-pwa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: apps/coordinator-pwa/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  # ─── Admin Dashboards ────────────────────────────────────────────────────────
+  admin-dashboards:
+    name: Admin Dashboards — typecheck & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin-dashboards
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: apps/admin-dashboards/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  # ─── Database ───────────────────────────────────────────────────────────────
+  db-migrations:
+    name: DB Migrations — apply & verify
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: qaat_test
+          POSTGRES_USER: qaat
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports: ["5432:5432"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply all migrations
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
+            -f db/migrations/001_init_schema.sql \
+            -f db/migrations/002_indexes.sql \
+            -f db/migrations/003_rls_policies.sql \
+            -f db/migrations/004_materialized_views.sql \
+            -f db/migrations/005_tenant_rsa_keys.sql \
+            -f db/migrations/006_sync_package_hmac.sql \
+            -f db/migrations/007_integrity_and_scale.sql \
+            -f db/migrations/008_online_checkin.sql \
+            -f db/migrations/009_force_rls_and_app_role.sql
+        env:
+          PGPASSWORD: testpass
+
+      - name: Verify RLS is ENABLED and FORCED on all tenant tables
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -c "
+            SELECT relname
+            FROM pg_class
+            WHERE relkind = 'r'
+              AND relnamespace = 'public'::regnamespace
+              AND relname NOT IN ('tenants')
+              AND (NOT relrowsecurity OR NOT relforcerowsecurity);
+          " | grep -q "(0 rows)" || (echo "RLS not ENABLED+FORCED on all tables!" && exit 1)
+
+      - name: Ensure qaat_app cannot bypass RLS
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -tAc "
+            SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname='qaat_app';
+          " | grep -qx "f" || (echo "qaat_app must be NOSUPERUSER + NOBYPASSRLS!" && exit 1)
+
+      - name: Load seed data
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
+            -f db/seeds/001_test_tenants.sql \
+            -f db/seeds/002_test_users.sql
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: tests/security/go.sum
+
+      # The isolation suite MUST run as the same NON-superuser role the app uses
+      # (qaat_app), against the seeded multi-tenant data — otherwise it passes
+      # vacuously. This is the regression gate for update.md C1.
+      - name: RLS isolation tests (as qaat_app)
+        run: go test ./... -count=1 -v
+        working-directory: tests/security
+        env:
+          DB_URL: postgres://qaat_app:changeme_app@localhost:5432/qaat_test?sslmode=disable
