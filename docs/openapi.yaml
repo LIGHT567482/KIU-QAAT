@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: QAAT API
+  version: 1.0.0
+  description: |
+    Quality Assurance Attendance Tracker — multi-tenant offline-first SaaS.
+    All endpoints require `Authorization: Bearer <JWT>` unless marked public.
+    All responses include `X-Correlation-ID` for distributed tracing.
+
+servers:
+  - url: https://api.qaat.platform/api/v1
+    description: Production
+  - url: http://localhost:8443/api/v1
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:   { type: string }
+        message: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password, tenant_id]
+      properties:
+        email:     { type: string, format: email }
+        password:  { type: string }
+        totp_code: { type: string, description: "Required for VC and DQA_DIRECTOR roles" }
+        tenant_id: { type: string, format: uuid }
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type:   { type: string, example: Bearer }
+        expires_in:   { type: integer, example: 86400 }
+        jti:          { type: string }
+        role:         { type: string, enum: [COORDINATOR, QA_OFFICER, DQA_DIRECTOR, VC, ADMIN] }
+        user_id:      { type: string, format: uuid }
+
+    ThresholdConfig:
+      type: object
+      properties:
+        attendance_threshold:   { type: integer, minimum: 1, maximum: 100 }
+        checkin_window_minutes: { type: integer }
+        auto_kill_minutes:      { type: integer }
+        rssi_threshold_dbm:     { type: integer }
+
+    EligibilityUnit:
+      type: object
+      properties:
+        unit_id:               { type: string }
+        unit_name:             { type: string }
+        sessions_held:         { type: integer }
+        sessions_attended:     { type: integer }
+        attendance_percentage: { type: number }
+        threshold:             { type: integer }
+        status:                { type: string, enum: [ELIGIBLE, EXAM_INELIGIBLE] }
+        deficit_sessions:      { type: integer, nullable: true }
+
+    EligibilityRecord:
+      type: object
+      properties:
+        student_id:    { type: string }
+        academic_year: { type: string }
+        semester:      { type: integer }
+        units:
+          type: array
+          items: { $ref: '#/components/schemas/EligibilityUnit' }
+
+    LiveSession:
+      type: object
+      properties:
+        session_id:     { type: string, format: uuid }
+        coordinator_id: { type: string }
+        unit_id:        { type: string }
+        unit_name:      { type: string }
+        venue_id:       { type: string }
+        session_status: { type: string }
+        student_count:  { type: integer }
+        gate_open_time: { type: string, format: date-time }
+        audit_flags:    { type: array, items: { type: string } }
+
+paths:
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /auth/login:
+    post:
+      summary: Authenticate user and receive JWT
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: JWT issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { description: Invalid credentials }
+        '403': { description: MFA required or account inactive }
+        '429': { description: Account locked }
+
+  /auth/refresh:
+    post:
+      summary: Refresh JWT — rotates jti, blacklists old token
+      tags: [Auth]
+      responses:
+        '200': { description: New JWT }
+        '401': { description: Token invalid or revoked }
+
+  /auth/logout:
+    post:
+      summary: Blacklist JWT jti
+      tags: [Auth]
+      responses:
+        '204': { description: Logged out }
+
+  /auth/mfa/enroll:
+    post:
+      summary: Generate TOTP secret and otpauth URL
+      tags: [Auth]
+      responses:
+        '200':
+          description: TOTP enrolment data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  otpauth_url:  { type: string }
+                  backup_codes: { type: array, items: { type: string } }
+
+  /auth/mfa/verify:
+    post:
+      summary: Confirm TOTP code and activate MFA
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200': { description: MFA activated }
+        '401': { description: Invalid code }
+
+  # ── Manifest ─────────────────────────────────────────────────────────────
+
+  /manifest/daily:
+    get:
+      summary: Fetch today's encrypted daily manifest (Coordinator only)
+      tags: [Manifest]
+      parameters:
+        - in: header
+          name: X-Device-Fingerprint
+          schema: { type: string }
+          required: true
+      responses:
+        '200':
+          description: Daily manifest with sessions, roster (hashed), policy, public key
+        '403': { description: Wrong role }
+
+  # ── QR Management ─────────────────────────────────────────────────────────
+
+  /qr/generate/batch:
+    post:
+      summary: Trigger async QR generation + email delivery for all active students
+      tags: [QR]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, academic_year]
+              properties:
+                tenant_id:    { type: string, format: uuid }
+                academic_year: { type: string, example: "2025/2026" }
+                course_id:    { type: string, nullable: true }
+      responses:
+        '202':
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:          { type: string }
+                  status:          { type: string }
+                  estimated_count: { type: integer }
+
+  /qr/reissue:
+    post:
+      summary: Reissue QR for a single student (invalidates previous serial)
+      tags: [QR]
+      responses:
+        '200': { description: New QR delivered }
+
+  # ── Sessions ──────────────────────────────────────────────────────────────
+
+  /sessions/warden-link:
+    post:
+      summary: Generate one-time warden delegation link with GPS geofence
+      tags: [Sessions]
+      responses:
+        '200': { description: Delegation link + geofence }
+
+  /sessions/warden-validate:
+    post:
+      summary: Validate warden token + GPS position
+      tags: [Sessions]
+      responses:
+        '200': { description: Valid }
+        '401': { description: Token invalid }
+        '403': { description: Outside geofence }
+
+  # ── Sync ──────────────────────────────────────────────────────────────────
+
+  /sync/init:
+    post:
+      summary: Initialise chunked sync upload
+      tags: [Sync]
+      responses:
+        '200':
+          description: Upload ID + chunk size
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_id:        { type: string, format: uuid }
+                  chunk_size_bytes: { type: integer }
+                  server_timestamp: { type: string, format: date-time }
+
+  /sync/chunk/{upload_id}/{chunk_index}:
+    post:
+      summary: Upload a single AES-256 encrypted chunk
+      tags: [Sync]
+      parameters:
+        - { in: path, name: upload_id,   schema: { type: string }, required: true }
+        - { in: path, name: chunk_index, schema: { type: integer }, required: true }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200': { description: Chunk acknowledged with HMAC-SHA256 signature }
+
+  /sync/resume/{upload_id}:
+    get:
+      summary: Get resume point for interrupted upload
+      tags: [Sync]
+      responses:
+        '200': { description: First missing chunk index + received list }
+
+  /sync/complete/{upload_id}:
+    post:
+      summary: Finalise upload — verify checksum + write attendance_logs
+      tags: [Sync]
+      responses:
+        '200': { description: SYNCED with record counts }
+        '409': { description: Upload incomplete or checksum mismatch }
+
+  # ── Eligibility ───────────────────────────────────────────────────────────
+
+  /eligibility/{student_id}:
+    get:
+      summary: Get per-unit attendance + eligibility for a student
+      tags: [Eligibility]
+      parameters:
+        - { in: path, name: student_id, schema: { type: string }, required: true }
+      responses:
+        '200':
+          description: Eligibility record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EligibilityRecord' }
+
+  /eligibility/clearance-token:
+    post:
+      summary: Generate RSA-signed exam clearance tokens for eligible students
+      tags: [Eligibility]
+      responses:
+        '200': { description: Array of signed clearance tokens }
+
+  # ── Dashboards ────────────────────────────────────────────────────────────
+
+  /dashboard/vc/overview:
+    get:
+      summary: VC overview — IER, ghost lectures, eligibility summary
+      tags: [Dashboards]
+      responses:
+        '200': { description: KPI data }
+
+  /dashboard/dqa/thresholds:
+    get:
+      summary: Read institutional policy thresholds
+      tags: [Dashboards]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThresholdConfig' }
+    put:
+      summary: Update policy thresholds (invalidates manifest cache)
+      tags: [Dashboards]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ThresholdConfig' }
+      responses:
+        '200': { description: Updated config }
+
+  /dashboard/qa/live-sessions:
+    get:
+      summary: All currently ACTIVE sessions with coordinator + student count
+      tags: [Dashboards]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LiveSession' }
+
+  /dashboard/qa/device-reset:
+    post:
+      summary: Clear student hardware fingerprint binding
+      tags: [Dashboards]
+      responses:
+        '200': { description: Binding cleared }
+        '409': { description: Rebind limit reached (max 2 per academic year) }
+
+  # ── Exports ───────────────────────────────────────────────────────────────
+
+  /reports/vc/audit.pdf:
+    get:
+      summary: Download 30-day session audit report as PDF
+      tags: [Exports]
+      responses:
+        '200':
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+
+  /reports/dqa/eligibility.csv:
+    get:
+      summary: Download full eligibility list as CSV
+      tags: [Exports]
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema: { type: string }
+
+  # ── SIS Import ────────────────────────────────────────────────────────────
+
+  /import/csv:
+    post:
+      summary: Upload student roster CSV (multipart/form-data, field name "roster")
+      tags: [Import]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                roster: { type: string, format: binary }
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inserted: { type: integer }
+                  updated:  { type: integer }
+                  skipped:  { type: integer }
+                  errors:   { type: array, items: { type: string } }
+
+  /import/trigger:
+    post:
+      summary: Trigger automated SIS pull (also called by nightly CronJob)
+      tags: [Import]
+      responses:
+        '202': { description: Job queued }

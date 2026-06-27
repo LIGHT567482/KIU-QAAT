@@ -1,0 +1,43 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Go
+services/*/bin/
+services/*/*.test
+services/*/vendor/
+
+# Node
+node_modules/
+apps/*/node_modules/
+apps/*/dist/
+apps/*/.svelte-kit/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keys (never commit)
+*.pem
+*.key
+*.p12
+*.pfx
+keys/
+
+# Docker volumes
+pgdata/
+redisdata/
+
+# Test coverage
+coverage/
+*.out

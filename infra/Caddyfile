@@ -1,0 +1,45 @@
+# QAAT HTTPS reverse proxy.
+# Terminates TLS on each public port and forwards to the plain-HTTP container.
+# HTTPS makes the browser a "secure context", REQUIRED for Web Crypto (coordinator
+# PWA device key/vault, student check-in fingerprint).
+#
+# Port-only site addresses (":8443" etc.) mean Caddy serves EVERY host on that
+# port — any LAN IP, localhost, 127.0.0.1, or qaat.local — so the stack keeps
+# working when the laptop's DHCP IP changes and works fully offline via localhost.
+# The frontends derive the API host from the page's own hostname at runtime, so
+# nothing bakes a fixed IP. The self-signed cert (certs/qaat.crt) carries the
+# current LAN IP + 127.0.0.1 + localhost + qaat.local in its SANs; a brand-new IP
+# not in the SAN still works after accepting the browser warning (or regenerate
+# the cert). Install certs/qaat.crt as trusted on each device to remove warnings.
+
+{
+	auto_https disable_redirects
+	# Browsers do not send SNI for bare IP addresses; fall back to the localhost
+	# site (same cert + backend) so https://<LAN-IP>:port works from phones.
+	default_sni localhost
+}
+
+:8443 {
+	tls /certs/qaat.crt /certs/qaat.key
+	reverse_proxy api-gateway:8443
+}
+
+:3000 {
+	tls /certs/qaat.crt /certs/qaat.key
+	reverse_proxy coordinator-pwa:3000
+}
+
+:3001 {
+	tls /certs/qaat.crt /certs/qaat.key
+	reverse_proxy admin-dashboards:3001
+}
+
+:3002 {
+	tls /certs/qaat.crt /certs/qaat.key
+	reverse_proxy super-admin:3002
+}
+
+:3003 {
+	tls /certs/qaat.crt /certs/qaat.key
+	reverse_proxy student-portal:3003
+}

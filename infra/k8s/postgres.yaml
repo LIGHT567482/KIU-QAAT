@@ -1,0 +1,70 @@
+# PostgreSQL StatefulSet — Primary only (add streaming replica for production HA).
+# For managed RDS/CloudSQL in production, replace with ExternalName Service.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: qaat
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits:   { cpu: "2000m", memory: "4Gi" }
+          env:
+            - name: POSTGRES_DB
+              value: qaat
+            - name: POSTGRES_USER
+              value: qaat
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: qaat-secrets, key: db-password }
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+            - name: migrations
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "qaat"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: migrations
+          configMap:
+            name: qaat-migrations
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: qaat
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None  # headless for StatefulSet DNS

@@ -1,0 +1,60 @@
+Act as a Principal Backend Engineer and Senior Software Architect. I am deploying a subscription-based SaaS system with a highly strategic, FOMO-driven tier pricing model. 
+
+I need you to write the complete backend payment protocol, system routes, and database controller logic using Node.js (Express, TypeScript) and clean relational database integration (Prisma ORM / PostgreSQL). 
+
+Here is our exact 12-month pricing dataset containing total costs, diminishing incremental costs, and dynamic user-interface upsell hooks:
+
+[
+  {"months": 1, "total_price_ugx": 2000000, "savings_ugx": 0, "discount_percentage": 0.0, "incremental_cost_ugx": 2000000, "upgrade_incentive_text": "Commit to 2 months and unlock a 5% overall discount!"},
+  {"months": 2, "total_price_ugx": 3800000, "savings_ugx": 2000000, "discount_percentage": 5.0, "incremental_cost_ugx": 1800000, "upgrade_incentive_text": "Save an extra 100,000 UGX on the next month by upgrading to 3 months!"},
+  {"months": 3, "total_price_ugx": 5500000, "savings_ugx": 500000, "discount_percentage": 8.33, "incremental_cost_ugx": 1700000, "upgrade_incentive_text": "Unlock your milestone 12.5% discount! The 4th month costs just 1,500,000 UGX."},
+  {"months": 4, "total_price_ugx": 7000000, "savings_ugx": 1000000, "discount_percentage": 12.5, "incremental_cost_ugx": 1500000, "upgrade_incentive_text": "Extend to 5 months; the next month drops to an ultra-low 1,350,000 UGX!"},
+  {"months": 5, "total_price_ugx": 8350000, "savings_ugx": 1650000, "discount_percentage": 16.5, "incremental_cost_ugx": 1350000, "upgrade_incentive_text": "Hit the half-year mark! Cross to 6 months for an extra 1,250,000 UGX."},
+  {"months": 6, "total_price_ugx": 9600000, "savings_ugx": 2400000, "discount_percentage": 20.0, "incremental_cost_ugx": 1250000, "upgrade_incentive_text": "Keep winning! The 7th month adds only 1,150,000 UGX to your total."},
+  {"months": 7, "total_price_ugx": 10750000, "savings_ugx": 3250000, "discount_percentage": 23.21, "incremental_cost_ugx": 1150000, "upgrade_incentive_text": "Stepping up! Add month 8 for a heavily discounted 1,050,000 UGX."},
+  {"months": 8, "total_price_ugx": 11800000, "savings_ugx": 4200000, "discount_percentage": 26.25, "incremental_cost_ugx": 1050000, "upgrade_incentive_text": "Massive savings ahead! Month 9 costs under a million: just 950,000 UGX."},
+  {"months": 9, "total_price_ugx": 12750000, "savings_ugx": 5250000, "discount_percentage": 29.17, "incremental_cost_ugx": 950000, "upgrade_incentive_text": "Double digits value! Grab month 10 for a tiny addition of 850,000 UGX."},
+  {"months": 10, "total_price_ugx": 13600000, "savings_ugx": 6400000, "discount_percentage": 32.0, "incremental_cost_ugx": 850000, "upgrade_incentive_text": "Almost at the top! Adding the 11th month is priced at only 750,000 UGX."},
+  {"months": 11, "total_price_ugx": 14350000, "savings_ugx": 7650000, "discount_percentage": 34.77, "incremental_cost_ugx": 750000, "upgrade_incentive_text": "Ultimate Value Deal: Add just 650,000 UGX more to get your full 12-Month Annual Plan!"},
+  {"months": 12, "total_price_ugx": 15000000, "savings_ugx": 9000000, "discount_percentage": 37.5, "incremental_cost_ugx": 650000, "upgrade_incentive_text": "You are on our best maximum-savings tier! Total 9,000,000 UGX kept in your pocket."}
+]
+
+Please construct the code base following these strict functional and security architectural guidelines:
+
+1. STRICT DIRECT-BANK TRANSACTIONS ONLY:
+- The system must explicitly disallow any logic related to "withdrawals" or "payouts" from the bank via the API. The protocol is unidirectional for input tracking only: payments, subscriptions, and deposits.
+
+2. MAXIMUM BANK ACCOUNT SECURITY (MASKING & ACCESS CONTROL):
+- Super Admins must have an endpoint to manage recipient bank accounts/gateways.
+- Tenants MUST NOT see raw bank account numbers or sensitive credentials. 
+- Create a strict Data Transfer Object (DTO) layer or selector filtering mechanism. When a tenant requests available payment options, the backend must hide critical database columns (like account numbers or secret API keys) and only serve a masked choice payload containing the method ID, public title (e.g., Centenary, DFCU, Standard Chartered, Stripe, PayPal, Post Bank), and an uploaded logo image URL for visual identity.
+
+3. DATABASE SCHEMA & PRICING VERIFICATION:
+- Design a Prisma Schema for 'Tenant', 'Subscription', 'PricingTier', and 'PaymentMethod' (including fields for account details, billing name, method title, and image asset path).
+- Write a backend validation service for incoming checkout requests. Never trust pricing parameters sent directly from the client. Look up the price exclusively against the 'PricingTier' database structure by using the requested "months" index.
+
+4. EXPRESS.JS ROUTE ARTIFACTS:
+- GET /api/payments/methods: Accessible by tenants. Returns a clean, sanitized list of payment method options (Display Title + Brand Image URL). Highly secured against raw data leakage.
+- POST /api/subscriptions/checkout: Processes the tier, calculates active parameters, selects the abstract method ID, and kicks off payment processing while returning the 'upgrade_incentive_text' of the next higher tier to stimulate psychological upgrade intent.
+- POST /api/subscriptions/webhook: Direct gateway receiver logic to confirm incoming transactions from integrated partners. Updates tenant subscription statuses, marks deposits as completed, and logs absolute timestamps.
+
+5. CLEAN ARCHITECTURE STANDARD:
+- Use strict TypeScript interfaces and typings.
+- Enforce input verification rules preventing tenants from passing subscription duration boundaries lower than 1 month or higher than 12 months.
+
+At the very end of your response file and within all the generated file code blocks, append this legal disclaimer tag: 
+"All rights reserved by LIGHT TECHNOLOGIES"
+
+
+
+
+and:
+========================================================================================
+© 2026 LIGHT TECHNOLOGIES. ALL RIGHTS RESERVED.
+
+This software code, data design, pricing algorithm, database schema configuration, 
+and proprietary commercial logic are the exclusive intellectual property of LIGHT 
+TECHNOLOGIES. Unauthorized copying, distribution, modification, reverse engineering, 
+or deployment of this system model without formal express written authorization from 
+LIGHT TECHNOLOGIES is strictly prohibited.
+========================================================================================

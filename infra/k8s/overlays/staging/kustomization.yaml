@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../namespace.yaml
+  - ../../postgres.yaml
+  - ../../redis.yaml
+  - ../../auth-service.yaml
+  - ../../api-gateway.yaml
+  - ../../qr-generator.yaml
+  - ../../sync-receiver.yaml
+  - ../../sis-cronjob.yaml
+  - ../../monitoring.yaml
+
+namespace: qaat-staging
+
+namePrefix: staging-
+
+commonLabels:
+  environment: staging
+
+patches:
+  # Scale down to 1 replica for staging.
+  - target:
+      kind: Deployment
+      name: auth-service
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: api-gateway
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/env/9/value
+        value: "staging"
+  - target:
+      kind: Deployment
+      name: sync-receiver
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+configMapGenerator:
+  - name: qaat-env-staging
+    literals:
+      - ENVIRONMENT=staging
+      - LOG_LEVEL=debug
+      - CORS_ORIGINS=https://staging-admin.qaat.platform,https://staging-student.qaat.platform
