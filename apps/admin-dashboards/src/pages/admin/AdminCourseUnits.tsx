@@ -116,7 +116,7 @@ export default function AdminCourseUnits() {
   // Build year range 1..totalYears
   const years = Array.from({ length: totalYears }, (_, i) => i + 1)
 
-  if (status === 'loading') return <p style={{ padding: 24, color: '#94a3b8' }}>Loading roadmap…</p>
+  if (status === 'loading') return <p style={{ padding: 24, color: 'var(--muted)' }}>Loading roadmap…</p>
   if (status === 'error')   return <p style={{ padding: 24, color: '#b91c1c' }}>Could not load roadmap.</p>
 
   const unitMap = roadmap?.roadmap ?? {}
@@ -126,14 +126,14 @@ export default function AdminCourseUnits() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <a href="#" onClick={() => history.back()} style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Back to Courses</a>
+          <a href="#" onClick={() => history.back()} style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Back to Courses</a>
           <h2 style={{ margin: '4px 0 2px' }}>{roadmap?.name ?? courseId}</h2>
-          <div style={{ fontSize: 13, color: '#94a3b8', display: 'flex', gap: 16 }}>
+          <div style={{ fontSize: 13, color: 'var(--muted)', display: 'flex', gap: 16 }}>
             {roadmap?.department && <span>{roadmap.department}</span>}
             {roadmap?.school && <span>· {roadmap.school}</span>}
             {roadmap?.coordinator_name && <span>· Coordinator: <strong>{roadmap.coordinator_name}</strong></span>}
           </div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
             Course ID: <code>{courseId}</code> &nbsp;·&nbsp; {totalYears}-year programme
           </div>
         </div>
@@ -218,7 +218,7 @@ export default function AdminCourseUnits() {
               </select>
             </label>
             <label style={{ display: 'block' }}>
-              <div style={labelStyle}>Session start {editUnit.schedule_locked && <span style={{ color: '#94a3b8', fontWeight: 400 }}>(set by coordinator — you can override)</span>}</div>
+              <div style={labelStyle}>Session start {editUnit.schedule_locked && <span style={{ color: 'var(--muted)', fontWeight: 400 }}>(set by coordinator — you can override)</span>}</div>
               <input type="time" value={editForm.session_start ?? ''} onChange={e => setEditForm(f => ({ ...f, session_start: e.target.value }))}
                 style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
             </label>
@@ -251,7 +251,7 @@ export default function AdminCourseUnits() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                     <span style={{ fontWeight: 700, fontSize: 13, color: '#475569' }}>Semester {sem}</span>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>{units.length} unit{units.length !== 1 ? 's' : ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{units.length} unit{units.length !== 1 ? 's' : ''}</span>
                       <button
                         onClick={() => {
                           setAddForm({ ...blankForm, year, semester: sem, level })
@@ -266,7 +266,7 @@ export default function AdminCourseUnits() {
                   {/* Unit list */}
                   <div>
                     {units.length === 0 && (
-                      <div style={{ padding: '16px 14px', color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>
+                      <div style={{ padding: '16px 14px', color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}>
                         No units yet for this semester.
                       </div>
                     )}
@@ -279,7 +279,7 @@ export default function AdminCourseUnits() {
                       }}>
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>{u.name}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                             {u.unit_id}
                             {u.academic_year && ` · ${u.academic_year}`}
                             {u.default_venue_id && ` · venue: ${u.default_venue_id}`}
@@ -301,7 +301,7 @@ export default function AdminCourseUnits() {
       ))}
 
       {years.length === 0 && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', padding: 32 }}>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 32 }}>
           No years configured. Set total_years on the course to define the roadmap.
         </p>
       )}
@@ -396,7 +396,7 @@ function UnitsImportBar({ courseId, onDone }: { courseId: string; onDone: () => 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16, padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
       <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>Bulk units:</span>
-      <span style={{ fontSize: 11, color: '#94a3b8', flex: '1 1 200px' }}>columns — unit_id, name, year, semester, level · units land in THIS course (a unit already under another course asks before moving)</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 200px' }}>columns — unit_id, name, year, semester, level · units land in THIS course (a unit already under another course asks before moving)</span>
       <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/course-units/export.xlsx`, 'course-units.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={{ ...btnGhost, border: '1px solid #e2e8f0', padding: '6px 12px', borderRadius: 6 }}>Template / Export</button>
       <input ref={ref} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={doImport} style={{ display: 'none' }} />
       <button onClick={() => ref.current?.click()} disabled={busy || !tenantId} style={btnPrimary}>{busy ? 'Importing…' : 'Import units'}</button>
@@ -407,7 +407,7 @@ function UnitsImportBar({ courseId, onDone }: { courseId: string; onDone: () => 
 
 const btnPrimary: React.CSSProperties = { padding: '8px 16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 const btnSmall:   React.CSSProperties = { padding: '4px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, cursor: 'pointer', fontSize: 12 }
-const btnGhost:   React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: 13 }
+const btnGhost:   React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 13 }
 const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, color: '#475569' }
 const selectStyle: React.CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, background: '#fff', boxSizing: 'border-box' }
 const errorBox:   React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }

@@ -25,7 +25,7 @@ export async function startBLEScan(beaconUUID: string): Promise<void> {
   navigator.bluetooth.addEventListener('advertisementreceived', (event: Event) => {
     const adv = event as BluetoothAdvertisingEvent
     const readings = rssiReadings.get(beaconUUID) ?? []
-    readings.push({ rssi: adv.rssi, timestamp: Date.now() })
+    readings.push({ rssi: adv.rssi ?? 0, timestamp: Date.now() })
     pruneOldReadings(beaconUUID, 10_000)
     rssiReadings.set(beaconUUID, readings)
   })

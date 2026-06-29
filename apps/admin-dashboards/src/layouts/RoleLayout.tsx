@@ -31,9 +31,14 @@ export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
     return <Navigate to="/unauthorized" replace />
   }
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui' }}>
+    // app-shell = min-height:100dvh (with 100vh fallback) so the footer always sits at
+    // the bottom of the visible viewport, on phones too. No margins → full-bleed.
+    <div className="app-shell" style={{ display: 'flex', fontFamily: 'system-ui' }}>
       <Sidebar role={user.role} brand={brand} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--app-bg)' }}>
+      {/* Content column fills the rest and carries the tenant background colour. */}
+      <div style={{
+        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--app-bg)',
+      }}>
         <main style={{ flex: 1, padding: 24, color: 'var(--text)' }}>
           <Outlet />
         </main>
@@ -109,8 +114,9 @@ function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
 
   return (
     <aside style={{
-      width: 220, background: 'var(--sidebar)', color: 'var(--sidebar-text)',
+      width: 220, flexShrink: 0, background: 'var(--sidebar)', color: 'var(--sidebar-text)',
       display: 'flex', flexDirection: 'column', padding: '24px 0',
+      position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100dvh', overflowY: 'auto',
     }}>
       <div style={{ padding: '0 20px 24px', borderBottom: '1px solid rgba(255,255,255,.12)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

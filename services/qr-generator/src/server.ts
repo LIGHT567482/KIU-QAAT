@@ -1,5 +1,5 @@
 import express from 'express'
-import { generateBatch, reissueQR, issueForStudent, qrToken } from './handlers/generate.js'
+import { generateBatch, reissueQR, issueForStudent, qrToken, emailLink } from './handlers/generate.js'
 import { requireJWT } from './middleware/auth.js'
 
 const app = express()
@@ -17,6 +17,7 @@ app.post('/api/v1/qr/generate/batch', requireJWT, generateBatch)
 app.post('/api/v1/qr/reissue',        requireJWT, reissueQR)
 app.post('/api/v1/qr/issue',          requireJWT, issueForStudent)
 app.post('/api/v1/qr/token',          requireJWT, qrToken)
+app.post('/api/v1/qr/email-link',     requireJWT, emailLink)
 
 const port = process.env.PORT ?? 3002
 app.listen(port, () => {

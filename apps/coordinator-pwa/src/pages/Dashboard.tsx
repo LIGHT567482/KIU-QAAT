@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme'
+import SyncAudit from '../components/SyncAudit'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -96,7 +97,7 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
             : <div style={{ height: 68, width: 68, borderRadius: 6, background: 'var(--brand)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand?.name ?? 'Q').slice(0, 1)}</div>}
           <div>
             <div style={{ fontWeight: 700 }}>{brand?.name ?? 'QAAT'}</div>
-            {brand?.motto && <div style={{ fontSize: 11, color: '#64748b' }}>{brand.motto}</div>}
+            {brand?.motto && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{brand.motto}</div>}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -114,7 +115,7 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
       {off ? (
         <div style={{ background: 'var(--surface, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
           <div style={{ fontSize: 18, fontWeight: 800 }}>{off.course_name}</div>
-          <div style={{ color: '#64748b', fontSize: 13 }}>{[off.session_type, `Year ${off.study_year}`, `Sem ${off.semester}`, off.level, off.intake].filter(Boolean).join(' · ')}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{[off.session_type, `Year ${off.study_year}`, `Sem ${off.semester}`, off.level, off.intake].filter(Boolean).join(' · ')}</div>
         </div>
       ) : (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, padding: 16, marginBottom: 16, color: '#92400e' }}>
@@ -145,6 +146,8 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
           ))}
         </div>
       )}
+
+      <StandbyPanel token={token} />
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         {(['timetable', 'units', 'students', 'roster'] as const).map(t => (
@@ -180,7 +183,7 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
       {tab === 'roster' && (
         last?.session ? (
           <div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
               {last.session.unit_name} · {last.session.session_date} · <strong>{last.session.present}/{last.session.total}</strong> present
             </div>
             <Table head={['Reg No.', 'Name', 'Status', 'Checked in']}
@@ -189,6 +192,8 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
           </div>
         ) : <Empty msg="No closed/synced session yet. Close a session to see its roster here." />
       )}
+
+      <SyncAudit />
     </div>
   )
 }
@@ -219,7 +224,7 @@ function Timetable({ units }: { units: Unit[] }) {
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
         Your weekly schedule. Set or change a unit's day &amp; time from “Take attendance” when you open its session.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(96px, 1fr))', gap: 8, overflowX: 'auto' }}>
@@ -235,14 +240,14 @@ function Timetable({ units }: { units: Unit[] }) {
                 {DAYS[d]}{isToday ? ' · today' : ''}
               </div>
               {items.length === 0
-                ? <div style={{ fontSize: 11, color: '#94a3b8' }}>—</div>
+                ? <div style={{ fontSize: 11, color: 'var(--muted)' }}>—</div>
                 : items.map(u => (
                     <div key={u.unit_id} style={{ background: 'var(--bg,#f1f5f9)', borderRadius: 8, padding: '6px 8px', marginBottom: 6 }}>
                       <div style={{ fontWeight: 600, fontSize: 12 }}>{u.name}</div>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                         {u.session_start}{u.session_duration_minutes ? `–${endTime(u.session_start, u.session_duration_minutes)}` : ''}{u.room ? ` · ${u.room}` : ''}
                       </div>
-                      {u.lecturers && <div style={{ fontSize: 10, color: '#94a3b8' }}>{u.lecturers}</div>}
+                      {u.lecturers && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{u.lecturers}</div>}
                     </div>
                   ))}
             </div>
@@ -275,7 +280,7 @@ function Table({ head, rows, empty }: { head: string[]; rows: (string | number)[
       <tbody>
         {rows.map((r, i) => (
           <tr key={i} style={{ borderBottom: '1px solid var(--border,#f1f5f9)' }}>
-            {r.map((c, j) => <td key={j} style={{ padding: '8px 10px', color: j === 0 ? '#64748b' : 'inherit', fontFamily: j === 0 ? 'monospace' : 'inherit', fontWeight: j === 1 ? 600 : 400 }}>{c}</td>)}
+            {r.map((c, j) => <td key={j} style={{ padding: '8px 10px', color: j === 0 ? 'var(--muted)' : 'inherit', fontFamily: j === 0 ? 'monospace' : 'inherit', fontWeight: j === 1 ? 600 : 400 }}>{c}</td>)}
           </tr>
         ))}
       </tbody>
@@ -283,7 +288,80 @@ function Table({ head, rows, empty }: { head: string[]; rows: (string | number)[
   )
 }
 function Empty({ msg }: { msg: string }) {
-  return <p style={{ color: '#94a3b8', textAlign: 'center', padding: 24 }}>{msg}</p>
+  return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 24 }}>{msg}</p>
+}
+
+// Emergency standby — the coordinator authorises a student of their OWN cohort to
+// run a session in their absence. Issues a code the coordinator reads out; the
+// student signs in with it on the login screen.
+interface Standby { delegation_id: string; code: string; deputy_reg: string; deputy_name: string; expires_at: string }
+function StandbyPanel({ token }: { token: string | null }) {
+  const [open, setOpen] = useState(false)
+  const [reg, setReg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [list, setList] = useState<Standby[]>([])
+
+  const load = useCallback(() => {
+    if (!token) return
+    fetch(`${API}/api/v1/coordinator/standby`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : [])).then((d: Standby[]) => setList(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [token])
+  useEffect(() => { if (open) load() }, [open, load])
+
+  async function issue() {
+    if (!reg.trim()) return
+    setBusy(true); setErr(null)
+    try {
+      const res = await fetch(`${API}/api/v1/coordinator/standby`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ deputy_reg: reg.trim() }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.message || 'Could not create standby')
+      setReg(''); load()
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') } finally { setBusy(false) }
+  }
+  async function revoke(id: string) {
+    if (!confirm('Revoke this standby? The student will no longer be able to run your session.')) return
+    await fetch(`${API}/api/v1/coordinator/standby/${id}/revoke`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+    load()
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border,#e2e8f0)', borderRadius: 12, padding: '10px 14px', marginBottom: 16, background: 'var(--surface,#fff)' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'inherit', fontWeight: 700, fontSize: 13, padding: 0 }}>
+        <span>🆘 Emergency standby {list.length > 0 && <span style={{ color: '#b45309' }}>· {list.length} active</span>}</span>
+        <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          <p style={{ fontSize: 12, color: 'var(--muted,#64748b)', margin: '0 0 10px' }}>
+            Going to be absent? Authorise a student <strong>from your own cohort</strong> to run the session today. Read them the code — they sign in with “standby code” on the login screen. Valid until end of day.
+          </p>
+          {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '6px 10px', borderRadius: 6, marginBottom: 8, fontSize: 12 }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={reg} onChange={e => setReg(e.target.value)} placeholder="Standby student's registration number"
+              style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border,#e2e8f0)', fontSize: 13, background: 'var(--surface,#fff)', color: 'inherit' }} />
+            <button onClick={issue} disabled={busy || !reg.trim()} style={{ padding: '8px 14px', background: '#b45309', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', opacity: busy || !reg.trim() ? 0.6 : 1 }}>{busy ? 'Issuing…' : 'Issue code'}</button>
+          </div>
+          {list.length > 0 && (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {list.map(s => (
+                <div key={s.delegation_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'var(--bg,#f8fafc)', borderRadius: 8, padding: '8px 10px' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 16, letterSpacing: 1 }}>{s.code}</span>
+                    <div style={{ fontSize: 11, color: 'var(--muted,#64748b)' }}>{s.deputy_name || s.deputy_reg} · until {new Date(s.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                  <button onClick={() => revoke(s.delegation_id)} style={{ padding: '5px 10px', background: 'none', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>Revoke</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ChangePasswordModal({ token, onClose }: { token: string | null; onClose: () => void }) {

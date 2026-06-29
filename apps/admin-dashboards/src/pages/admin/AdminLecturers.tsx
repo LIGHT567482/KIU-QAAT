@@ -4,7 +4,8 @@ import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
-const LECT_COLS = ['staff_id', 'full_name', 'phone', 'department', 'title', 'gender']
+// email is OPTIONAL — used only to email the lecturer their permanent career QR.
+const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'department', 'title', 'gender']
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
   const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
@@ -29,7 +30,7 @@ export default function AdminLecturers() {
     () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturers`)
   )
   const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState({ full_name: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
+  const [form, setForm] = useState({ full_name: '', email: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -77,7 +78,7 @@ export default function AdminLecturers() {
     try {
       await api.post(`/api/v1/admin/tenants/${tenantId}/lecturers`, form)
       setCreating(false)
-      setForm({ full_name: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
+      setForm({ full_name: '', email: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setSaving(false) }
@@ -133,9 +134,9 @@ export default function AdminLecturers() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ fontSize: 13, color: '#64748b', textDecoration: 'none' }}>← Tenants</a>
+          <a href="/admin/tenants" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>← Tenants</a>
           <h2 style={{ margin: '4px 0 0' }}>Lecturers</h2>
-          <div style={{ fontSize: 13, color: '#94a3b8' }}>Tenant: {tenantId}</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Tenant: {tenantId}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={editPrefix} style={btnSmall} title="Format for auto-generated staff IDs">
@@ -173,6 +174,7 @@ export default function AdminLecturers() {
               </select>
             </label>
             <Input label="Full name *" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} />
+            <Input label="Email (optional — emails them their QR)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
             <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+256 700 000000" />
             <Input label="Department" value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))} placeholder="Computer Science" />
             <Input label="Staff ID (optional — auto-generated if left blank)" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} placeholder="leave blank to auto-generate e.g. KIU/STAFF/00001" />
@@ -183,7 +185,7 @@ export default function AdminLecturers() {
         </div>
       )}
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       {importMsg && (
         <div style={{ background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>{importMsg}</div>
@@ -234,10 +236,10 @@ export default function AdminLecturers() {
             <tr key={l.lecturer_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '10px 12px' }}>{l.title || '—'}</td>
               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{l.full_name}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{l.gender || '—'}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.gender || '—'}</td>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{l.staff_id || '—'}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{l.phone || '—'}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{l.department || '—'}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.phone || '—'}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.department || '—'}</td>
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(l)} style={btnSmall}>Edit</button>
                 <button onClick={() => makeEnroll(l)} style={{ ...btnSmall, marginLeft: 6, background: '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}>Enroll FP</button>
@@ -248,7 +250,7 @@ export default function AdminLecturers() {
           ))}
           {(lecturers ?? []).length === 0 && status === 'ok' && (
             <tr>
-              <td colSpan={8} style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+              <td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
                 No lecturers registered yet. Click "+ New Lecturer" to add one.
               </td>
             </tr>
@@ -260,11 +262,11 @@ export default function AdminLecturers() {
         <div onClick={() => setQr(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 380, width: '100%', textAlign: 'center' }}>
             <h3 style={{ margin: '0 0 2px' }}>{qr.name}</h3>
-            {qr.staff_id && <div style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace', marginBottom: 12 }}>{qr.staff_id}</div>}
+            {qr.staff_id && <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 12 }}>{qr.staff_id}</div>}
             {qrImg
               ? <img src={qrImg} alt="Lecturer QR" style={{ width: 280, height: 280 }} />
-              : <p style={{ color: '#94a3b8' }}>Generating QR…</p>}
-            <p style={{ fontSize: 12, color: '#64748b', margin: '12px 0' }}>The lecturer scans this with their phone to open their attendance dashboard — every unit they teach, separated and filterable. No password.</p>
+              : <p style={{ color: 'var(--muted)' }}>Generating QR…</p>}
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0' }}>The lecturer scans this with their phone to open their attendance dashboard — every unit they teach, separated and filterable. No password.</p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
               {qrImg && <a href={qrImg} download={`lecturer-qr-${qr.staff_id || qr.name}.png`} style={{ ...btnPrimary, textDecoration: 'none' }}>Download</a>}
               <button onClick={() => { navigator.clipboard?.writeText(qr.url) }} style={btnSmall}>Copy link</button>
@@ -278,7 +280,7 @@ export default function AdminLecturers() {
         <div onClick={() => setEnroll(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 440, width: '100%' }}>
             <h3 style={{ margin: '0 0 4px' }}>Enroll fingerprint — {enroll.name}</h3>
-            <p style={{ color: '#64748b', fontSize: 13, marginBottom: 14 }}>
+            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
               The lecturer opens this link <strong>on their own phone</strong> and registers their fingerprint
               (or Face unlock). It works once and expires in 24 hours. Send it to them, or have them open it now.
             </p>

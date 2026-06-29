@@ -132,9 +132,9 @@ export default function AdminCourses() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
+          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
           <h2 style={{ margin: '4px 0 0' }}>Courses & Sessions</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>A course can run several sessions (e.g. Morning, Evening), each with its own coordinator. A student's level of study is set when registering the student.</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>A course can run several sessions (e.g. Morning, Evening), each with its own coordinator. A student's level of study is set when registering the student.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => { setCohortOpen(o => !o); setCohortMsg(null) }} style={btnSmall}>{cohortOpen ? 'Cancel' : '+ New cohort (all courses)'}</button>
@@ -145,7 +145,7 @@ export default function AdminCourses() {
       {cohortOpen && (
         <div style={panel}>
           <h3 style={{ margin: '0 0 6px' }}>New cohort across all courses</h3>
-          <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 14px' }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 14px' }}>
             Creates this cohort's session for <strong>every course</strong> at once, instead of adding it to each course by hand. Coordinators are attached afterwards, per course, in each course's sessions panel.
           </p>
           {cohortMsg && <div style={{ background: cohortMsg.startsWith('Created') ? '#f0fdf4' : '#fef2f2', color: cohortMsg.startsWith('Created') ? '#166534' : '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{cohortMsg}</div>}
@@ -187,7 +187,7 @@ export default function AdminCourses() {
       {/* Bulk curriculum import — load an existing catalogue instead of typing it all. */}
       <CurriculumImport tenantId={tenantId!} onDone={refetchAll} />
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search courses by name, ID, department or school…"
         style={{ width: '100%', maxWidth: 420, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }} />
@@ -198,7 +198,7 @@ export default function AdminCourses() {
         <FilterSelect label="School" value={filters.school} onChange={v => setF('school', v)} options={schoolOpts} />
         <FilterSelect label="Level" value={filters.level} onChange={v => setF('level', v)} options={levelOpts} />
         {anyFilter && <button onClick={() => { setFilters({ department: '', school: '', level: '' }); setSearch('') }}
-          style={{ ...btnSmall, color: '#64748b' }}>Clear all</button>}
+          style={{ ...btnSmall, color: 'var(--muted)' }}>Clear all</button>}
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -215,9 +215,9 @@ export default function AdminCourses() {
               <tr key={c.course_id} style={{ borderBottom: editId === c.course_id || openOfferings === c.course_id ? 'none' : '1px solid #f1f5f9' }}>
                 <td style={{ padding: '10px 12px' }}>
                   <div style={{ fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{c.course_id}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.course_id}</div>
                 </td>
-                <td style={{ padding: '10px 12px', color: '#64748b' }}>{c.department || '—'}</td>
+                <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{c.department || '—'}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'center' }}><span style={pill('#e0e7ff', '#3730a3')}>{c.unit_count}</span></td>
                 <td style={{ padding: '10px 12px', textAlign: 'center' }}><span style={pill('#f0fdf4', '#166534')}>{c.offering_count}</span></td>
                 <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
@@ -248,7 +248,7 @@ export default function AdminCourses() {
             </>
           ))}
           {status === 'ok' && visibleCourses.length === 0 && (
-            <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>{cq ? 'No courses match your search.' : 'No courses yet. Create one, then add sessions (with coordinators) to it.'}</td></tr>
+            <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>{cq ? 'No courses match your search.' : 'No courses yet. Create one, then add sessions (with coordinators) to it.'}</td></tr>
           )}
         </tbody>
       </table>
@@ -305,14 +305,14 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
   return (
     <div style={{ paddingTop: 12 }}>
       <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Cohorts of {course.name}</div>
-      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>A cohort = session · year · semester · level · intake. Each has its own coordinator + timetable. Cohorts exist with or without a coordinator/students.</div>
-      {offerings.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 8 }}>No cohorts yet.</div>}
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>A cohort = session · year · semester · level · intake. Each has its own coordinator + timetable. Cohorts exist with or without a coordinator/students.</div>
+      {offerings.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 8 }}>No cohorts yet.</div>}
       {offerings.map(o => (
         <div key={o.offering_id}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid #eef2f7' }}>
             <span style={pill('#f0fdf4', '#166534')}>{[o.session_type, `Y${o.study_year}`, `S${o.semester}`, o.level, o.intake].filter(Boolean).join(' · ')}</span>
             <span style={{ fontSize: 13 }}>{o.coordinator_name || <span style={{ color: '#f59e0b' }}>⚠ no coordinator</span>}{o.coordinator_code && <span style={{ color: '#0369a1', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>{o.coordinator_code}</span>}</span>
-            <span style={{ fontSize: 12, color: '#64748b' }}>· {o.student_count} students</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {o.student_count} students</span>
             <button onClick={() => edit?.offering_id === o.offering_id ? setEdit(null) : startEdit(o)} style={{ ...btnSmall, marginLeft: 'auto' }}>{edit?.offering_id === o.offering_id ? 'Cancel' : 'Edit'}</button>
             <button onClick={() => del(o)} style={{ ...btnSmall, color: '#b91c1c', borderColor: '#fecaca', background: '#fef2f2' }}>Remove</button>
           </div>
@@ -393,7 +393,7 @@ function CoordinatorPicker({ value, onChange, coordinators, domain, titles, tena
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <input value={nf.local} placeholder="username" onChange={e => setN('local', e.target.value)}
                 style={{ flex: 1, padding: '8px 10px', borderRadius: '6px 0 0 6px', border: '1px solid #e2e8f0', borderRight: 0, fontSize: 14, boxSizing: 'border-box' }} />
-              <span style={{ padding: '8px 8px', borderRadius: '0 6px 6px 0', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#64748b', fontSize: 12, whiteSpace: 'nowrap' }}>@{domain || '…'}</span>
+              <span style={{ padding: '8px 8px', borderRadius: '0 6px 6px 0', border: '1px solid #e2e8f0', background: '#f1f5f9', color: 'var(--muted)', fontSize: 12, whiteSpace: 'nowrap' }}>@{domain || '…'}</span>
             </div>
           </label>
           <Input label="Password *" value={nf.password} onChange={v => setN('password', v)} placeholder="temporary password" />
@@ -436,9 +436,9 @@ function ListEditor({ title, hint, values, onSave }: { title: string; hint: stri
         <button onClick={() => { setDraft(values); setOpen(o => !o) }} style={{ ...btnSmall }}>{open ? 'Close' : 'Manage'}</button>
       </div>
       {!open
-        ? <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>{values.join(' · ')}</div>
+        ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>{values.join(' · ')}</div>
         : (<div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>{hint}</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{hint}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               {draft.map((v, i) => (
                 <span key={`${v}-${i}`} style={{ ...pill('#eef2ff', '#3730a3'), display: 'inline-flex', gap: 6, alignItems: 'center' }}>{v}
@@ -462,7 +462,7 @@ function ListEditor({ title, hint, values, onSave }: { title: string; hint: stri
 // downloads the current data in the exact import columns (export == template), so
 // importing a course brings its units, and assignments bring the units' lecturers.
 const CURRICULUM_KINDS = [
-  { key: 'courses',              label: '1. Courses',     cols: 'course_id, name, course_group, department, school' },
+  { key: 'courses',              label: '1. Courses',     cols: 'course_id, name, department, school' },
   { key: 'course-units',         label: '2. Units (roadmap)', cols: 'unit_id, course_id, name, year, semester, level' },
   { key: 'lecturer-assignments', label: '3. Lecturer mapping', cols: 'unit_id, lecturer_staff_id, lecturer_name, academic_year, intake_session, year, semester' },
 ] as const
@@ -495,7 +495,7 @@ function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () =
       </div>
       {open && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
             Import your existing catalogue instead of typing it. Do them in order. Each <b>Template</b> downloads
             the current data in the exact columns to fill in (CSV or Excel). Unknown lecturers in step 3 are
             auto‑created and mapped to their units.
@@ -503,7 +503,7 @@ function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () =
           {CURRICULUM_KINDS.map(k => (
             <div key={k.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid #eef2f7', flexWrap: 'wrap' }}>
               <div style={{ minWidth: 160, fontWeight: 600, fontSize: 13 }}>{k.label}</div>
-              <code style={{ fontSize: 11, color: '#64748b', flex: '1 1 240px' }}>{k.cols}</code>
+              <code style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 240px' }}>{k.cols}</code>
               <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/${k.key}/export.xlsx`, `${k.key}.xlsx`).catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall}>Template / Export</button>
               <input ref={el => { refs.current[k.key] = el }} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => doImport(k.key, e)} style={{ display: 'none' }} />
               <button onClick={() => refs.current[k.key]?.click()} disabled={busy === k.key} style={btnPrimary}>{busy === k.key ? 'Importing…' : 'Import'}</button>
@@ -519,7 +519,7 @@ function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () =
 function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)}
-      style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, background: '#fff', color: value ? '#1e293b' : '#64748b', cursor: 'pointer' }}>
+      style={{ padding: '7px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, background: '#fff', color: value ? '#1e293b' : 'var(--muted)', cursor: 'pointer' }}>
       <option value="">{label}: all</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
@@ -539,7 +539,7 @@ function Select({ label, value, onChange, options, prefix }: { label: string; va
   return (
     <label style={{ display: 'block' }}>
       <div style={labelStyle}>{label}</div>
-      <select value={value} onChange={e => onChange(e.target.value)} style={{ ...selectStyle, color: value ? '#1e293b' : '#94a3b8' }}>
+      <select value={value} onChange={e => onChange(e.target.value)} style={{ ...selectStyle, color: value ? '#1e293b' : 'var(--muted)' }}>
         <option value="">— Select —</option>
         {options.map(o => <option key={o} value={o} style={{ color: '#1e293b' }}>{`${prefix ?? ''}${o}`}</option>)}
       </select>

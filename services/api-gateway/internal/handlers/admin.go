@@ -65,6 +65,10 @@ func ListTenants(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(active_semester, 0),
 			       COALESCE(logo_url, ''), COALESCE(brand_color, ''),
 			       COALESCE(sidebar_color, ''), COALESCE(background_color, ''),
+			       COALESCE(background_image, ''),
+			       COALESCE(background_blur, 0), COALESCE(background_brightness, 100),
+			       COALESCE(background_contrast, 100), COALESCE(background_overlay_color, ''),
+			       COALESCE(background_overlay_opacity, 0),
 			       COALESCE(footer_color, ''),
 			       COALESCE(motto, ''), COALESCE(slogan, ''), COALESCE(address, '')
 			FROM tenants ORDER BY created_at DESC`)
@@ -88,6 +92,12 @@ func ListTenants(pool *pgxpool.Pool) http.HandlerFunc {
 			BrandColor          string `json:"brand_color"`
 			SidebarColor        string `json:"sidebar_color"`
 			BackgroundColor     string `json:"background_color"`
+			BackgroundImage     string `json:"background_image"`
+			BackgroundBlur      int    `json:"background_blur"`
+			BackgroundBright    int    `json:"background_brightness"`
+			BackgroundContrast  int    `json:"background_contrast"`
+			BackgroundOverlay   string `json:"background_overlay_color"`
+			BackgroundOverlayO  int    `json:"background_overlay_opacity"`
 			FooterColor         string `json:"footer_color"`
 			Motto               string `json:"motto"`
 			Slogan              string `json:"slogan"`
@@ -99,7 +109,9 @@ func ListTenants(pool *pgxpool.Pool) http.HandlerFunc {
 			var createdAt time.Time
 			rows.Scan(&t.TenantID, &t.Name, &t.Domain, &t.InstitutionID, &t.AttendanceThreshold,
 				&t.IsActive, &createdAt, &t.ActiveAcademicYear, &t.ActiveSemester,
-				&t.LogoURL, &t.BrandColor, &t.SidebarColor, &t.BackgroundColor, &t.FooterColor,
+				&t.LogoURL, &t.BrandColor, &t.SidebarColor, &t.BackgroundColor,
+				&t.BackgroundImage, &t.BackgroundBlur, &t.BackgroundBright, &t.BackgroundContrast,
+				&t.BackgroundOverlay, &t.BackgroundOverlayO, &t.FooterColor,
 				&t.Motto, &t.Slogan, &t.Address) //nolint:errcheck
 			t.CreatedAt = createdAt.Format(time.RFC3339)
 			tenants = append(tenants, t)

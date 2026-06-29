@@ -175,6 +175,47 @@ func (h *AuthHandler) IssueLecturerToken(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// ─── POST /internal/coordinator-token ────────────────────────────────────────
+//
+// Service-to-service only (shared secret): the gateway calls this AFTER verifying a
+// coordinator's standby delegation (emergency fallback), to mint a COORDINATOR token
+// for the ABSENT coordinator's own identity so the standby student can run that
+// session. ttl_seconds shortens the token (e.g. to end of day); never extends it.
+func (h *AuthHandler) IssueCoordinatorToken(w http.ResponseWriter, r *http.Request) {
+	if h.internalKey == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Internal-Key")), []byte(h.internalKey)) != 1 {
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid internal key")
+		return
+	}
+	var req struct {
+		UserID     string `json:"user_id"`
+		TenantID   string `json:"tenant_id"`
+		TTLSeconds int64  `json:"ttl_seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" || req.TenantID == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "user_id and tenant_id are required")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), req.UserID)
+	if err != nil || user.TenantID != req.TenantID || user.Role != models.RoleCoordinator || !user.IsActive {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "not an active coordinator in this tenant")
+		return
+	}
+	tokenStr, jti, expiresAt, err := h.jwt.IssueWithTTL(user.UserID, user.TenantID, string(user.Role), time.Duration(req.TTLSeconds)*time.Second)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not issue token")
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{
+		AccessToken: tokenStr,
+		TokenType:   "Bearer",
+		ExpiresIn:   int64(time.Until(expiresAt).Seconds()),
+		JTI:         jti,
+		Role:        string(user.Role),
+		UserID:      user.UserID,
+		TenantID:    user.TenantID,
+	})
+}
+
 // ─── POST /internal/student-token ────────────────────────────────────────────
 //
 // Service-to-service only: the API gateway calls this AFTER it has cryptographically

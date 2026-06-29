@@ -51,7 +51,7 @@ func ImportCSV(pool *pgxpool.Pool) http.HandlerFunc {
 			AcademicYr: strings.TrimSpace(r.FormValue("academic_year")),
 		}
 
-		result, parseErr := processCSV(r.Context(), pool, tenantID, file, def)
+		result, parseErr := processCSV(r.Context(), pool, tenantID, file, def, r.Header.Get("Authorization"))
 		if parseErr != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, errBody("CSV_PARSE_ERROR", parseErr.Error()))
 			return
@@ -95,7 +95,7 @@ var requiredCols = []string{
 	"student_id", "full_name",
 }
 
-func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.Reader, def importDefaults) (*importResult, error) {
+func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.Reader, def importDefaults, authHeader string) (*importResult, error) {
 	// Read the whole upload so we can accept EITHER CSV or Excel (.xlsx) — the
 	// admin chooses the format (next.txt #6).
 	data, err := io.ReadAll(r)
@@ -173,7 +173,10 @@ func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.R
 		intake       := orDefault(get("intake_session"), def.Intake)
 		offeringID   := orDefault(get("offering_id"), def.OfferingID)
 		// Email is synthesised from the reg-no when not supplied (hidden identity).
-		email        := orDefault(get("email"), synthEmail(studentID, domain))
+		// realEmail tracks whether the row carried a genuine address — only those
+		// students get their QR emailed (optional, QR-dispatch only).
+		realEmail    := get("email")
+		email        := orDefault(realEmail, synthEmail(studentID, domain))
 
 		if studentID == "" || courseID == "" {
 			res.Errors = append(res.Errors, fmt.Sprintf("line %d: student_id and a course (row or import target) are required", lineNum))
@@ -232,6 +235,12 @@ func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.R
 			res.Inserted++
 		} else {
 			res.Updated++
+		}
+
+		// When the row carried a real email, mint + email this student's QR
+		// (best-effort, async). Rows with only the synthetic identity get none.
+		if realEmail != "" {
+			issueStudentQR(authHeader, studentID, "")
 		}
 	}
 

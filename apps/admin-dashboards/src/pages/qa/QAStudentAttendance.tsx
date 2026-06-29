@@ -80,7 +80,7 @@ export default function QAStudentAttendance() {
           <button onClick={() => setFilters({ course: '', session: '', year: '', semester: '' })} style={{ ...btnGhost, alignSelf: 'flex-end' }}>Clear</button>}
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead><tr style={{ background: 'var(--surface,#f8fafc)' }}>
           {['Reg No.', 'Name', 'Course', 'Level', 'Session', 'Year', 'Sem', 'Held', 'Attended', 'Progress'].map(h =>
@@ -110,11 +110,11 @@ export default function QAStudentAttendance() {
             )
           })}
           {status === 'ok' && list.length === 0 && (
-            <tr><td colSpan={10} style={{ padding: 28, textAlign: 'center', color: '#94a3b8' }}>No matching students.</td></tr>
+            <tr><td colSpan={10} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>No matching students.</td></tr>
           )}
         </tbody>
       </table>
-      {status === 'ok' && <p style={{ color: '#94a3b8', fontSize: 12, marginTop: 10 }}>Showing {list.length} of {all.length} students</p>}
+      {status === 'ok' && <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 10 }}>Showing {list.length} of {all.length} students</p>}
     </div>
   )
 }

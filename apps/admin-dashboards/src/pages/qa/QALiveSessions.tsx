@@ -13,14 +13,14 @@ export default function QALiveSessions() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>Live Sessions</h2>
-        <span style={{ fontSize: 12, color: '#94a3b8' }}>Auto-refreshes every 10s</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>Auto-refreshes every 10s</span>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load sessions.</p>}
 
       {sessions.length === 0 && status === 'ok' && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
           No active sessions right now.
         </div>
       )}
@@ -46,13 +46,13 @@ function SessionCard({ session: s }: { session: LiveSession }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{s.unit_name}</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
             {s.unit_id} · {s.venue_id} · Coordinator {s.coordinator_id}
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 26, fontWeight: 700, color: '#1e293b' }}>{s.student_count}</div>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>students</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>students</div>
         </div>
       </div>
 
@@ -66,7 +66,7 @@ function SessionCard({ session: s }: { session: LiveSession }) {
         </div>
       )}
 
-      <div style={{ marginTop: 8, fontSize: 12, color: '#94a3b8' }}>
+      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
         Gate open: {new Date(s.gate_open_time).toLocaleTimeString()}
       </div>
     </div>

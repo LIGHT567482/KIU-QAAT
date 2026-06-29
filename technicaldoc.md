@@ -5,6 +5,36 @@
 
 ---
 
+> ## ⚠️ Current-state addendum (read first)
+> This spec predates several shipped changes. Where it conflicts with the items
+> below, **the items below win**, and [`flow.md`](flow.md) +
+> [`docs/FLOWCHART.md`](docs/FLOWCHART.md) are the authoritative current view.
+>
+> - **Proximity is LAN-only, no BLE.** BLE beacons / RSSI / Web Bluetooth were
+>   **removed** (migration 039). A student is proven in the room by **being on the
+>   coordinator's Wi-Fi hotspot LAN** (egress IP must match `sessions.coordinator_ip`)
+>   **plus** a **live rotating room code**. Anywhere this doc says "BLE/RSSI/beacon
+>   proximity," read "same-LAN + rotating room code."
+> - **Attendance is fully offline.** The coordinator's laptop is the room hotspot +
+>   LAN server + database; every log is written locally the instant it is accepted,
+>   then the closed session is **sealed (AES-256-GCM + device-bound HMAC-SHA256 +
+>   SHA-256 checksum) and atomically synced** when internet returns.
+> - **Passwordless identities.** Students are identified by **registration number**
+>   only (no email/phone/password); lecturers by **staff ID**. Both get a **permanent
+>   QR**; an **optional** email may be supplied solely to email that QR on
+>   create/import (qr-generator `POST /api/v1/qr/email-link`).
+> - **Passwordless student progress portal** (`GET /api/v1/student/progress?reg=&org=`):
+>   read-only attendance %/eligibility, scoped to one institution.
+> - **Standby coordinator** (migration 042): an absent coordinator may pre-authorise
+>   an own-cohort student with a one-day code to run that day's session.
+> - **Curriculum model:** a course is created independently of level; **levels** are
+>   added inside the course (each with its own year × semester unit roadmap).
+>   **Cohorts** can be applied across all courses at once.
+> - **Threshold floor:** the exam-eligibility attendance threshold is clamped to a
+>   **75% minimum**.
+
+---
+
 ## 1. Backend API Specification
 
 ### 1.1 Base URL and Versioning
@@ -405,6 +435,7 @@ CREATE TABLE venues (
   tenant_id      UUID NOT NULL REFERENCES tenants(tenant_id)
 );
 
+-- ⚠️ ble_beacons was DROPPED in migration 039 (LAN-only proximity). Historical only:
 CREATE TABLE ble_beacons (
   beacon_uuid    UUID PRIMARY KEY,
   venue_id       VARCHAR(50) NOT NULL REFERENCES venues(venue_id),
@@ -738,7 +769,11 @@ async function sealSessionPackage(sessionId: string): Promise<EncryptedPackage> 
 
 ---
 
-## 4. BLE Proximity Engine
+## 4. BLE Proximity Engine — ⚠️ SUPERSEDED / REMOVED (migration 039)
+> This entire section is **historical**. BLE / Web Bluetooth / RSSI were removed.
+> Proximity is now: the phone must be **on the coordinator's hotspot LAN** (egress IP
+> matches `sessions.coordinator_ip`) **plus** present the **live rotating room code**.
+> Kept for design history only — none of the code below ships.
 
 ### 4.1 Web Bluetooth Integration
 

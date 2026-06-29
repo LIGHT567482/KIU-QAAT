@@ -39,8 +39,12 @@ Authenticated by a signed artefact inside the handler and protected by a per-IP 
 | GET | `/api/v1/lecturer/session-info` | Display fields for the lecturer captive page | session_id |
 | POST | `/api/v1/lecturer/webauthn/{enroll,assert}/{begin,finish}` | Phone-passkey biometric enrol/verify | WebAuthn ceremony |
 | GET | `/api/v1/branding/public` | Display-safe tenant branding for captive portals | tenant_id (display fields only) |
-| POST | `/api/v1/auth/login` | Login (→ auth-service) | credentials |
+| POST | `/api/v1/auth/login` | Login (admins: email + institution_id; → auth-service) | credentials |
 | GET | `/api/v1/auth/tenant-lookup` | Resolve tenant_id from a student email | — |
+| GET | `/api/v1/student/progress` | **Passwordless reg-no progress portal** (read-only %; needs `?reg=` + `?org=`) | reg-no resolved only within its institution |
+| POST | `/api/v1/lecturer/qr-login` | Passwordless lecturer dashboard from their career QR | HMAC-signed lecturer QR |
+| POST | `/api/v1/auth/lecturer-login` | Lecturer staff-ID + password login (no email) | staff ID |
+| POST | `/api/v1/auth/coordinator-standby-login` | Standby deputy login: `{code, reg}` → coordinator token (end-of-day) | one-day delegation code + own-cohort reg-no |
 
 ## 2. Super-admin plane — `RequireRole(SUPER_ADMIN)`
 
@@ -61,7 +65,8 @@ Sub-resources under `/api/v1/admin/tenants/{tenant_id}/…` are confined to the 
 - **Courses & units:** `GET/POST /…/{tenant_id}/courses`, `PATCH /api/v1/admin/courses/{course_id}`, `GET /api/v1/admin/courses/{course_id}/units`, `POST /…/units`, `PATCH /api/v1/admin/courses/{course_id}/units/{unit_id}`, `GET /api/v1/admin/courses/{course_id}/roadmap`
 - **Students:** `GET/POST/PATCH/DELETE /…/{tenant_id}/students`, `GET /…/students/export.xlsx`, `POST /api/v1/import/csv`, `POST /api/v1/import/trigger`
 - **Lecturers & assignments:** `GET/POST /…/{tenant_id}/lecturers`, `PATCH /api/v1/admin/lecturers/{lecturer_id}`, `POST /…/lecturers/{lecturer_id}/enroll-link`, `GET/POST /…/{tenant_id}/lecturer-assignments`, `DELETE /api/v1/admin/lecturer-assignments/{assignment_id}`, `GET /…/{tenant_id}/lecturer-attendance[/summary]`
-- **Offerings, venues, beacons, coordinators:** `GET/POST/DELETE /…/offerings`, `GET/POST /…/venues`, `POST /…/beacons`, `GET /…/coordinators[/export.xlsx]`, `POST /…/coordinators/import`
+- **Offerings, venues, coordinators:** `GET/POST/DELETE /…/offerings` (cohorts; supports apply-across-all-courses), `GET/POST /…/venues`, `GET /…/coordinators[/export.xlsx]`, `POST /…/coordinators/import`. (BLE `beacons` endpoints were removed — migration 039.)
+- **Permanent QRs + email dispatch:** `GET /…/{tenant_id}/lecturers/{lecturer_id}/qr` (career-QR token + scan URL). On create/import, if an optional `email` is supplied, the lecturer/student QR is emailed via qr-generator `POST /api/v1/qr/email-link` (lecturers) / `POST /api/v1/qr/issue` (students).
 - **Academic period:** `PATCH /…/{tenant_id}/academic-period`, `POST /…/academic-period/advance`
 - **Settings (`/api/v1/admin/settings/*`, own tenant via JWT):** `thresholds`, `intakes`, `levels`, `titles`, `session-window`, `study-sessions`, `staff-id-prefix`, `users-passcode` (+ `/verify`) — each `GET` + `PUT`.
 
@@ -80,6 +85,8 @@ Sub-resources under `/api/v1/admin/tenants/{tenant_id}/…` are confined to the 
 | GET | `/api/v1/coordinator/units/{unit_id}/lecturers` | Assigned lecturers |
 | POST/GET | `/api/v1/sync/{init,chunk/…,complete/…,resume/…}` | Offline sync (→ sync-receiver) |
 | POST | `/api/v1/sessions/warden-link` | LAN warden link (→ session-manager) |
+| GET/POST | `/api/v1/coordinator/standby` | List / issue a **standby delegation** (own-cohort student + one-day code) |
+| POST | `/api/v1/coordinator/standby/{id}/revoke` | Revoke a standby delegation |
 
 ## 5. Student — `RequireRole(STUDENT)` (JWT path) + the public QR path above
 

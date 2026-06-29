@@ -27,7 +27,7 @@ func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT c.course_id, c.name, COALESCE(c.department,''), COALESCE(c.school,''),
-			       COALESCE(c.level,''), COALESCE(c.course_group, c.name),
+			       COALESCE(c.level,''),
 			       COUNT(cu.unit_id) AS unit_count,
 			       COALESCE(c.total_years, 3) AS total_years,
 			       COALESCE(c.level_years, '{}') AS level_years,
@@ -35,8 +35,8 @@ func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 			FROM courses c
 			LEFT JOIN course_units cu ON cu.course_id = c.course_id
 			WHERE c.tenant_id = $1
-			GROUP BY c.course_id, c.name, c.department, c.school, c.level, c.course_group, c.total_years, c.level_years
-			ORDER BY COALESCE(c.course_group, c.name), c.level, c.name`, tenantID)
+			GROUP BY c.course_id, c.name, c.department, c.school, c.level, c.total_years, c.level_years
+			ORDER BY c.name, c.level`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -49,7 +49,6 @@ func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Department    string         `json:"department"`
 			School        string         `json:"school"`
 			Level         string         `json:"level"`
-			CourseGroup   string         `json:"course_group"`
 			UnitCount     int            `json:"unit_count"`
 			TotalYears    int            `json:"total_years"`
 			LevelYears    map[string]int `json:"level_years"`
@@ -59,7 +58,7 @@ func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var c course
 			rows.Scan(&c.CourseID, &c.Name, &c.Department, &c.School,
-				&c.Level, &c.CourseGroup, &c.UnitCount, &c.TotalYears, &c.LevelYears, &c.OfferingCount) //nolint:errcheck
+				&c.Level, &c.UnitCount, &c.TotalYears, &c.LevelYears, &c.OfferingCount) //nolint:errcheck
 			if c.LevelYears == nil {
 				c.LevelYears = map[string]int{}
 			}
@@ -270,7 +269,6 @@ func UpdateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Department  *string `json:"department"`
 			School      *string `json:"school"`
 			Level       *string         `json:"level"`
-			CourseGroup *string         `json:"course_group"`
 			TotalYears  *int            `json:"total_years"`
 			LevelYears  *map[string]int `json:"level_years"` // per-level years for THIS course
 		}
@@ -296,9 +294,6 @@ func UpdateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		if req.Level != nil {
 			setClauses = append(setClauses, fmt.Sprintf("level = $%d", n)); args = append(args, *req.Level); n++
-		}
-		if req.CourseGroup != nil {
-			setClauses = append(setClauses, fmt.Sprintf("course_group = $%d", n)); args = append(args, *req.CourseGroup); n++
 		}
 		if req.LevelYears != nil {
 			// Clamp each level's years to 1–10 before storing the JSONB map.
@@ -860,6 +855,13 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 				return
 			}
 		}
+		// Dispatch the lecturer's permanent career QR by email when one was given
+		// (optional — email is only used for QR delivery, not for login).
+		if strings.TrimSpace(req.Email) != "" {
+			emailLecturerQR(r.Header.Get("Authorization"),
+				lecturerScanURL(r, makeLecturerQRToken(lecturerID, tenantID)),
+				req.Email, req.FullName, staffID)
+		}
 		writeJSON(w, http.StatusCreated, map[string]string{"lecturer_id": lecturerID, "staff_id": staffID, "status": "CREATED"})
 	}
 }
@@ -1131,6 +1133,9 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+		// Track whether a genuine address was supplied — the QR is emailed only then
+		// (email is optional, used solely for QR dispatch; identity is the reg-no).
+		realEmail := req.Email != ""
 
 		var domain string
 		if err := adminPool.QueryRow(r.Context(),
@@ -1211,11 +1216,14 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Generate the student's QR there and then and email it to the registered
-		// address (+ optional additional address). Fire-and-forget so registration
-		// is never blocked by mail latency; qr-generator verifies the forwarded JWT
-		// and derives the tenant itself (#4c).
-		issueStudentQR(r.Header.Get("Authorization"), req.StudentID, req.AdditionalEmail)
+		// Generate + email the student's QR only when a real destination exists (the
+		// registered email or an explicit additional address). Fire-and-forget so
+		// registration is never blocked by mail latency; qr-generator verifies the
+		// forwarded JWT and derives the tenant itself (#4c). Reg-no-only students
+		// need no email — their identity (and portal) is the reg-no.
+		if realEmail || strings.TrimSpace(req.AdditionalEmail) != "" {
+			issueStudentQR(r.Header.Get("Authorization"), req.StudentID, req.AdditionalEmail)
+		}
 
 		writeJSON(w, http.StatusCreated, map[string]string{
 			"student_id":  req.StudentID,

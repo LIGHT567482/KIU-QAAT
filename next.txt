@@ -74,7 +74,13 @@ In other words let it bare the tenant domain to avoid a student from tenant A to
 also let the logo and the name of the tenant be elevated and be on the top of every page in the system
 
 make an emergency fallback with similar protocol and logic for just in case the coordinator is absent for a specific session
-
+in otherwords let there be a way for which another student can act as the coordinator for that session and let it be just from the coordinator himself not any other admin
 
 
 let the sidebars begin with left-margin=0px and stretch both bottom and top to margin=0px and also let the footer have 0px of margin at the bottom, and let it stretch to 0px margin both left and right
+git config --global user.name LIGHT567482
+git config --global user.email joshuasemucyo@gmail.com
+git add .
+git commit -m "Timetable added too"
+git pull
+git push

@@ -91,9 +91,9 @@ export default function AdminCoordinators() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Home</a>
+          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Coordinators</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Directory of coordinators with their contacts and the session they coordinate.</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Directory of coordinators with their contacts and the session they coordinate.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={manageTitles} style={btnGhost} title="Define the title list (Prof., Dr., Eng.…)">Manage titles</button>
@@ -108,7 +108,7 @@ export default function AdminCoordinators() {
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, ID, course…"
         style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, width: 320, marginBottom: 14 }} />
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
@@ -150,14 +150,14 @@ export default function AdminCoordinators() {
               <td style={{ padding: '8px 10px' }}>{c.title || '—'}</td>
               <td style={{ padding: '8px 10px', fontWeight: 600 }}>{c.full_name}</td>
               <td style={{ padding: '8px 10px' }}>{c.gender || '—'}</td>
-              <td style={{ padding: '8px 10px', color: '#64748b' }}>{c.email}</td>
-              <td style={{ padding: '8px 10px', color: '#64748b' }}>{c.phone || '—'}</td>
-              <td style={{ padding: '8px 10px', color: '#64748b' }}>{c.whatsapp || '—'}</td>
+              <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{c.email}</td>
+              <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{c.phone || '—'}</td>
+              <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{c.whatsapp || '—'}</td>
               <td style={{ padding: '8px 10px' }}>{c.course || <span style={{ color: '#f59e0b' }}>unassigned</span>}</td>
               <td style={{ padding: '8px 10px' }}>{c.level || '—'}</td>
               <td style={{ padding: '8px 10px' }}>{c.session ? <span style={{ background: '#f0fdf4', color: '#166534', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>{c.session}</span> : '—'}</td>
               <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{c.study_year || c.semester ? `Y${c.study_year} · S${c.semester}` : '—'}</td>
-              <td style={{ padding: '8px 10px', color: '#64748b' }}>{c.intake || '—'}</td>
+              <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{c.intake || '—'}</td>
               <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(c)} style={{ ...btnTiny, marginRight: 4 }}>Edit</button>
                 <button onClick={() => del(c)} style={{ ...btnTiny, color: '#b91c1c', borderColor: '#fecaca', background: '#fef2f2' }}>Delete</button>
@@ -165,7 +165,7 @@ export default function AdminCoordinators() {
             </tr>
           ))}
           {status === 'ok' && list.length === 0 && (
-            <tr><td colSpan={12} style={{ padding: 28, textAlign: 'center', color: '#94a3b8' }}>
+            <tr><td colSpan={12} style={{ padding: 28, textAlign: 'center', color: 'var(--muted)' }}>
               {all.length === 0 ? 'No coordinators yet. Add them under Users, then assign each to a session under Courses.' : 'No coordinators match the search.'}
             </td></tr>
           )}

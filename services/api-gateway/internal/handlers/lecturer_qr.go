@@ -140,6 +140,58 @@ func mintLecturerToken(ctx context.Context, userID, tenantID string) ([]byte, in
 	return buf.Bytes(), resp.StatusCode
 }
 
+// lecturerScanURL builds the public scan URL for a lecturer's QR from the
+// inbound request host (admin-console origin + lecturer portal port).
+func lecturerScanURL(r *http.Request, token string) string {
+	host := r.Host
+	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+		host = strings.Split(fh, ",")[0]
+	}
+	hostname := strings.TrimSpace(strings.Split(host, ":")[0])
+	port := os.Getenv("LECTURER_PORTAL_PORT")
+	if port == "" {
+		port = "3001"
+	}
+	return fmt.Sprintf("https://%s:%s/?lqr=%s", hostname, port, token)
+}
+
+// emailLecturerQR fires an async request to qr-generator to render the
+// lecturer's permanent career QR and email it. No-op when email is blank.
+// Best-effort: any failure is logged by qr-generator and never blocks the
+// caller (create / bulk import). Tenant is derived by qr-generator from the
+// forwarded Authorization JWT, so only the auth header is needed.
+func emailLecturerQR(authHeader, qrURL, to, name, staffID string) {
+	to = strings.TrimSpace(to)
+	if authHeader == "" || to == "" || qrURL == "" {
+		return
+	}
+	base := os.Getenv("QR_GENERATOR_URL")
+	if base == "" {
+		base = "http://qr-generator:3002"
+	}
+	body, _ := json.Marshal(map[string]string{
+		"to":         to,
+		"url":        qrURL,
+		"name":       name,
+		"subject_id": staffID,
+		"heading":    "Your Lecturer QR",
+		"intro":      "Scan this QR with your phone to open your attendance dashboard. It is permanent — keep it for your whole time at the institution.",
+	})
+	go func() {
+		req, err := http.NewRequest(http.MethodPost, base+"/api/v1/qr/email-link", bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	}()
+}
+
 // POST /api/v1/lecturer/qr-login  (public) — body {"qr": "<token or URL>"}
 func LecturerQRLogin(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -190,16 +242,7 @@ func AdminLecturerQR(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 		token := makeLecturerQRToken(lecturerID, tenantID)
 		// The lecturer dashboard lives on the admin-console origin (default :3001).
-		host := r.Host
-		if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
-			host = strings.Split(fh, ",")[0]
-		}
-		hostname := strings.TrimSpace(strings.Split(host, ":")[0])
-		port := os.Getenv("LECTURER_PORTAL_PORT")
-		if port == "" {
-			port = "3001"
-		}
-		url := fmt.Sprintf("https://%s:%s/?lqr=%s", hostname, port, token)
+		url := lecturerScanURL(r, token)
 		writeJSON(w, http.StatusOK, map[string]string{
 			"lecturer_id": lecturerID, "full_name": name, "staff_id": staffID,
 			"token": token, "url": url,

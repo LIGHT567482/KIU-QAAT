@@ -433,7 +433,7 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
           Select Lecturer
         </label>
         {loadingLecturers ? (
-          <p style={{ color: '#94a3b8', fontSize: 13 }}>Loading lecturers…</p>
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading lecturers…</p>
         ) : (
           <select
             value={selectedLecturer}
@@ -449,7 +449,7 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
           </select>
         )}
         {!loadingLecturers && lecturers.length === 0 && (
-          <p style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
             No lecturers assigned to this unit. Use "Open without lecturer" below.
           </p>
         )}
@@ -461,23 +461,23 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
         {sched?.schedule_locked ? (
           <div style={{ fontSize: 13, color: '#0f172a' }}>
             Starts <strong>{sched.session_start}</strong> · {sched.session_duration_minutes} min
-            <span style={{ color: '#94a3b8' }}> · locked (only the admin can change)</span>
+            <span style={{ color: 'var(--muted)' }}> · locked (only the admin can change)</span>
           </div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 8 }}>
               <label style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Start time</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Start time</div>
                 <input type="time" value={schedStart} onChange={e => setSchedStart(e.target.value)}
                   style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
               </label>
               <label style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Length (min)</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Length (min)</div>
                 <input type="number" min={5} max={600} value={schedDur} onChange={e => setSchedDur(Number(e.target.value))}
                   style={{ width: '100%', padding: '9px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
               </label>
             </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>Set once — it locks after the first session. Only the admin can change it later.</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Set once — it locks after the first session. Only the admin can change it later.</div>
           </>
         )}
         {schedErr && <div style={{ color: '#b91c1c', fontSize: 12, marginTop: 6 }}>{schedErr}</div>}
@@ -508,7 +508,7 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
       <button
         disabled={opening}
         onClick={async () => { setOpening(true); await openWith(''); setOpening(false) }}
-        style={{ marginTop: 8, width: '100%', padding: 10, background: 'transparent', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: 8, fontWeight: 500, fontSize: 13, cursor: opening ? 'not-allowed' : 'pointer' }}
+        style={{ marginTop: 8, width: '100%', padding: 10, background: 'transparent', color: 'var(--muted)', border: '1px solid #e2e8f0', borderRadius: 8, fontWeight: 500, fontSize: 13, cursor: opening ? 'not-allowed' : 'pointer' }}
       >
         Open without lecturer assignment
       </button>
@@ -619,9 +619,19 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
       {/* Room code — the big projector display */}
       {serverSession && (
         <div style={{ background: '#0f172a', borderRadius: 12, padding: '20px 24px', marginBottom: 16, textAlign: 'center' }}>
-          <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>ROOM CODE</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>ROOM CODE</div>
           <div style={{ color: '#fff', fontSize: 'clamp(34px, 11vw, 52px)', fontWeight: 800, letterSpacing: 'clamp(6px, 3vw, 12px)', fontFamily: 'monospace' }}>{roomCode}</div>
-          <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>changes in {codeSecsLeft}s</div>
+          <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>changes in {codeSecsLeft}s</div>
+        </div>
+      )}
+
+      {/* Rotation reminder — a phone hotspot only holds ~10 students at once, so they
+          must disconnect after checking in to free a slot for the next student. */}
+      {serverSession && (
+        <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12.5, color: '#92400e', lineHeight: 1.45 }}>
+          📴 <strong>Tell students to turn Wi-Fi OFF the moment they see ✓.</strong> Only ~10 phones
+          fit on the hotspot at once, so each must disconnect to let the next student check in. Let
+          them through in small batches.
         </div>
       )}
 
@@ -638,10 +648,10 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
         <div>
           <strong>{unitName}</strong>
           <div style={{ fontSize: 28, fontWeight: 700, color: '#1e293b' }}>{liveCount}</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>students present</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>students present</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 13, color: '#64748b' }}>Window closes in</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Window closes in</div>
           <div style={{ fontSize: 20, fontWeight: 600, color: timeLeft === 'CLOSED' ? '#ef4444' : '#1e293b' }}>{timeLeft}</div>
         </div>
       </div>
@@ -704,7 +714,7 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
               </div>
               <div style={{ maxHeight: 280, overflowY: 'auto' }}>
                 {filteredRoster.length === 0 && (
-                  <div style={{ padding: 16, color: '#94a3b8', textAlign: 'center', fontSize: 13 }}>
+                  <div style={{ padding: 16, color: 'var(--muted)', textAlign: 'center', fontSize: 13 }}>
                     {roster.length === 0 ? 'Loading roster…' : 'No students match.'}
                   </div>
                 )}
@@ -717,12 +727,12 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
                     }}>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{s.full_name}</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{s.student_id}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.student_id}</div>
                       </div>
                       <span style={{
                         padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
                         background: present ? '#f0fdf4' : '#f8fafc',
-                        color: present ? '#166534' : '#94a3b8',
+                        color: present ? '#166534' : 'var(--muted)',
                       }}>
                         {present ? '✓ PRESENT' : 'NOT YET'}
                       </span>
@@ -770,7 +780,7 @@ function SessionClosed({ status, count, onGoDashboard }: { status: string; count
     <div style={{ maxWidth: 480, margin: '80px auto', padding: 24, textAlign: 'center', fontFamily: 'system-ui' }}>
       <div style={{ fontSize: 48 }}>✓</div>
       <h2>{status === 'AUTO_CLOSED' ? 'Session auto-closed' : 'Session closed'}</h2>
-      <p style={{ color: '#64748b' }}><strong>{count}</strong> students recorded.</p>
+      <p style={{ color: 'var(--muted)' }}><strong>{count}</strong> students recorded.</p>
       <p style={{ color: '#16a34a' }}>Session sealed and synced.</p>
       {onGoDashboard && (
         <button onClick={onGoDashboard}
@@ -842,10 +852,10 @@ function LecturerQRModal({ sessionId, token, onClose }: { sessionId: string; tok
         </div>
         <canvas ref={canvasRef} style={{ width: '100%', height: 'auto', borderRadius: 8 }} />
         <div style={{ marginTop: 14, padding: '10px 12px', background: '#f1f5f9', borderRadius: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: .08 }}>LIVE DIGIT CODE</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: .08 }}>LIVE DIGIT CODE</div>
           <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 8, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>{code}</div>
         </div>
-        <p style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>
+        <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
           The lecturer scans this QR to <b>begin</b> and again to <b>end</b> the lecture, each time entering their staff ID and the live digit code above (it changes every 10s and is device-verified).
         </p>
         {err && <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>{err}</div>}

@@ -127,18 +127,18 @@ func LecturerGateScan(adminPool *pgxpool.Pool, rdb *redis.Client) http.HandlerFu
 			return
 		}
 
-		// (2b) Network-proximity gate: the scan MUST come from the coordinator's LAN
-		// (the hotspot / same network). Always enforced — being on the coordinator's
-		// LAN is the proximity model. Blocks a remote proxy who somehow obtained the
-		// staff ID + a relayed live code.
-		if coordinatorIP != nil && *coordinatorIP != "" {
-			if !onSameLAN(middleware.ClientIP(r), *coordinatorIP) {
-				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
-					"error":   "not_same_network",
-					"message": "you must be on the same network as the coordinator to confirm attendance",
-				})
-				return
-			}
+		// (2b) Network-proximity gate (MANDATORY): the scan MUST come from the
+		// coordinator's LAN (their hotspot / same network). Being on the coordinator's
+		// LAN is the proximity model, so this is required — no coordinator IP anchor
+		// (set when they opened the session on the hotspot) means presence cannot be
+		// proven → reject. Blocks a remote proxy who obtained the staff ID + a relayed
+		// live code, and any scan attempted after the session's hotspot is gone.
+		if coordinatorIP == nil || *coordinatorIP == "" || !onSameLAN(middleware.ClientIP(r), *coordinatorIP) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error":   "not_same_network",
+				"message": "you must be connected to the coordinator's hotspot (same network) to confirm attendance",
+			})
+			return
 		}
 
 		// (3) Biometric identity gate: if this lecturer has enrolled a fingerprint

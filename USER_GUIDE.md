@@ -19,30 +19,40 @@ delete from.
 ## 2. What the system does, and how
 
 ### 2.1 Roles
-- **Student** — has a personal, cryptographically signed QR code (emailed to them).
-  Checks in from their own phone. No app to install.
-- **Coordinator** — runs the live session: opens it, shows the rotating room code
-  on the projector, closes it.
-- **Lecturer** — presence is recorded (anti-ghost-lecture).
-- **QA Officer / DQA Director / VC** — oversight, thresholds, reports, eligibility.
-- **Admin** — tenant and user management, course/unit/student/venue/lecturer registration.
-- **Lecturer** — registered by admin per tenant; assigned to course units per academic period; appears in the coordinator's dropdown when opening a session.
+- **Student** — identified by their **registration number** only (no email/phone/password
+  needed). Has a permanent, cryptographically signed QR for check-in, and can view their own
+  attendance % any time via the passwordless **reg-no portal**. Checks in from their own phone;
+  no app to install. An email is optional — supplied only if you want their QR emailed to them.
+- **Coordinator** — runs the live session on their **laptop**, which is the room's Wi-Fi hotspot
+  and offline server: opens the session, shows the rotating room code on the projector, closes it.
+  If absent, can pre-authorise an **own-cohort student** (a "standby") with a one-day code to run
+  that day's session in their place.
+- **Lecturer** — identified by **staff ID**; presence is recorded at a start/end gate
+  (anti-ghost-lecture). Has a permanent career QR (scan → passwordless dashboard) and a
+  staff-ID dashboard login. Optional email only to email them their QR.
+- **QA Officer / DQA Director / VC / DVC** — oversight, thresholds (≥75% floor), reports, eligibility.
+- **Admin** — tenant and user management; courses (level-independent) with levels + unit roadmaps inside them;
+  cohorts (applied across all courses at once or one); student/lecturer registration + bulk import; venues.
+- **Super-Admin** — platform owner: registers universities (tenants), branding, billing.
 
 ### 2.2 The check-in flow (the part redesigned 2026-06-02)
 
-> **Why it changed.** The original design had each student's phone connect to a
-> small server running on the coordinator's phone over local WiFi. We proved this
-> cannot work in the real world: iPhones can't run that kind of server, a phone
-> hotspot only holds ~8–10 devices (a lecture hall has 300), and the browser
-> security features the page needs (camera, crypto) are blocked on plain-WiFi
-> connections. So live check-in now runs **online over HTTPS**, which works
-> identically on every iPhone and Android. The full reasoning is in
-> `update.md` and the plan file `~/.claude/plans/async-napping-petal.md`.
+> **Why it works offline.** The original design tried to run a tiny server on the
+> coordinator's **phone** — that fails in the real world (iPhones can't run it, a phone
+> hotspot only holds ~8–10 devices, and browsers block camera/crypto on plain WiFi).
+> The current design moves the server to the coordinator's **laptop**, which is the
+> room's Wi-Fi hotspot **and** the local server **and** the database. Phones join that
+> hotspot and reach the laptop over HTTPS on the LAN. **No internet is needed in the
+> room** — every check-in is written to the laptop's database the instant it's accepted.
+> When the laptop later has connectivity, the closed session is sealed and synced to the
+> cloud. "Same network" (being on the coordinator's hotspot) is itself one of the proximity
+> proofs. The full reasoning is in `update.md`, `flow.md`, and `RUN-ANYWHERE.md`.
 
 What happens, step by step:
 
 1. **Admin registers lecturers** in the Admin Dashboard → Tenants → Lecturers. Each
-   lecturer has a name, email, phone, and department. Admin then goes to Assignments
+   lecturer has a name, **staff ID**, optional phone and department (email is optional —
+   only used to email them their QR). Admin then goes to Assignments
    and assigns each lecturer to specific course units (by academic year, year of study,
    semester, and intake session — e.g. "Dr Okafor teaches CS101 in Year 1, Sem 1,
    2024/2025, Morning session").
@@ -66,9 +76,10 @@ What happens, step by step:
 | 4 | On the active roster | Someone not enrolled in the unit |
 | 4b | Serial number matches current issue | A QR that was reissued/revoked (lost card) |
 | 5 | **Rotating room code** (replaces the old Bluetooth check) | Checking in from outside the room — you must see the live screen |
+| 5b | **Same network** — must be on the coordinator's hotspot LAN (egress IP matches the session) | Checking in from off-site (`NOT_SAME_NETWORK`) |
 | 6 | Device fingerprint binding | One phone checking in several students |
 | 7 | Duplicate check | Checking in twice |
-| 8 | One device per session | A shared "proxy phone" |
+| 8 | One device per session (`DEVICE_ALREADY_USED`) | A shared "proxy phone" |
 
 **Why the rotating code instead of Bluetooth?** A student's web browser cannot read
 Bluetooth signal strength (iPhones block it entirely). The rotating code is the
@@ -162,10 +173,13 @@ System ready. A seed student (`jzany17@gmail.com`) exists. To send real email:
 System ready. Open `http://10.200.6.121:3000` on a phone on the same LAN.  
 Login: `coordinator@test.local / Coord1234!`. Select "Introduction to Programming" → "Dr. Jane Smith" → Open Session. Check in from another phone → End Session.
 
-**Test 3 — Sync round-trip (local):**  
-System ready (`SYNC_RECEIVER_URL` wired to local sync-receiver :8083). After ending a session from the PWA, the service worker outbox uploads to sync-receiver → writes `attendance_logs`.  
-To trigger manually in browser DevTools: `(await navigator.serviceWorker.ready).sync.register('qaat-sync-outbox')`  
-Verify: `SELECT COUNT(*) FROM attendance_logs WHERE session_id='<id>'`
+**Test 3 — Sync round-trip (local): ✅ PROVEN with a real hash (2026-06-29).**  
+A sealed package carrying a realistic 64-char `student_id_hash` now uploads (init/chunk/complete) and
+writes `attendance_logs` with `records_written=1`. (Earlier this silently failed: the 64-char hash
+overflowed `attendance_logs.student_id varchar(50)`; `sync-receiver` now resolves the hash → the real
+reg-no server-side and stores the reg-no — consistent with online check-in.) To trigger from the PWA in
+DevTools: `(await navigator.serviceWorker.ready).sync.register('qaat-sync-outbox')`; verify with
+`SELECT student_id FROM attendance_logs WHERE session_id='<id>'` (you'll see the reg-no, not a hash).
 
 - **GPS geofence** (optional second presence check) is designed but not wired in.
 
@@ -206,11 +220,25 @@ The student check-in page is served at `GET /checkin?session=<id>`.
 
 ## 5. Capacity — how big a number can it handle? (honest)
 
+> ### ⚠️ The real limit is the Wi-Fi radio, NOT the server.
+> For offline, in-room attendance the bottleneck is **how many phones one access
+> point holds at once**, and that is small:
+> - **Stock Android phone hotspot: ~8–10 devices.** (No app, native or not, beats this — it's the OS/radio.)
+> - **Android can't kick clients without root**, so freeing a slot is **voluntary**: each student must turn Wi-Fi **off** after they see ✓. The check-in screen and the coordinator dashboard both say this loudly.
+> - **Linux laptop hotspot: ~20–40** comfortably (more with a good external AC/AX adapter, but congested).
+>
+> **So "one coordinator, one room, ~1000 students" works ONLY by rotation**, and it is
+> **time-bounded, not instant**: with ~10–40 slots and ~10–15 s per student, throughput is
+> a few students/second *at best* → roughly **20–60+ minutes for ~1000**, longer with reconnect
+> churn and stragglers. To go faster you need **more radio**: an external Wi-Fi router/AP in the
+> room, several coordinators/APs in parallel, or the hub's server on campus Wi-Fi. **The numbers
+> below are about the *server*, which was never the problem.**
+
 > **Read this carefully:** the only *measured* fact today is that single check-ins
 > succeed. The throughput figures below are **engineering estimates** derived from
-> the work each check-in does, not from a load test. Treat them as "what the design
-> should support if hardware and tuning are reasonable", and confirm with the k6
-> load tests before relying on them.
+> the work each check-in does, not from a load test, and they describe the **server**,
+> not the Wi-Fi radio above. Confirm with the k6 load tests (which test the server,
+> not the radio) before relying on them.
 
 **What one check-in costs the server:** one signature verification (fast) + about
 6 small indexed database queries + one insert. That is a lightweight request.

@@ -41,3 +41,6 @@ redisdata/
 # Test coverage
 coverage/
 *.out
+next.txt
+coordinator'sapp.md
+HowItWorks.md

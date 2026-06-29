@@ -151,7 +151,7 @@ const lecturerCheckinPageHTML = `<!DOCTYPE html>
   button.primary:hover:not(:disabled){filter:brightness(1.1)}
   button.primary:disabled{background:#94a3b8;cursor:default}
   .error{margin-top:12px;padding:11px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c;font-size:13px;text-align:center;display:none}
-  .success{text-align:center;display:none}
+  .success{text-align:center}
   .check{font-size:56px;margin-bottom:12px}
   .present{font-size:22px;font-weight:700;color:#16a34a;margin-bottom:6px}
   .present-sub{font-size:14px;color:var(--muted)}
@@ -202,10 +202,11 @@ const lecturerCheckinPageHTML = `<!DOCTYPE html>
   </div>
 
   <!-- ── Success ── -->
-  <div id="screen-success" class="success">
+  <div id="screen-success" class="success" style="display:none">
     <div class="check">&#x2705;</div>
     <div class="present" id="success-title">Attendance recorded</div>
     <p class="present-sub" id="success-sub" style="margin-top:8px">Your presence has been noted for this session.</p>
+    <p class="present-sub" style="margin-top:14px;color:#b45309;background:#fffbeb;border:1px solid #f59e0b;border-radius:10px;padding:10px 12px;font-size:13px">&#x1F4F4; You can <strong>disconnect from the class Wi-Fi</strong> now to free a spot &mdash; reconnect only when you scan again to end the lecture.</p>
   </div>
 </div>
 

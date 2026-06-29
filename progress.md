@@ -1,7 +1,22 @@
 # QAAT — Build Progress
-**Last updated:** 2026-06-14 (session 12)
-**Reference docs:** ARCHITECT.md · technicaldoc.md · plan.md  
-**Current position:** All 4 phases substantially complete — ready for pilot execution
+**Last updated:** 2026-06-29
+**Reference docs:** flow.md · ARCHITECT.md · technicaldoc.md · plan.md  
+**Current position:** All 4 phases substantially complete + post-pilot hardening shipped
+
+---
+
+> ### Since session 12 — shipped changes (newest first)
+> - **Optional QR email dispatch** (2026-06-28): optional email re-added for lecturers
+>   + students, used *only* to email their permanent QR on create/import; blank = no email.
+> - **Standby coordinator** (2026-06-28, migration 042): an absent coordinator delegates
+>   that day's session to an own-cohort student via a one-day code.
+> - **Lean registration** (2026-06-26): passwordless **reg-no** student progress portal;
+>   students identified by reg-no only (no email/phone/password); lecturer **staff-ID**
+>   login; course is level-independent (levels added inside it); cohorts apply across all courses.
+> - **Curriculum + lecturer QR** (2026-06-23): curriculum bulk import; lecturer permanent
+>   career QR → passwordless dashboard; 75% attendance-threshold floor.
+> - **LAN-only proximity** (migration 039): **BLE/beacon/RSSI removed entirely.** Proximity =
+>   on the coordinator's hotspot LAN + live rotating room code. The BLE rows below are HISTORICAL.
 
 ---
 
@@ -335,7 +350,7 @@
 |------|--------|-------|
 | SMTP real email | ⏳ Awaiting credentials | Fill `.env.smtp`, then `source .env.smtp && ./scripts/start_qr_generator.sh`, then run E2E script |
 | Offline session on real hardware | ⏳ Ready to run | Open `http://10.200.6.121:3000` on mobile → login as coordinator@test.local / Coord1234! → open session → check in → end |
-| Sync round-trip | ⏳ Ready to run | After mobile session closes → trigger service worker sync → verify `attendance_logs` rows in DB |
+| Sync round-trip | ✅ Proven (2026-06-29) | Verified live with a real 64-char hash → server resolves hash→reg-no → `attendance_logs` row written (`records_written=1`). Earlier silent failure (hash overflowed `student_id varchar(50)`) is fixed in `sync-receiver`. |
 
 ---
 
@@ -344,7 +359,7 @@
 | Area | What | Priority |
 |---|---|---|
 | **H3 (security)** | Move secrets out of `.env` into KMS/Vault; rotate KEK + VAPID key; replace all `changeme*`; enable Postgres TLS | High |
-| **M5 (sync)** | Run one real PWA-seal → sync-receiver decrypt round-trip end-to-end | High |
+| ~~**M5 (sync)**~~ | ✅ DONE 2026-06-29 — real seal→decrypt→write round-trip proven (with a 64-char hash); server-side hash→reg-no resolution fix in `sync-receiver` | — |
 | **H4 (design)** | Rotating room code relayable by absent students — consider shorter window or server-side ghost check | High |
 | **M1–M4 (medium)** | XFF-spoofable rate limiter; in-process unbounded limiters; TOTP keyed by password hash; public Grafana LB | Medium |
 | **CI** | Apply all 13 migrations in CI, seed, run tests/security as `qaat_app` | Medium |

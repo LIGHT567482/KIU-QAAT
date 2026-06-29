@@ -83,7 +83,7 @@ export default function QRScanner({ onScan, active }: Props) {
         muted
         style={{ width: '100%', borderRadius: 8, background: '#000' }}
       />
-      {!scanning && <p style={{ color: '#64748b', textAlign: 'center' }}>Starting camera…</p>}
+      {!scanning && <p style={{ color: 'var(--muted)', textAlign: 'center' }}>Starting camera…</p>}
     </div>
   )
 }

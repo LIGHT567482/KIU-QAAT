@@ -76,18 +76,18 @@ export default function AdminLecturerAttendance() {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
+        <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
         <h2 style={{ margin: '4px 0 2px' }}>Lecturer Attendance</h2>
-        <p style={{ color: '#64748b', margin: 0, fontSize: 13 }}>Tenant: {tenantId}</p>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>Tenant: {tenantId}</p>
       </div>
 
-      {sumStatus === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {sumStatus === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by lecturer name, department or email…"
         style={{ width: '100%', maxWidth: 420, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }} />
 
       {(summary ?? []).length === 0 && sumStatus === 'ok' && (
-        <div style={{ padding: '20px 0', color: '#94a3b8', fontSize: 14 }}>
+        <div style={{ padding: '20px 0', color: 'var(--muted)', fontSize: 14 }}>
           No attendance records yet. Records are created when a coordinator opens a session with a lecturer assigned.
         </div>
       )}
@@ -108,7 +108,7 @@ export default function AdminLecturerAttendance() {
               <tr key={s.lecturer_id} style={{ borderBottom: expanded.has(s.lecturer_id) ? 'none' : '1px solid #f1f5f9' }}>
                 <td style={{ padding: '10px 12px' }}>
                   <div style={{ fontWeight: 700 }}>{s.lecturer_name}</div>
-                  {s.department && <div style={{ fontSize: 11, color: '#94a3b8' }}>{s.department}</div>}
+                  {s.department && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.department}</div>}
                 </td>
                 <td style={{ padding: '10px 12px', fontWeight: 700 }}>{s.total_sessions}</td>
                 <td style={{ padding: '10px 12px' }}>{Number(s.total_contact_hours).toFixed(1)}</td>
@@ -127,7 +127,7 @@ export default function AdminLecturerAttendance() {
                       <thead>
                         <tr>
                           {['Date', 'Unit', 'Gate Open', 'Gate Close', 'Contact Hrs', 'Status'].map(h => (
-                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: '#94a3b8', fontWeight: 600 }}>{h}</th>
+                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -135,15 +135,15 @@ export default function AdminLecturerAttendance() {
                         {logsFor(s.lecturer_id).map(l => (
                           <tr key={l.log_id} style={{ borderTop: '1px solid #e8eef4' }}>
                             <td style={{ padding: '6px 10px', fontWeight: 600 }}>{fmtDate(l.session_date)}</td>
-                            <td style={{ padding: '6px 10px' }}>{l.unit_name} <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span></td>
+                            <td style={{ padding: '6px 10px' }}>{l.unit_name} <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span></td>
                             <td style={{ padding: '6px 10px', color: '#475569' }}>{fmt(l.gate_open_time)}</td>
-                            <td style={{ padding: '6px 10px', color: l.gate_close_time ? '#475569' : '#94a3b8' }}>{l.gate_close_time ? fmt(l.gate_close_time) : 'In progress'}</td>
+                            <td style={{ padding: '6px 10px', color: l.gate_close_time ? '#475569' : 'var(--muted)' }}>{l.gate_close_time ? fmt(l.gate_close_time) : 'In progress'}</td>
                             <td style={{ padding: '6px 10px' }}>{l.contact_hours > 0 ? `${Number(l.contact_hours).toFixed(2)} h` : '—'}</td>
                             <td style={{ padding: '6px 10px' }}>{statusBadge(l.session_status)}</td>
                           </tr>
                         ))}
                         {logsFor(s.lecturer_id).length === 0 && (
-                          <tr><td colSpan={6} style={{ padding: 12, color: '#94a3b8' }}>No session logs.</td></tr>
+                          <tr><td colSpan={6} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -154,7 +154,7 @@ export default function AdminLecturerAttendance() {
           ))}
         </tbody>
       </table>
-      {logStatus === 'loading' && <p style={{ color: '#94a3b8', marginTop: 8 }}>Loading logs…</p>}
+      {logStatus === 'loading' && <p style={{ color: 'var(--muted)', marginTop: 8 }}>Loading logs…</p>}
     </div>
   )
 }

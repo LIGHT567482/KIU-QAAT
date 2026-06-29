@@ -32,7 +32,7 @@ export default function AdminSettings() {
     }
   }
 
-  if (status === 'loading') return <p style={{ color: '#94a3b8' }}>Loading…</p>
+  if (status === 'loading') return <p style={{ color: 'var(--muted)' }}>Loading…</p>
   if (status === 'error' || !form) return <p style={{ color: '#b91c1c' }}>Failed to load settings.</p>
 
   return (

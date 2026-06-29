@@ -13,12 +13,12 @@ export default function DQACourseHealth() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0 }}>Course Health</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Aggregate attendance compliance per course unit — sorted by lowest first.</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Aggregate attendance compliance per course unit — sorted by lowest first.</p>
         </div>
         <button onClick={refetch} style={btn}>Refresh</button>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load course health data.</p>}
 
       {/* Summary pills */}
@@ -31,7 +31,7 @@ export default function DQACourseHealth() {
             return (
               <div key={level} style={{ background: bgs[level], borderRadius: 8, padding: '10px 16px', textAlign: 'center', minWidth: 80 }}>
                 <div style={{ fontSize: 22, fontWeight: 700, color: colors[level] }}>{count}</div>
-                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>{level.replace('_', ' ')}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{level.replace('_', ' ')}</div>
               </div>
             )
           })}
@@ -47,10 +47,10 @@ export default function DQACourseHealth() {
           return (
             <div key={u.unit_id} style={{ background: bg, borderRadius: 10, padding: '14px 16px', border: `1px solid ${accent}22` }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>{u.unit_name}</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>{u.course_name}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{u.course_name}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ fontSize: 28, fontWeight: 800, color: accent }}>{pct}%</div>
-                <div style={{ fontSize: 11, color: '#64748b' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                   <div>{u.enrolled_count} students</div>
                   <div style={{ color: accent }}>{u.below_threshold_count} below {u.threshold}%</div>
                 </div>
@@ -65,7 +65,7 @@ export default function DQACourseHealth() {
       </div>
 
       {units.length === 0 && status === 'ok' && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>No course units found.</p>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>No course units found.</p>
       )}
     </div>
   )

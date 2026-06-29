@@ -15,7 +15,7 @@ const CSS = `
   --surface: #ffffff;
   --surface-2: #f8fafc;
   --text: #0f172a;
-  --muted: #64748b;
+  --muted: #334155;
   --border: #e2e8f0;
   --brand: #1a73e8;
   --brand-contrast: #ffffff;

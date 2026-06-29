@@ -94,6 +94,7 @@ func main() {
 	// verified a scanned QR. Shared-secret gated (X-Internal-Key).
 	r.Post("/internal/student-token", authHandler.IssueStudentToken)
 	r.Post("/internal/lecturer-token", authHandler.IssueLecturerToken)
+	r.Post("/internal/coordinator-token", authHandler.IssueCoordinatorToken)
 
 	// ─── Server ───────────────────────────────────────────────────────────────
 	srv := &http.Server{

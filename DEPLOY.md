@@ -21,7 +21,7 @@ This document covers deploying QAAT in three environments: **local development**
 | session-manager | `services/session-manager` | — | Warden delegation, exam clearance tokens |
 | sync-receiver | `services/sync-receiver` | — | Chunked AES-256 upload, vector-clock dedup |
 | notification-service | `services/notification-service` | 3004 | SMTP + Web Push |
-| student-portal | `apps/student-portal` | 3005 | Lightweight SPA |
+| student-portal | `apps/student-portal` | 3003 | Passwordless reg-no progress portal |
 | mailhog | `mailhog/mailhog` | 1025 / 8025 | **Dev only** — local SMTP catcher |
 
 The three frontends — Coordinator PWA ([apps/coordinator-pwa](apps/coordinator-pwa)), Admin
@@ -53,7 +53,7 @@ make ps                   # confirm containers are healthy
 ```
 
 Default ports: API Gateway `:8443`, Auth `:8081`, QR Generator `:3002`,
-Notification `:3004`, Student Portal `:3005`, Mailhog UI `:8025`.
+Notification `:3004`, Student Portal `:3003`, Mailhog UI `:8025`.
 The dashboards/PWA dev servers run via `make dev-pwa` / `make dev-dashboards`.
 
 ### 3.1 Required secrets in `.env`

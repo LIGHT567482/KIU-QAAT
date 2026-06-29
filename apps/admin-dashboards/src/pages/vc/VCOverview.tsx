@@ -82,7 +82,7 @@ export default function VCOverview() {
         </div>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error' && (
         <div style={{ background: '#fef2f2', color: '#b91c1c', padding: 16, borderRadius: 8, marginBottom: 20 }}>
           Failed to load. <button onClick={refetch} style={{ marginLeft: 8 }}>Retry</button>
@@ -131,8 +131,8 @@ export default function VCOverview() {
                   {d.ghost_sessions.map(gs => (
                     <tr key={gs.session_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '8px 12px', fontWeight: 600 }}>{gs.unit_name}
-                        <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 6 }}>{gs.unit_id}</span></td>
-                      <td style={{ padding: '8px 12px', color: '#64748b' }}>{gs.session_date}</td>
+                        <span style={{ color: 'var(--muted)', fontSize: 12, marginLeft: 6 }}>{gs.unit_id}</span></td>
+                      <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>{gs.session_date}</td>
                       <td style={{ padding: '8px 12px', color: '#b91c1c', fontWeight: 600 }}>{gs.student_count}</td>
                     </tr>
                   ))}
@@ -155,7 +155,7 @@ function KPI({ label, value, alert, tooltip }: { label: string; value: number | 
       cursor: tooltip ? 'help' : 'default',
     }}>
       <div style={{ fontSize: 28, fontWeight: 700, color: alert ? '#ef4444' : '#1e293b' }}>{value}</div>
-      <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{label}</div>
     </div>
   )
 }
@@ -165,7 +165,7 @@ const btnStyle: React.CSSProperties = {
   background: '#fff', cursor: 'pointer', fontSize: 13,
 }
 const labelStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: '#64748b', fontWeight: 600,
+  display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', fontWeight: 600,
 }
 const inp: React.CSSProperties = {
   padding: '6px 10px', fontSize: 13, borderRadius: 6,

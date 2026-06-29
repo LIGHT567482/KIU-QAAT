@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -374,6 +375,11 @@ func decryptPackage(ctx context.Context, pool *pgxpool.Pool, coordinatorID, tena
 func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte, tenantID, coordinatorID string) (written, duplicates int, err error) {
 	// The outer wrapper is a JSON object produced by sealSessionPackage in the PWA.
 	var pkg struct {
+		Session struct {
+			SessionID   string `json:"session_id"`
+			UnitID      string `json:"unit_id"`
+			SessionDate string `json:"session_date"`
+		} `json:"session"`
 		AttendanceRecords []struct {
 			LogID                string `json:"log_id"`
 			SessionID            string `json:"session_id"`
@@ -404,7 +410,44 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 		return 0, 0, fmt.Errorf("set tenant: %w", err)
 	}
 
+	// Phone-hub: the session was opened OFFLINE on the device, so its session_id does
+	// not exist centrally yet — but attendance_logs FK-references sessions. Create it
+	// from the package before inserting rows. Laptop-hub sessions already exist, so
+	// ON CONFLICT is a no-op. (No-op too if the package omits the session block.)
+	if pkg.Session.SessionID != "" && pkg.Session.UnitID != "" {
+		if _, err := conn.Exec(ctx, `
+			INSERT INTO sessions (session_id, tenant_id, coordinator_id, unit_id, session_date, session_status)
+			VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5,'')::date, CURRENT_DATE), 'CLOSED')
+			ON CONFLICT (session_id) DO NOTHING`,
+			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate,
+		); err != nil {
+			return 0, 0, fmt.Errorf("create session from package: %w", err)
+		}
+	}
+
+	// The OFFLINE edge carries the privacy-preserving student_id_hash (HMAC-SHA256 of
+	// the reg-no, 64 hex chars). The ONLINE check-in stores the raw reg-no. Resolve the
+	// hash back to the reg-no here so attendance_logs.student_id is ALWAYS the reg-no —
+	// consistent across paths (so they dedup) and within varchar(50).
+	hashToReg, err := buildHashIndex(ctx, conn, tenantID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("build student hash index: %w", err)
+	}
+	unresolved := 0
+
 	for _, rec := range pkg.AttendanceRecords {
+		studentID := hashToReg[rec.StudentIDHash]
+		if studentID == "" {
+			// Fallback: a value that already fits the column is treated as a raw
+			// reg-no (back-compat); anything else is an unknown hash → skip (the edge
+			// validator already gates on roster membership, so this should be rare).
+			if len(rec.StudentIDHash) <= 50 {
+				studentID = rec.StudentIDHash
+			} else {
+				unresolved++
+				continue
+			}
+		}
 		tag, execErr := conn.Exec(ctx, `
 			INSERT INTO attendance_logs
 			  (log_id, tenant_id, session_id, student_id, checkin_timestamp,
@@ -413,7 +456,7 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			ON CONFLICT (tenant_id, session_id, coordinator_id, sequence_number)
 			  WHERE entry_method = 'QR_SCAN' DO NOTHING`,
-			rec.LogID, tenantID, rec.SessionID, rec.StudentIDHash,
+			rec.LogID, tenantID, rec.SessionID, studentID,
 			rec.CheckinTimestamp, rec.DeviceFingerprintHash,
 			rec.SequenceNumber, rec.EntryMethod, coordinatorID,
 		)
@@ -430,7 +473,36 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			written++
 		}
 	}
+	if unresolved > 0 {
+		slog.Warn("sync: attendance records with unresolved student hashes were skipped",
+			"count", unresolved, "tenant", tenantID)
+	}
 	return written, duplicates, nil
+}
+
+// buildHashIndex maps HMAC-SHA256(student_hash_key, reg_no) → reg_no for the tenant,
+// so the offline path's student_id_hash resolves back to the registration number.
+// Runs on the RLS-scoped connection, so it only sees this tenant's students.
+func buildHashIndex(ctx context.Context, conn *pgxpool.Conn, tenantID string) (map[string]string, error) {
+	var hashKey string
+	if err := conn.QueryRow(ctx,
+		`SELECT COALESCE(student_hash_key,'') FROM tenants WHERE tenant_id = $1`, tenantID).Scan(&hashKey); err != nil {
+		return nil, fmt.Errorf("load hash key: %w", err)
+	}
+	rows, err := conn.Query(ctx, `SELECT student_id FROM students_extended WHERE tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load students: %w", err)
+	}
+	defer rows.Close()
+	idx := make(map[string]string)
+	for rows.Next() {
+		var reg string
+		if err := rows.Scan(&reg); err != nil {
+			return nil, err
+		}
+		idx[hmacSHA256([]byte(hashKey), reg)] = reg
+	}
+	return idx, rows.Err()
 }
 
 // refreshEligibilityView recomputes the attendance summary for one tenant only,

@@ -32,7 +32,7 @@ export default function DQATrends() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0 }}>Attendance Trends</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
             Week-over-week attendance for the last 12 weeks.
             {wow && (
               <span style={{ marginLeft: 8, fontWeight: 700, color: wow.startsWith('+') ? '#22c55e' : '#ef4444' }}>
@@ -44,11 +44,11 @@ export default function DQATrends() {
         <button onClick={refetch} style={btn}>Refresh</button>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load trend data.</p>}
 
       {formatted.length === 0 && status === 'ok' && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>No session data in the last 12 weeks.</p>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>No session data in the last 12 weeks.</p>
       )}
 
       {formatted.length > 0 && (
@@ -93,7 +93,7 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
     <div style={{ background: '#fff', borderRadius: 10, padding: '14px 18px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
       <div style={{ fontSize: 24, fontWeight: 700, color: '#1e293b' }}>{value.toLocaleString()}</div>
-      <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{label}</div>
     </div>
   )
 }

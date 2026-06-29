@@ -44,6 +44,16 @@ func validLogo(s string) bool {
 // validColor accepts only an empty value or a #rgb / #rrggbb hex string. Rejecting
 // anything else stops CSS-injection / breakout through the brand palette (the
 // values are written into CSS custom properties on the client).
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func validColor(s string) bool {
 	if s == "" {
 		return true
@@ -71,6 +81,12 @@ type branding struct {
 	BrandColor         string `json:"brand_color"`
 	SidebarColor       string `json:"sidebar_color"`
 	BackgroundColor    string `json:"background_color"`
+	BackgroundImage    string `json:"background_image"`
+	BackgroundBlur     int    `json:"background_blur"`
+	BackgroundBright   int    `json:"background_brightness"`
+	BackgroundContrast int    `json:"background_contrast"`
+	BackgroundOverlay  string `json:"background_overlay_color"`
+	BackgroundOverlayO int    `json:"background_overlay_opacity"`
 	FooterColor        string `json:"footer_color"`
 	Address            string `json:"address"`
 	ActiveAcademicYear string `json:"active_academic_year"`
@@ -83,7 +99,10 @@ const brandingSelect = `
 	SELECT tenant_id::text, name, COALESCE(domain, ''),
 	       COALESCE(logo_url, ''), COALESCE(motto, ''), COALESCE(slogan, ''),
 	       COALESCE(brand_color, ''), COALESCE(sidebar_color, ''),
-	       COALESCE(background_color, ''), COALESCE(footer_color, ''),
+	       COALESCE(background_color, ''), COALESCE(background_image, ''),
+	       COALESCE(background_blur, 0), COALESCE(background_brightness, 100),
+	       COALESCE(background_contrast, 100), COALESCE(background_overlay_color, ''),
+	       COALESCE(background_overlay_opacity, 0), COALESCE(footer_color, ''),
 	       COALESCE(address, ''), COALESCE(active_academic_year, ''),
 	       COALESCE(active_semester, 0)
 	FROM tenants WHERE tenant_id = $1`
@@ -101,7 +120,9 @@ func GetBranding(pool *pgxpool.Pool) http.HandlerFunc {
 		err := pool.QueryRow(r.Context(), brandingSelect, tenantID).Scan(
 			&b.TenantID, &b.Name, &b.Domain, &b.LogoURL,
 			&b.Motto, &b.Slogan, &b.BrandColor,
-			&b.SidebarColor, &b.BackgroundColor, &b.FooterColor, &b.Address,
+			&b.SidebarColor, &b.BackgroundColor, &b.BackgroundImage,
+			&b.BackgroundBlur, &b.BackgroundBright, &b.BackgroundContrast,
+			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.Address,
 			&b.ActiveAcademicYear, &b.ActiveSemester)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
@@ -133,7 +154,9 @@ func GetPublicBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 		err := adminPool.QueryRow(r.Context(), brandingSelect, tenantID).Scan(
 			&b.TenantID, &b.Name, &b.Domain, &b.LogoURL,
 			&b.Motto, &b.Slogan, &b.BrandColor,
-			&b.SidebarColor, &b.BackgroundColor, &b.FooterColor, &b.Address,
+			&b.SidebarColor, &b.BackgroundColor, &b.BackgroundImage,
+			&b.BackgroundBlur, &b.BackgroundBright, &b.BackgroundContrast,
+			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.Address,
 			&b.ActiveAcademicYear, &b.ActiveSemester)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
@@ -158,6 +181,12 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			BrandColor      string `json:"brand_color"`
 			SidebarColor    string `json:"sidebar_color"`
 			BackgroundColor string `json:"background_color"`
+			BackgroundImage string `json:"background_image"`
+			BackgroundBlur     int    `json:"background_blur"`
+			BackgroundBright   int    `json:"background_brightness"`
+			BackgroundContrast int    `json:"background_contrast"`
+			BackgroundOverlay  string `json:"background_overlay_color"`
+			BackgroundOverlayO int    `json:"background_overlay_opacity"`
 			FooterColor     string `json:"footer_color"`
 			Motto           string `json:"motto"`
 			Slogan          string `json:"slogan"`
@@ -176,12 +205,23 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_LOGO", "logo must be an https URL or a base64 PNG/JPEG/WebP/GIF data URL (no SVG)"))
 			return
 		}
-		for _, c := range []string{req.BrandColor, req.SidebarColor, req.BackgroundColor, req.FooterColor} {
+		// Background image is validated the same way as the logo (https URL or a
+		// base64 image data URL) — also prevents CSS-injection when applied as url().
+		if !validLogo(req.BackgroundImage) {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_BACKGROUND", "background image must be an https URL or a base64 PNG/JPEG/WebP/GIF data URL (no SVG)"))
+			return
+		}
+		for _, c := range []string{req.BrandColor, req.SidebarColor, req.BackgroundColor, req.FooterColor, req.BackgroundOverlay} {
 			if !validColor(c) {
 				writeJSON(w, http.StatusBadRequest, errBody("INVALID_COLOR", "colours must be #rgb or #rrggbb hex"))
 				return
 			}
 		}
+		// Clamp the image adjustment controls to safe ranges (sliders).
+		req.BackgroundBlur = clampInt(req.BackgroundBlur, 0, 20)
+		req.BackgroundBright = clampInt(req.BackgroundBright, 30, 150)
+		req.BackgroundContrast = clampInt(req.BackgroundContrast, 30, 150)
+		req.BackgroundOverlayO = clampInt(req.BackgroundOverlayO, 0, 90)
 		// institution_id: only overwrite when a non-empty value is supplied (COALESCE
 		// keeps the existing one otherwise), so a branding-only edit won't clear it.
 		ct, err := adminPool.Exec(r.Context(), `
@@ -194,11 +234,19 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			  footer_color     = NULLIF($7,''),
 			  motto            = NULLIF($8,''),
 			  slogan           = NULLIF($9,''),
-			  address          = NULLIF($10,'')
+			  address          = NULLIF($10,''),
+			  background_image = NULLIF($11,''),
+			  background_blur            = $12,
+			  background_brightness      = $13,
+			  background_contrast        = $14,
+			  background_overlay_color   = NULLIF($15,''),
+			  background_overlay_opacity = $16
 			WHERE tenant_id = $1`,
 			tenantID, req.InstitutionID, req.LogoURL, req.BrandColor, req.SidebarColor,
 			req.BackgroundColor, req.FooterColor,
-			req.Motto, req.Slogan, req.Address)
+			req.Motto, req.Slogan, req.Address, req.BackgroundImage,
+			req.BackgroundBlur, req.BackgroundBright, req.BackgroundContrast,
+			req.BackgroundOverlay, req.BackgroundOverlayO)
 		if err != nil {
 			msg := err.Error()
 			if strings.Contains(msg, "institution_id") {

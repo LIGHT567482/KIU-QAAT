@@ -105,11 +105,12 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Proximity proof #2: network proximity — the student MUST be on the room's
-		// Wi-Fi (the coordinator's hotspot / same LAN). Always enforced: connection to
-		// the coordinator's LAN is the proximity model, so a remote proxy who was
-		// somehow texted the live code is still blocked.
-		if coordinatorIP != "" && !onSameLAN(middleware.ClientIP(r), coordinatorIP) {
+		// Proximity proof #2: network proximity (MANDATORY) — the student MUST be on
+		// the room's Wi-Fi (the coordinator's hotspot / same LAN). Connection to the
+		// coordinator's LAN is the proximity model, so this is required: no coordinator
+		// IP anchor (captured when they opened the session on the hotspot) means
+		// presence cannot be proven → reject. Blocks a remote proxy texted the live code.
+		if coordinatorIP == "" || !onSameLAN(middleware.ClientIP(r), coordinatorIP) {
 			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "NOT_SAME_NETWORK"})
 			return
 		}

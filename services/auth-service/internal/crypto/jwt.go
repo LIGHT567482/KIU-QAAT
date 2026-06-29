@@ -26,13 +26,23 @@ func NewJWTService(cfg *config.JWTConfig) *JWTService {
 }
 
 func (s *JWTService) Issue(userID, tenantID, role string) (tokenString, jti string, expiresAt time.Time, err error) {
+	return s.IssueWithTTL(userID, tenantID, role, s.cfg.TTL)
+}
+
+// IssueWithTTL is Issue with an explicit lifetime, capped at the configured TTL so
+// a caller can shorten (e.g. a standby coordinator token that dies at end of day)
+// but never extend a token's life.
+func (s *JWTService) IssueWithTTL(userID, tenantID, role string, ttl time.Duration) (tokenString, jti string, expiresAt time.Time, err error) {
 	jti, err = generateJTI()
 	if err != nil {
 		return "", "", time.Time{}, fmt.Errorf("generate jti: %w", err)
 	}
 
+	if ttl <= 0 || ttl > s.cfg.TTL {
+		ttl = s.cfg.TTL
+	}
 	now := time.Now()
-	expiresAt = now.Add(s.cfg.TTL)
+	expiresAt = now.Add(ttl)
 
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{

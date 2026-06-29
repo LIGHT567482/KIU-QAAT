@@ -34,9 +34,9 @@ export default function AdminVenues() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
+          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
           <h2 style={{ margin: '4px 0 0' }}>Venues</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Tenant: {tenantId}</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Tenant: {tenantId}</p>
         </div>
         <button onClick={() => setCreating(c => !c)} style={btnPrimary}>
           {creating ? 'Cancel' : '+ New Venue'}
@@ -70,7 +70,7 @@ export default function AdminVenues() {
         </div>
       )}
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
@@ -85,14 +85,14 @@ export default function AdminVenues() {
             <tr key={v.venue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{v.venue_id}</td>
               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{v.name}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{v.building || '—'}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{v.building || '—'}</td>
               <td style={{ padding: '10px 12px', textAlign: 'center' }}>{v.floor}</td>
               <td style={{ padding: '10px 12px', textAlign: 'center' }}>{v.capacity || '—'}</td>
             </tr>
           ))}
           {status === 'ok' && (venues ?? []).length === 0 && (
             <tr>
-              <td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+              <td colSpan={5} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
                 No venues yet. Click "+ New Venue" to add one.
               </td>
             </tr>

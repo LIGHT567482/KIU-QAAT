@@ -17,14 +17,14 @@ export default function DQAPunctuality() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <h2 style={{ margin: 0 }}>Lecturer Punctuality</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
             Gate-open wait time vs scheduled session start — {period}.
           </p>
         </div>
         <button onClick={refetch} style={btn}>Refresh</button>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load punctuality data.</p>}
 
       {records.length > 0 && (
@@ -48,12 +48,12 @@ export default function DQAPunctuality() {
                 <tr key={r.coordinator_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>
                     {r.coordinator_name}
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.coordinator_id}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.coordinator_id}</div>
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.total_sessions}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.gate_opened_count}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                    <span style={{ color: r.no_gate_open_count > 0 ? '#ef4444' : '#64748b', fontWeight: r.no_gate_open_count > 0 ? 700 : 400 }}>
+                    <span style={{ color: r.no_gate_open_count > 0 ? '#ef4444' : 'var(--muted)', fontWeight: r.no_gate_open_count > 0 ? 700 : 400 }}>
                       {r.no_gate_open_count}
                     </span>
                   </td>
@@ -79,7 +79,7 @@ export default function DQAPunctuality() {
       )}
 
       {records.length === 0 && status === 'ok' && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>No session data in the last 30 days.</p>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>No session data in the last 30 days.</p>
       )}
     </div>
   )
@@ -89,7 +89,7 @@ function SummaryCard({ label, value, color }: { label: string; value: number; co
   return (
     <div style={{ background: '#fff', borderRadius: 10, padding: '12px 18px', border: `1px solid ${color}44`, display: 'flex', gap: 12, alignItems: 'center' }}>
       <div style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#64748b' }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</div>
     </div>
   )
 }

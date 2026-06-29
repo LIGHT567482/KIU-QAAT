@@ -15,7 +15,7 @@ const CSS = `
   --surface: #ffffff;
   --surface-2: #f8fafc;
   --text: #0f172a;
-  --muted: #64748b;
+  --muted: #334155;
   --border: #e2e8f0;
   --brand: #1a73e8;
   --brand-contrast: #ffffff;
@@ -45,6 +45,11 @@ const CSS = `
   --footer-text: #cbd5e1;
   color-scheme: dark;
 }
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; height: 100%; }
+/* Full-bleed shell — fills the visible viewport (100dvh handles mobile browser
+   chrome) so the footer always sits at the very bottom, on phones too. */
+.app-shell { min-height: 100vh; min-height: 100dvh; }
 html, body { background: var(--app-bg); color: var(--text); transition: background .2s, color .2s; }
 input, select, textarea {
   background: var(--surface); color: var(--text); border-color: var(--border);

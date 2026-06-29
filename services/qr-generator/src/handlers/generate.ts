@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import { generateTenantKeyPair, generateSerialNumber, signQRPayload } from '../crypto/rsa-keys.js'
 import { renderQRImage } from '../crypto/qr-image.js'
 import { getTenantKeys, storeTenantKeys } from '../store/tenant-keys.js'
-import { deliverBatch, type QREmailJob } from '../email/delivery.js'
+import { deliverBatch, sendLinkQREmail, type QREmailJob } from '../email/delivery.js'
 import { withTenant } from '../db.js'
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
@@ -384,5 +384,52 @@ export async function reissueQR(req: Request, res: Response): Promise<void> {
     if (!res.headersSent) {
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'reissue failed' })
     }
+  })
+}
+
+// emailLink renders a QR for an arbitrary URL (e.g. a lecturer's permanent
+// career-QR login link) and emails it to an explicit recipient. Unlike the
+// student flows it does not mint or store a serial — the QR simply encodes the
+// URL the caller supplies. Used for the optional QR-dispatch email that the
+// gateway fires when a lecturer (or student) is created/imported with an email.
+export async function emailLink(req: Request, res: Response): Promise<void> {
+  const tenant_id = callerTenant(req, res)
+  if (!tenant_id) return
+
+  const { to, url, name, subject_id, heading, intro } = req.body as {
+    to?: string; url?: string; name?: string
+    subject_id?: string; heading?: string; intro?: string
+  }
+  if (!to || !url) {
+    res.status(400).json({ error: 'INVALID_REQUEST', message: 'to and url required' })
+    return
+  }
+
+  // Respond immediately; deliver in the background so import loops never block.
+  res.status(202).json({ status: 'EMAIL_QUEUED' })
+
+  withTenant(tenant_id, async (db) => {
+    const tenantRow = (await db.query(
+      'SELECT name, domain FROM tenants WHERE tenant_id = $1', [tenant_id],
+    )).rows[0]
+    if (!tenantRow) return
+
+    const qrImageBuffer = await QRCode.toBuffer(url, {
+      errorCorrectionLevel: 'M', margin: 2, width: 480,
+    })
+
+    await sendLinkQREmail({
+      to,
+      recipientName: name || '',
+      subjectId: subject_id || '',
+      tenantName: tenantRow.name,
+      tenantDomain: tenantRow.domain,
+      heading: heading || 'Your QR Code',
+      intro: intro || 'Your permanent QR code is attached.',
+      qrImageBuffer,
+    })
+    console.info(`[qr-generator] link-qr emailed to=${to} subject=${subject_id || ''}`)
+  }).catch((err) => {
+    console.error('[qr-generator] emailLink failed:', err instanceof Error ? err.message : err)
   })
 }

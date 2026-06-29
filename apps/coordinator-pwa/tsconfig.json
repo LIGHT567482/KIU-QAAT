@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "types": ["web-bluetooth"],
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

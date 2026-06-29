@@ -43,7 +43,7 @@ func queryCoordinators(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 		SELECT u.user_id::text, COALESCE(u.registration_number,''), COALESCE(u.coordinator_code,''),
 		       COALESCE(u.title,''), u.full_name, COALESCE(u.gender,''),
 		       u.email, COALESCE(u.phone,''), COALESCE(u.whatsapp,''),
-		       COALESCE(c.name, c.course_group, ''), COALESCE(o.level,''), COALESCE(o.session_type,''),
+		       COALESCE(c.name, ''), COALESCE(o.level,''), COALESCE(o.session_type,''),
 		       COALESCE(o.study_year, 0), COALESCE(o.semester, 0), COALESCE(o.intake,''),
 		       u.is_active
 		FROM users u

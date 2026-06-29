@@ -32,7 +32,7 @@ func ImportLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		res, perr := processLecturerCSV(r.Context(), adminPool, tenantID, file)
+		res, perr := processLecturerCSV(r.Context(), adminPool, tenantID, file, r)
 		if perr != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, errBody("CSV_PARSE_ERROR", perr.Error()))
 			return
@@ -41,8 +41,8 @@ func ImportLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.Reader) (*importResult, error) {
-	data, err := io.ReadAll(r)
+func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, src io.Reader, httpReq *http.Request) (*importResult, error) {
+	data, err := io.ReadAll(src)
 	if err != nil {
 		return nil, fmt.Errorf("could not read file: %w", err)
 	}
@@ -88,30 +88,36 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 			continue
 		}
 		staffID := get("staff_id")
+		// email is OPTIONAL — used only to dispatch the lecturer's career QR, never
+		// for login. A blank email simply means no QR is emailed for this row.
+		email := get("email")
 
 		var inserted bool
+		var lecturerID string
 		var qErr error
 		if staffID != "" {
 			// Upsert by (tenant, staff_id) — matches the partial unique index
 			// ux_lecturers_tenant_staffid (predicate must be repeated).
 			qErr = pool.QueryRow(ctx, `
-				INSERT INTO lecturers (tenant_id, full_name, phone, department, staff_id, title, gender)
-				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''))
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, department, staff_id, title, gender)
+				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''))
 				ON CONFLICT (tenant_id, staff_id) WHERE staff_id IS NOT NULL AND staff_id <> ''
 				DO UPDATE SET
 				    full_name  = EXCLUDED.full_name,
+				    email      = COALESCE(EXCLUDED.email, lecturers.email),
 				    phone      = COALESCE(EXCLUDED.phone, lecturers.phone),
 				    department = COALESCE(EXCLUDED.department, lecturers.department),
 				    title      = COALESCE(EXCLUDED.title, lecturers.title),
 				    gender     = COALESCE(EXCLUDED.gender, lecturers.gender)
-				RETURNING (xmax = 0)`,
-				tenantID, fullName, get("phone"), get("department"), staffID, get("title"), get("gender")).Scan(&inserted)
+				RETURNING lecturer_id::text, (xmax = 0)`,
+				tenantID, fullName, email, get("phone"), get("department"), staffID, get("title"), get("gender")).Scan(&lecturerID, &inserted)
 		} else {
 			// No staff ID → plain insert (cannot dedupe reliably without it).
-			_, qErr = pool.Exec(ctx, `
-				INSERT INTO lecturers (tenant_id, full_name, phone, department, title, gender)
-				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''))`,
-				tenantID, fullName, get("phone"), get("department"), get("title"), get("gender"))
+			qErr = pool.QueryRow(ctx, `
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, department, title, gender)
+				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''))
+				RETURNING lecturer_id::text`,
+				tenantID, fullName, email, get("phone"), get("department"), get("title"), get("gender")).Scan(&lecturerID)
 			inserted = true
 		}
 		if qErr != nil {
@@ -123,6 +129,12 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 			res.Inserted++
 		} else {
 			res.Updated++
+		}
+		// Email the permanent career QR when an address was supplied.
+		if email != "" && lecturerID != "" && httpReq != nil {
+			emailLecturerQR(httpReq.Header.Get("Authorization"),
+				lecturerScanURL(httpReq, makeLecturerQRToken(lecturerID, tenantID)),
+				email, fullName, staffID)
 		}
 	}
 	return res, nil
@@ -139,7 +151,7 @@ func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 			where += fmt.Sprintf(" AND department = $%d", len(args))
 		}
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT COALESCE(staff_id,''), full_name, COALESCE(phone,''),
+			SELECT COALESCE(staff_id,''), full_name, COALESCE(email,''), COALESCE(phone,''),
 			       COALESCE(department,''), COALESCE(title,''), COALESCE(gender,'')
 			FROM lecturers WHERE `+where+` ORDER BY full_name`, args...)
 		if err != nil {
@@ -148,11 +160,12 @@ func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		out := [][]string{{"staff_id", "full_name", "phone", "department", "title", "gender"}}
+		// email is optional and used only to dispatch the lecturer's career QR.
+		out := [][]string{{"staff_id", "full_name", "email", "phone", "department", "title", "gender"}}
 		for rows.Next() {
-			var sid, name, phone, dept, title, gender string
-			rows.Scan(&sid, &name, &phone, &dept, &title, &gender) //nolint:errcheck
-			out = append(out, []string{sid, name, phone, dept, title, gender})
+			var sid, name, email, phone, dept, title, gender string
+			rows.Scan(&sid, &name, &email, &phone, &dept, &title, &gender) //nolint:errcheck
+			out = append(out, []string{sid, name, email, phone, dept, title, gender})
 		}
 
 		xlsx, err := buildXLSX(out)

@@ -66,7 +66,7 @@ A lecturer is **registered** (staff ID captured, optional WebAuthn passkey). To 
 4. **Biometric** — if a WebAuthn passkey is enrolled, an on-device fingerprint assertion is required (single-use per scan via Redis).
 5. **Student quorum on END** — the lecture only closes (and contact hours count) if a configurable **share of enrolled students actually attended** (`lecturer_attendance_ratio`), proving a real, attended lecture.
 - This composition makes remote/proxy lecturer attendance impractical: a proxy would need the staff ID **and** a live relayed code **and** to be on the campus network **and** the lecturer's phone biometric **and** real students in the room.
-- ⚠️ **IP heuristic caveat:** same-egress-IP equals same NAT/LAN; it can be defeated if the gateway trusts a spoofable `X-Forwarded-For` from an untrusted hop. ✅ Mitigated here because Caddy is the only front door and sets XFF; 🔲 ensure no other ingress can inject XFF, and keep BLE range as a future second proximity signal.
+- ⚠️ **IP heuristic caveat:** same-egress-IP equals same NAT/LAN; it can be defeated if the gateway trusts a spoofable `X-Forwarded-For` from an untrusted hop. ✅ Mitigated here because Caddy is the only front door and sets XFF; 🔲 ensure no other ingress can inject XFF. In practice the coordinator's laptop is its **own isolated Wi-Fi hotspot**, so "same egress IP" means "physically on this room's AP" — the live rotating room code is the paired second proximity signal (BLE was removed, mig 039).
 
 ### VC / DVC / DQA_DIRECTOR / QA_OFFICER — governance, read-mostly
 - **Authz:** dashboard/report routes gated to the specific role(s); QA mutations (corrections, device-reset, reissue) are QA-only.

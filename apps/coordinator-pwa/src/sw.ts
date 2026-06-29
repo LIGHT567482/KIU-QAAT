@@ -87,7 +87,7 @@ function studentScanPage(url: URL): Response {
       const file = e.target.files[0];
       if (!file) return;
       const el = document.getElementById('result');
-      el.textContent = 'Checking…'; el.style.color = '#64748b';
+      el.textContent = 'Checking…'; el.style.color = '#334155';
       const fd = new FormData();
       fd.append('qr', file);
       fd.append('session_id', '${sessionId}');

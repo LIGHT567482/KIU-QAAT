@@ -35,7 +35,7 @@ export default function QAManualCorrection() {
   return (
     <div style={{ maxWidth: 560 }}>
       <h2 style={{ marginBottom: 4 }}>Manual Attendance Correction</h2>
-      <p style={{ color: '#64748b', marginBottom: 24, fontSize: 13 }}>
+      <p style={{ color: 'var(--muted)', marginBottom: 24, fontSize: 13 }}>
         Insert a MANUAL_OVERRIDE attendance record. Only use this when automatic check-in failed due to a verified system or hardware issue. All corrections are fully audited.
       </p>
 

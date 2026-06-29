@@ -78,7 +78,7 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 
 	sql := `
 		SELECT se.student_id, se.full_name,
-		       COALESCE(c.course_group, c.name, ''), COALESCE(c.level,''),
+		       COALESCE(c.name, ''), COALESCE(c.level,''),
 		       COALESCE(o.session_type,''), COALESCE(se.current_year,0), COALESCE(se.semester,0),
 		       COUNT(DISTINCT s.session_id) AS held,
 		       COUNT(DISTINCT al.session_id) AS attended
@@ -90,7 +90,7 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 		     AND (se.offering_id IS NULL OR s.offering_id = se.offering_id)
 		LEFT JOIN attendance_logs al ON al.session_id = s.session_id AND al.student_id = se.student_id
 		WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'` + where + `
-		GROUP BY se.student_id, se.full_name, c.course_group, c.name, c.level, o.session_type, se.current_year, se.semester
+		GROUP BY se.student_id, se.full_name, c.name, c.level, o.session_type, se.current_year, se.semester
 		ORDER BY se.full_name`
 
 	rows, err := conn.Query(ctx, sql, args...)

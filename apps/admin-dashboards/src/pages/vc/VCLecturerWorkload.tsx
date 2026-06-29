@@ -36,11 +36,11 @@ export default function VCLecturerWorkload() {
         <button onClick={() => { setApplied({ dateFrom, dateTo }); refetch() }} style={btn}>Apply</button>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load workload data.</p>}
 
       {records.length === 0 && status === 'ok' && (
-        <p style={{ color: '#94a3b8' }}>No session data found for this period.</p>
+        <p style={{ color: 'var(--muted)' }}>No session data found for this period.</p>
       )}
 
       {records.length > 0 && (
@@ -59,7 +59,7 @@ export default function VCLecturerWorkload() {
                 <tr key={r.coordinator_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>
                     {r.coordinator_name}
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.coordinator_id}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.coordinator_id}</div>
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.distinct_units}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.scheduled_sessions}</td>
@@ -83,6 +83,6 @@ export default function VCLecturerWorkload() {
   )
 }
 
-const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: '#64748b', fontWeight: 600 }
+const labelStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--muted)', fontWeight: 600 }
 const inp: React.CSSProperties = { padding: '6px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #e2e8f0' }
 const btn: React.CSSProperties = { padding: '7px 16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }

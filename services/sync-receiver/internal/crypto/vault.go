@@ -15,6 +15,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -124,4 +125,36 @@ func VerifyAndDecryptPackage(bindingKey string, payload []byte, expectedHMACHex 
 		return nil, fmt.Errorf("package decryption failed: %w", err)
 	}
 	return plaintext, nil
+}
+
+// SealPackage mirrors the PWA/native Sealer (verified byte-compatible) for tests and
+// any Go-side sealing: returns base64(iv12 || ciphertext || tag), the hex HMAC-SHA256
+// over that base64 text, and its SHA-256 checksum — all from the device binding key.
+func SealPackage(bindingKey string, plaintext []byte) (encPayload, hmacHex, checksumHex string, err error) {
+	aesKey, hmacKey, err := deriveVaultKeys(bindingKey)
+	if err != nil {
+		return "", "", "", err
+	}
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", "", "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", "", "", err
+	}
+	iv := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", "", "", err
+	}
+	combined := append(iv, gcm.Seal(nil, iv, plaintext, nil)...)
+	encPayload = base64.StdEncoding.EncodeToString(combined)
+
+	mac := hmac.New(sha256.New, hmacKey)
+	mac.Write([]byte(encPayload))
+	hmacHex = hex.EncodeToString(mac.Sum(nil))
+
+	sum := sha256.Sum256([]byte(encPayload))
+	checksumHex = hex.EncodeToString(sum[:])
+	return encPayload, hmacHex, checksumHex, nil
 }

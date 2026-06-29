@@ -37,7 +37,7 @@ export default function LecturerDashboard() {
         Pick a unit to see who attended each lecture.
       </p>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'ok' && units.length === 0 && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 10, padding: 16 }}>
           You have no assigned units yet. Ask the administrator to assign you to a course unit.
@@ -61,7 +61,7 @@ export default function LecturerDashboard() {
 
       {unitId && gridStatus === 'ok' && (
         sessions.length === 0 ? (
-          <div style={{ color: '#94a3b8', padding: '20px 0' }}>No sessions held for this unit yet.</div>
+          <div style={{ color: 'var(--muted)', padding: '20px 0' }}>No sessions held for this unit yet.</div>
         ) : (
           <div style={{ overflowX: 'auto', border: '1px solid var(--border,#e2e8f0)', borderRadius: 10 }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 600 }}>
@@ -87,7 +87,7 @@ export default function LecturerDashboard() {
                   </tr>
                 ))}
                 {students.length === 0 && (
-                  <tr><td colSpan={2 + sessions.length} style={{ padding: 16, color: '#64748b' }}>No students enrolled in this unit.</td></tr>
+                  <tr><td colSpan={2 + sessions.length} style={{ padding: 16, color: 'var(--muted)' }}>No students enrolled in this unit.</td></tr>
                 )}
               </tbody>
               {/* Coordinator-of-record row, so the lecturer can see who ran each session. */}
@@ -96,7 +96,7 @@ export default function LecturerDashboard() {
                   <td style={{ ...bcell, position: 'sticky', left: 0, background: '#f8fafc', textAlign: 'left', fontWeight: 700, color: BLUE }}>Coordinator</td>
                   <td style={bcell}></td>
                   {sessions.map(s => (
-                    <td key={s.session_id} style={{ ...bcell, textAlign: 'center', fontSize: 10, color: '#64748b' }} title={s.coordinator_name}>
+                    <td key={s.session_id} style={{ ...bcell, textAlign: 'center', fontSize: 10, color: 'var(--muted)' }} title={s.coordinator_name}>
                       {s.coordinator_name ? s.coordinator_name.split(' ')[0] : '—'}
                     </td>
                   ))}

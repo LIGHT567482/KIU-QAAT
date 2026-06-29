@@ -102,9 +102,9 @@ export default function AdminLecturerAssignments() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ fontSize: 13, color: '#64748b', textDecoration: 'none' }}>← Tenants</a>
+          <a href="/admin/tenants" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>← Tenants</a>
           <h2 style={{ margin: '4px 0 0' }}>Lecturer Assignments</h2>
-          <div style={{ fontSize: 13, color: '#94a3b8' }}>Tenant: {tenantId}</div>
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Tenant: {tenantId}</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href={`/admin/tenants/${tenantId}/lecturers`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>
@@ -195,7 +195,7 @@ export default function AdminLecturerAssignments() {
         </div>
       )}
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       {/* Grouped by lecturer — one card per lecturer listing ALL their units, so a
           lecturer teaching 6 units appears once (not on 6 separate rows). */}
@@ -204,7 +204,7 @@ export default function AdminLecturerAssignments() {
           <div key={g.lecturer_id} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{g.lecturer_name}
-                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: '#64748b' }}>
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: 'var(--muted)' }}>
                   · {g.items.length} unit{g.items.length > 1 ? 's' : ''}
                 </span>
               </div>
@@ -213,8 +213,8 @@ export default function AdminLecturerAssignments() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {g.items.map(a => (
                 <span key={a.assignment_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 13 }}>
-                  <span><strong>{a.unit_name}</strong> <span style={{ color: '#94a3b8', fontSize: 11 }}>{a.unit_id}</span>
-                    <span style={{ color: '#64748b' }}> · {a.course_name} · {a.academic_year}</span></span>
+                  <span><strong>{a.unit_name}</strong> <span style={{ color: 'var(--muted)', fontSize: 11 }}>{a.unit_id}</span>
+                    <span style={{ color: 'var(--muted)' }}> · {a.course_name} · {a.academic_year}</span></span>
                   <button onClick={() => handleDelete(a.assignment_id)} disabled={deleting === a.assignment_id}
                     title="Remove this unit" style={{ border: 'none', background: 'transparent', color: '#b91c1c', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
                 </span>
@@ -223,7 +223,7 @@ export default function AdminLecturerAssignments() {
           </div>
         ))}
         {(assignments ?? []).length === 0 && status === 'ok' && (
-          <p style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+          <p style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>
             No assignments yet. Click "+ New Assignment" to assign a lecturer to a course unit.
           </p>
         )}

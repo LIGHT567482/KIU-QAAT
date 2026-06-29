@@ -1,22 +1,30 @@
 # QAAT — Quality Assurance Attendance Tracker
 
-QAAT is a multi-tenant, offline-first SaaS platform for university attendance. It combines BLE beacons, signed QR codes, and hardware fingerprinting to eliminate proxy attendance ("sign-ins for absent students") and ghost lectures.
+QAAT is a multi-tenant, **offline-first** SaaS platform for university attendance. It combines signed QR codes, a live rotating room code, **same-LAN (Wi-Fi) proximity**, and one-device-one-person binding to eliminate proxy attendance ("sign-ins for absent students") and ghost lectures.
 
-The architecture is a decentralised edge–cloud hybrid: all live session logic runs **offline** on the Coordinator's PWA (the edge server), while the cloud handles pre-session provisioning and post-session sync.
+**Attendance is taken completely offline.** The coordinator's hub — a **Linux laptop**, or a **native Android app** on a phone — is the room's Wi-Fi hotspot *and* the local server + database. Students' and the lecturer's phones join that hotspot and submit over the LAN; every log is written to the hub's database the instant it is accepted. No internet is needed in the room. When the hub later has connectivity, each closed session is sealed and **atomically** synced to the central SaaS database.
+
+> **Capacity reality — one access point ≈ one classroom.** A single hotspot holds a limited number of phones at once (**~10 on a stock Android**, ~20–40 on a laptop). So students **rotate**: each turns Wi-Fi **off** the moment they're marked present (the check-in screen says so explicitly), freeing a slot for the next. Large groups are served by this rotation over time, by several coordinators/APs in parallel, or by putting the hub's server on campus Wi-Fi. The Go server scales to thousands; the **Wi-Fi radio is the real limit**, not the software.
+
+> **Note (proximity model):** earlier builds used BLE beacons/RSSI for proximity. That was **removed** (migration 039). Proximity is now proven by **being on the coordinator's hotspot LAN plus the live rotating room code** — simpler, hardware-free, and works on every phone.
 
 ## Features
 
-- **Proxy-resistant check-in** — RSA-2048 signed QR codes validated against a roster, BLE/RSSI proximity, hardware fingerprint binding, and one-device-per-session enforcement.
-- **Offline-first edge server** — sessions run entirely on the Coordinator PWA with no network dependency; results sync to the cloud afterwards.
+- **Proxy-resistant check-in** — signed personal QR validated against the roster, a **live rotating room code**, **same-LAN proximity** (must be on the coordinator's hotspot), hardware-fingerprint binding, and **one-device-one-person** enforcement per session.
+- **Fully-offline edge server** — the coordinator's laptop runs the stack and is the room hotspot; sessions run with **zero network dependency**; sealed results sync to the cloud afterwards.
+- **Passwordless identities** — students are identified by **registration number only** (no email/phone/password); lecturers by **staff ID**. Both get a **permanent QR**; lecturers also have a staff-ID dashboard login.
+- **Passwordless student progress portal** — a single page where a student types their reg-no (scoped to their institution) and sees their own attendance % and exam eligibility — no account, no login.
+- **Standby coordinator** — if a coordinator is absent, they can pre-authorise an **own-cohort student** with a one-day code to run that day's session as their deputy (coordinator-only; never an admin).
+- **Optional QR email dispatch** — an optional email may be supplied for a lecturer or student **solely** to email them their QR on create/import; blank means no email is sent.
 - **Multi-tenancy with hard isolation** — PostgreSQL Row-Level Security on every table, enforced per request from the JWT tenant claim.
 - **Append-only attendance ledger** — attendance records cannot be deleted; corrections are new rows with a `MANUAL_OVERRIDE` entry method.
-- **Resilient chunked sync** — resumable AES-256 chunked upload with vector-clock deduplication and SHA-256 integrity checks.
-- **Custom in-house authentication** — RS256 JWTs, bcrypt password hashing, TOTP MFA, and a Redis-backed token blacklist.
-- **Role-based dashboards** — VC, DQA, QA, and Admin views plus a lightweight student attendance portal.
-- **Lecturer registration + assignment** — admins register lecturers per tenant and assign them to specific course units (by academic year, year, semester, intake session); coordinators pick from a filtered dropdown when opening a session.
-- **Lecturer attendance tracking** — `lecturer_attendance_logs` table records gate_open_time (when session opens) and gate_close_time + contact_hours (when session closes); admin dashboard shows per-lecturer summary and full detail log (anti-ghost-lecture audit trail).
-- **Course roadmap** — each course defines a year × semester grid; admin adds units per slot; courses can be created without a coordinator and updated at any time.
-- **Active semester control** — admin sets the active academic year and semester per tenant; coordinator's daily manifest shows only units for that semester.
+- **Resilient, atomic sync** — each closed session is sealed (AES-256-GCM + device-bound HMAC-SHA256 + SHA-256 checksum), chunked, and uploaded all-or-nothing with resume + retries.
+- **Custom in-house authentication** — RS256 JWTs, bcrypt password hashing, TOTP MFA (dev-toggleable), and a Redis-backed token blacklist.
+- **Role-based dashboards** — VC, DVC, DQA, QA, and Admin views plus the student progress portal.
+- **Curriculum model** — a **course** is created independently of level (no level/total-years on the course); **levels** (Certificate/Diploma/Degree/Masters…) are added inside the course, each with its own year × semester unit roadmap.
+- **Global cohorts** — a cohort (session · year · semester · level · intake) can be created once and applied across **all** courses at once, rather than per course.
+- **Lecturer assignment + attendance tracking** — lecturers are assigned to specific units; `lecturer_attendance_logs` records gate-open/close + contact hours per session (anti-ghost-lecture audit trail), surfaced in the admin and lecturer dashboards.
+- **Active semester control + rollover** — admin sets the active academic year/semester; a password-confirmed "advance semester" promotes every student and cohort one step (final level/year → GRADUATED).
 
 ## Architecture
 
@@ -24,15 +32,16 @@ The architecture is a decentralised edge–cloud hybrid: all live session logic 
 services/
   auth-service/         Go 1.21 — RS256 JWT, bcrypt, TOTP MFA, Redis jti blacklist
   api-gateway/          Go 1.21 — routing, JWT middleware, RBAC, tenant, rate limiter, Prometheus
-  qr-generator/         Node.js 20 — RSA-2048 QR signing, PNG generation, email delivery
-  session-manager/      Go 1.21 — warden delegation (GPS geofence), exam clearance tokens
-  sync-receiver/        Go 1.21 — chunked AES-256 upload, vector-clock dedup, eligibility trigger
+  qr-generator/         Node.js 20 — RSA-2048 QR signing, PNG generation, QR email delivery (/qr/email-link)
+  session-manager/      Go 1.21 — warden delegation, exam clearance tokens
+  sync-receiver/        Go 1.21 — chunked AES-256 sealed-package upload, integrity verify, eligibility refresh
   notification-service/ Node.js 20 — SMTP + Web Push notifications
 
 apps/
-  coordinator-pwa/      React 18 + TypeScript + Vite + PWA (offline edge server)
-  admin-dashboards/     React 18 + TypeScript + React Router (VC / DQA / QA / Admin)
-  student-portal/       React 18 lightweight SPA (personal attendance %)
+  coordinator-pwa/      React 18 + TypeScript + Vite + PWA (offline edge server = room hotspot + hub)
+  admin-dashboards/     React 18 + TypeScript + React Router (VC / DVC / DQA / QA / Admin + lecturer dashboard)
+  student-portal/       React 18 lightweight SPA (passwordless reg-no progress portal)
+  super-admin/          React 18 SPA (platform owner: register tenants, branding, billing)
 
 db/
   migrations/           SQL migration files (run in order by Postgres init)
@@ -74,9 +83,12 @@ make up            # docker compose up (full stack)
 | Coordinator PWA      | 3000  |
 | Admin dashboards     | 3001  |
 | QR generator         | 3002  |
-| Student portal       | 3005  |
+| Student portal       | 3003  |
 | Notification service | 3004  |
 | Mailhog UI           | 8025  |
+
+> Frontends are served behind Caddy (HTTPS). The student progress portal is opened
+> per-institution as `https://<host>:3003/?org=<institution-domain>`.
 
 > **Package manager:** all Node.js/frontend work uses **pnpm** — not npm or yarn.
 
@@ -111,17 +123,15 @@ Every query **must** `SET LOCAL app.current_tenant = '<uuid>'` before touching d
 ### Session state machine
 Defined in [apps/coordinator-pwa/src/session/state-machine.ts](apps/coordinator-pwa/src/session/state-machine.ts) using XState v5: `IDLE → PENDING_LECTURER → ACTIVE → CLOSED / AUTO_CLOSED`. Timers enforce the T+120 check-in window and T+180 auto-kill.
 
-### QR validation (8 steps)
-All eight steps live in [apps/coordinator-pwa/src/qr/validator.ts](apps/coordinator-pwa/src/qr/validator.ts):
+### Check-in validation (the proof factors)
+Identity is proven by the signed QR; presence + uniqueness are proven by the room and the device. A student is recorded `PRESENT` only when **all** hold (enforced on the coordinator's laptop, offline):
 
-1. RSA-2048 signature (SubtleCrypto)
-2. Expiry check
-3. Tenant ID match
-4. Roster lookup (SHA-256 hashed student ID)
-5. BLE RSSI ≥ threshold
-6. Hardware fingerprint (bound on first scan)
-7. Duplicate scan
-8. One-device-per-session
+1. Signed QR → resolves the student's account (passwordless QR-login)
+2. Session is `ACTIVE` and inside the daily window
+3. The **live rotating room code** is valid (read off the coordinator's screen)
+4. The phone is **on the coordinator's hotspot LAN** (else `NOT_SAME_NETWORK`)
+5. **One-device-one-person**: this device hasn't already checked in a different student this session (else `DEVICE_ALREADY_USED`)
+6. Not already present (idempotent)
 
 ### Chunked sync protocol
 `sync-receiver` expects: `POST /sync/init` → `POST /sync/chunk/:id/:idx` → `GET /sync/resume/:id` (on reconnect) → `POST /sync/complete/:id`. Each chunk is stored in Redis (7-day TTL). Complete validates the SHA-256 checksum, writes `attendance_logs`, and triggers `REFRESH MATERIALIZED VIEW CONCURRENTLY student_attendance_summary`.
@@ -146,14 +156,17 @@ A single PostgreSQL cluster with RLS on all tables. `tenant_id` is always a UUID
 
 The following are scaffolded or stubbed and not yet complete:
 
-- **Coordinator PWA LAN server** — the BroadcastChannel between the service worker and main thread for student QR submission is not yet wired.
 - **Reporting engine** — `GET /api/v1/dashboard/vc/overview` computes inline in handlers; a dedicated reporting service would improve performance at scale.
 - **SIS automated pull** — `POST /api/v1/import/trigger` is a stub; the OAuth 2.0 client to each institution's SIS REST API needs to be built per client.
-- **Beacon RSSI calibration UI** — currently done manually via `PUT /dqa/thresholds`.
+- **WebAuthn lecturer fingerprint** — requires a stable hostname RP ID (not a bare IP); optional, off by default.
 
 ## Documentation
 
+- [docs/SYSTEM_TEST_GUIDE.md](docs/SYSTEM_TEST_GUIDE.md) — **test the whole system with real students & devices** (backend → DB → frontends → QR → live offline session → verify).
+- [flow.md](flow.md) — **whole-system flowchart** (+ pre-rendered [flow-1-large.png](flow-1-large.png) / [flow-2.png](flow-2.png)).
+- [docs/FLOWCHART.md](docs/FLOWCHART.md) — the offline attendance gate, step by step.
 - [ARCHITECT.md](ARCHITECT.md) — full system architecture.
-- [DEPLOY.md](DEPLOY.md) — deployment guide.
+- [DEPLOY.md](DEPLOY.md) / [RUN-ANYWHERE.md](RUN-ANYWHERE.md) — deployment + run-on-any-laptop (offline hotspot) guide.
 - [USER_GUIDE.md](USER_GUIDE.md) — end-user guide.
-- [docs/openapi.yaml](docs/openapi.yaml) — API specification.
+- [docs/API.md](docs/API.md) — API overview.
+- [docs/SECURITY_PRIVACY_REVIEW.md](docs/SECURITY_PRIVACY_REVIEW.md) — security & privacy review.

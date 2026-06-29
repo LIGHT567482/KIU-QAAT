@@ -4,7 +4,7 @@ package handlers
 // instead of typing ~260 courses × 6+ units by hand. Three separate files, each
 // CSV or XLSX, each round-trips with its matching export (export == the template):
 //
-//   courses              : course_id, name, level, course_group, department, school, total_years
+//   courses              : course_id, name, department, school
 //   course-units (roadmap): unit_id, course_id, name, year, semester, level
 //   lecturer-assignments  : unit_id, lecturer_staff_id, lecturer_name, academic_year, intake_session, year, semester
 //
@@ -120,16 +120,15 @@ func ImportCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 			// course is added independently of level (levels are added within it later).
 			var inserted bool
 			err := adminPool.QueryRow(r.Context(), `
-				INSERT INTO courses (course_id, tenant_id, name, course_group, department, school)
-				VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''))
+				INSERT INTO courses (course_id, tenant_id, name, department, school)
+				VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($5,''))
 				ON CONFLICT (course_id) DO UPDATE SET
 				    name = EXCLUDED.name,
-				    course_group = COALESCE(EXCLUDED.course_group, courses.course_group),
 				    department = COALESCE(EXCLUDED.department, courses.department),
 				    school = COALESCE(EXCLUDED.school, courses.school)
 				WHERE courses.tenant_id = $2
 				RETURNING (xmax = 0)`,
-				cid, tenantID, name, cell(row, idx, "course_group"),
+				cid, tenantID, name,
 				cell(row, idx, "department"), cell(row, idx, "school")).Scan(&inserted)
 			if err != nil {
 				res.Skipped++
@@ -150,7 +149,7 @@ func ExportCoursesXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT course_id, name, COALESCE(course_group,''),
+			SELECT course_id, name,
 			       COALESCE(department,''), COALESCE(school,'')
 			FROM courses WHERE tenant_id = $1 ORDER BY name`, tenantID)
 		if err != nil {
@@ -158,11 +157,11 @@ func ExportCoursesXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		defer rows.Close()
-		out := [][]string{{"course_id", "name", "course_group", "department", "school"}}
+		out := [][]string{{"course_id", "name", "department", "school"}}
 		for rows.Next() {
-			var cid, name, grp, dept, school string
-			rows.Scan(&cid, &name, &grp, &dept, &school) //nolint:errcheck
-			out = append(out, []string{cid, name, grp, dept, school})
+			var cid, name, dept, school string
+			rows.Scan(&cid, &name, &dept, &school) //nolint:errcheck
+			out = append(out, []string{cid, name, dept, school})
 		}
 		writeXLSX(w, "courses.xlsx", out)
 	}

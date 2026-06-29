@@ -3,6 +3,16 @@
 
 ---
 
+> **⚠️ Proximity model changed since this checklist was written.** BLE beacons /
+> RSSI were **removed** (migration 039). Ignore every "beacon"/"RSSI"/"Bluetooth"
+> step below — there is **no beacon hardware to place, power, or calibrate**.
+> Instead, proximity is proven by the phone being **on the coordinator's Wi-Fi
+> hotspot LAN** plus the **live rotating room code**. The only "hardware" is the
+> coordinator's laptop, which is the room hotspot + offline server. See
+> [`../flow.md`](../flow.md) and [`FLOWCHART.md`](FLOWCHART.md).
+
+---
+
 ## Pre-Pilot (Week 13)
 
 ### Infrastructure

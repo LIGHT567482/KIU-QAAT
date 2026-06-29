@@ -14,15 +14,15 @@ export default function QACoordinatorHealth() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <h2 style={{ margin: 0 }}>Coordinator Health</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Sync latency and manual-override ratio — last 30 days. Refreshes every 30s.</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Sync latency and manual-override ratio — last 30 days. Refreshes every 30s.</p>
         </div>
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load coordinator health data.</p>}
 
       {records.length === 0 && status === 'ok' && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>No coordinator data in the last 30 days.</p>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>No coordinator data in the last 30 days.</p>
       )}
 
       <div style={{ display: 'grid', gap: 12 }}>
@@ -38,7 +38,7 @@ export default function QACoordinatorHealth() {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{r.coordinator_name}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.coordinator_id}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.coordinator_id}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Pill label="Sessions" value={String(r.total_sessions)} />
@@ -66,7 +66,7 @@ function Metric({ label, value, ok }: { label: string; value: string; ok: boolea
   return (
     <div style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 12px' }}>
       <div style={{ fontSize: 18, fontWeight: 700, color: ok ? '#1e293b' : '#f59e0b' }}>{value}</div>
-      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{label}</div>
     </div>
   )
 }
@@ -75,7 +75,7 @@ function Pill({ label, value, color = '#1e293b' }: { label: string; value: strin
   return (
     <div style={{ background: '#f8fafc', borderRadius: 6, padding: '4px 10px', fontSize: 12, textAlign: 'center' }}>
       <div style={{ fontWeight: 700, color }}>{value}</div>
-      <div style={{ color: '#94a3b8', fontSize: 10 }}>{label}</div>
+      <div style={{ color: 'var(--muted)', fontSize: 10 }}>{label}</div>
     </div>
   )
 }

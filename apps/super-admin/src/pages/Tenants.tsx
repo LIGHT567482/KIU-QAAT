@@ -302,8 +302,11 @@ function UsersPanel({ tenant, onClose }: { tenant: Tenant; onClose: () => void }
 }
 
 // ─── Logo upload (file → data URL) ────────────────────────────────────────────
-function LogoPicker({ value, onChange, onError }: { value: string; onChange: (v: string) => void; onError: (e: string | null) => void }) {
+function LogoPicker({ value, onChange, onError, label = 'Logo', maxBytes = MAX_LOGO_BYTES, hint }: {
+  value: string; onChange: (v: string) => void; onError: (e: string | null) => void; label?: string; maxBytes?: number; hint?: string
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const maxKB = Math.round(maxBytes / 1024)
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -313,7 +316,7 @@ function LogoPicker({ value, onChange, onError }: { value: string; onChange: (v:
     if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(file.type)) {
       onError('Please choose a PNG, JPEG, WebP or GIF image (SVG is not allowed).'); return
     }
-    if (file.size > MAX_LOGO_BYTES) { onError('Logo too large — please choose an image under ~700 KB.'); return }
+    if (file.size > maxBytes) { onError(`${label} too large — please choose an image under ~${maxKB} KB.`); return }
     const reader = new FileReader()
     reader.onload = () => onChange(String(reader.result))
     reader.onerror = () => onError('Could not read that file.')
@@ -322,15 +325,14 @@ function LogoPicker({ value, onChange, onError }: { value: string; onChange: (v:
 
   return (
     <div>
-      <div style={labelStyle}>Logo</div>
+      <div style={labelStyle}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{
           height: 56, width: 56, borderRadius: 10, border: '1px dashed var(--border)',
-          background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          background: value ? `center/cover no-repeat url("${value}")` : 'var(--surface-2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
-          {value
-            ? <img src={value} alt="logo" style={{ height: 56, width: 56, objectFit: 'contain' }} />
-            : <span style={{ fontSize: 11, color: 'var(--muted)' }}>none</span>}
+          {!value && <span style={{ fontSize: 11, color: 'var(--muted)' }}>none</span>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onFile} style={{ display: 'none' }} />
@@ -338,7 +340,7 @@ function LogoPicker({ value, onChange, onError }: { value: string; onChange: (v:
           {value && <button type="button" onClick={() => onChange('')} style={{ ...btnSmall, color: '#b91c1c' }}>Remove</button>}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>PNG/SVG/JPG from your device · max ~700 KB</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>{hint ?? `PNG/JPG/WebP/GIF from your device · max ~${maxKB} KB`}</div>
     </div>
   )
 }
@@ -373,7 +375,7 @@ function PalettePreview({ form }: { form: typeof EMPTY_FORM }) {
         <div style={{ width: 60, background: form.sidebar_color, display: 'flex', flexDirection: 'column', gap: 5, padding: 8 }}>
           {[0, 1, 2].map(i => <div key={i} style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,.6)' }} />)}
         </div>
-        <div style={{ flex: 1, background: form.background_color, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, backgroundColor: form.background_color, display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1, padding: 8 }}>
             <span style={{ display: 'inline-block', background: form.brand_color, color: '#fff', borderRadius: 5, fontSize: 10, padding: '4px 8px', fontWeight: 700 }}>Action</span>
           </div>

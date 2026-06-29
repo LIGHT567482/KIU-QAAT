@@ -30,13 +30,13 @@ export default function DQAThresholds() {
     }
   }
 
-  if (status === 'loading') return <p style={{ color: '#94a3b8' }}>Loading…</p>
+  if (status === 'loading') return <p style={{ color: 'var(--muted)' }}>Loading…</p>
   if (status === 'error' || !form) return <p style={{ color: '#b91c1c' }}>Failed to load thresholds.</p>
 
   return (
     <div style={{ maxWidth: 520 }}>
       <h2 style={{ marginBottom: 4 }}>Policy Thresholds</h2>
-      <p style={{ color: '#64748b', marginBottom: 24 }}>
+      <p style={{ color: 'var(--muted)', marginBottom: 24 }}>
         Changes apply immediately to all new sessions. The Daily Manifest cache is invalidated automatically.
       </p>
 
@@ -81,7 +81,7 @@ function Field({ label, hint, value, min, max, onChange }: {
   return (
     <label style={{ display: 'block' }}>
       <div style={{ fontWeight: 600, marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>{hint}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{hint}</div>
       <input
         type="number" min={min} max={max} value={value}
         onChange={e => onChange(Number(e.target.value))}

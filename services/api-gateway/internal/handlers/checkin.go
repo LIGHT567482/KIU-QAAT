@@ -84,7 +84,7 @@ func Checkin(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		result := validateCheckin(r.Context(), conn, qr, &req)
+		result := validateCheckin(r.Context(), conn, qr, &req, middleware.ClientIP(r))
 		status := http.StatusOK
 		if result.Status != "PRESENT" {
 			status = http.StatusUnprocessableEntity
@@ -94,15 +94,16 @@ func Checkin(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type activeSession struct {
-	SessionID   string
-	Secret      []byte
-	CoordID     string
-	UnitID      string
-	WindowStart *time.Time
-	WindowEnd   *time.Time
+	SessionID     string
+	Secret        []byte
+	CoordID       string
+	UnitID        string
+	WindowStart   *time.Time
+	WindowEnd     *time.Time
+	CoordinatorIP string
 }
 
-func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.SignedQR, req *checkinRequest) checkinResponse {
+func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.SignedQR, req *checkinRequest, clientIP string) checkinResponse {
 	reject := func(reason string) checkinResponse { return checkinResponse{Status: "REJECTED", Reason: reason} }
 
 	// ── Step 1b: RSA signature (authenticates the tenant claim) ───────────────
@@ -131,13 +132,23 @@ func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.Signed
 	// tenant+course and pick the one whose code validates. The JOIN on course_units
 	// constrains the search to sessions belonging to the student's course, so a
 	// student in Course A cannot check in to Course B's session.
+	//
+	// Cohort gate: a session belongs to a specific offering (the coordinator's
+	// cohort). We only consider sessions whose offering matches the student's own
+	// offering — so only the coordinator's OWN students can attend. (Edge case: if
+	// either side has no offering recorded, the course-level match above still holds.)
 	rows, err := conn.Query(ctx, `
 		SELECT s.session_id, s.checkin_secret, s.coordinator_id, s.unit_id,
-		       s.checkin_window_start, s.checkin_window_end
+		       s.checkin_window_start, s.checkin_window_end, COALESCE(s.coordinator_ip,'')
 		FROM sessions s
 		JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.course_id = $2
-		WHERE s.tenant_id = $1 AND s.session_status = 'ACTIVE'`,
-		qr.TenantID, qr.CourseID)
+		WHERE s.tenant_id = $1 AND s.session_status = 'ACTIVE'
+		  AND (
+		    s.offering_id IS NULL
+		    OR (SELECT se.offering_id FROM students_extended se WHERE se.student_id = $3) IS NULL
+		    OR s.offering_id = (SELECT se.offering_id FROM students_extended se WHERE se.student_id = $3)
+		  )`,
+		qr.TenantID, qr.CourseID, qr.StudentID)
 	if err != nil {
 		return reject("INTERNAL_ERROR")
 	}
@@ -146,7 +157,7 @@ func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.Signed
 	var candidateSessions []activeSession
 	for rows.Next() {
 		var s activeSession
-		if err := rows.Scan(&s.SessionID, &s.Secret, &s.CoordID, &s.UnitID, &s.WindowStart, &s.WindowEnd); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.Secret, &s.CoordID, &s.UnitID, &s.WindowStart, &s.WindowEnd, &s.CoordinatorIP); err != nil {
 			continue
 		}
 		candidateSessions = append(candidateSessions, s)
@@ -174,6 +185,17 @@ func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.Signed
 	// Window check (optional per-session gate times).
 	if (sess.WindowStart != nil && now.Before(*sess.WindowStart)) || (sess.WindowEnd != nil && now.After(*sess.WindowEnd)) {
 		return reject("GATE_NOT_OPEN")
+	}
+
+	// ── Network-proximity gate (MANDATORY) ────────────────────────────────────
+	// Attendance is recorded if and ONLY IF the scan comes from the coordinator's
+	// LAN (their Wi-Fi hotspot / same network). The session's coordinator_ip is the
+	// anchor, captured when the coordinator opened the session on that hotspot. No
+	// anchor = no provable presence → reject. This defeats a remote student who was
+	// merely relayed the live room code (scanning from home), since they are not on
+	// the coordinator's network.
+	if sess.CoordinatorIP == "" || !onSameLAN(clientIP, sess.CoordinatorIP) {
+		return reject("NOT_SAME_NETWORK")
 	}
 
 	// ── Step 6a: cross-student device lock ────────────────────────────────────

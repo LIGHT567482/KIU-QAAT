@@ -108,7 +108,7 @@ export default function App() {
 
         {error && <div style={errorBox}>{error}</div>}
         {!data && !error && !loading && (
-          <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>
+          <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>
             {org ? 'Type your registration number above and submit to see your attendance and exam eligibility.'
                  : 'Open your institution’s portal link, then enter your registration number to see your attendance.'}
           </p>
@@ -129,7 +129,7 @@ function Results({ data }: { data: Progress }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: 18 }}>{data.full_name || data.student_id}</div>
-          <div style={{ color: '#64748b', fontSize: 13 }}>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>
             {data.student_id}{data.academic_year ? ` · ${data.academic_year}` : ''} · Semester {data.semester}
           </div>
         </div>
@@ -145,7 +145,7 @@ function Results({ data }: { data: Progress }) {
       </div>
 
       {data.units.length === 0 && (
-        <p style={{ color: '#94a3b8', textAlign: 'center', marginTop: 48 }}>
+        <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>
           No attendance records found yet. Check back after your first session.
         </p>
       )}
@@ -166,11 +166,11 @@ function UnitCard({ unit: u }: { unit: Unit }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{u.unit_name}</div>
-          <div style={{ fontSize: 12, color: '#94a3b8' }}>{u.unit_id}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.unit_id}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 24, fontWeight: 800, color: eligible ? '#16a34a' : '#ef4444' }}>{pct}%</div>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>threshold {u.threshold}%</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>threshold {u.threshold}%</div>
         </div>
       </div>
 
@@ -191,7 +191,7 @@ function UnitCard({ unit: u }: { unit: Unit }) {
         }} />
       </div>
 
-      <div style={{ marginTop: 8, fontSize: 13, color: '#64748b' }}>
+      <div style={{ marginTop: 8, fontSize: 13, color: 'var(--muted)' }}>
         {u.sessions_attended} of {u.sessions_held} sessions attended
         {!eligible && u.deficit_sessions !== undefined && (
           <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: 8 }}>

@@ -24,7 +24,7 @@ export default function DQAEligibility() {
             padding: '8px 20px', fontWeight: 600, fontSize: 13,
             background: 'none', border: 'none', cursor: 'pointer',
             borderBottom: tab === t ? '2px solid #1e293b' : '2px solid transparent',
-            color: tab === t ? '#1e293b' : '#64748b',
+            color: tab === t ? '#1e293b' : 'var(--muted)',
             marginBottom: -2,
           }}>
             {t === 'all' ? 'All Students' : 'Student Lookup'}
@@ -85,7 +85,7 @@ function AllStudentsTab() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-        <p style={{ color: '#64748b', margin: 0, fontSize: 13 }}>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
           Every student's exam eligibility — shown in full regardless of any search; refreshed on sync.
           {status === 'ok' && data && (
             <>
@@ -112,23 +112,23 @@ function AllStudentsTab() {
         <FilterSelect label="Academic year" value={filters.academic} onChange={v => setF('academic', v)} options={opts.academic} />
         {hasFilters && (
           <button onClick={() => { setFilters({ ...EMPTY_FILTERS }); setSearch('') }}
-            style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', fontSize: 13, cursor: 'pointer', color: '#64748b' }}>
+            style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', fontSize: 13, cursor: 'pointer', color: 'var(--muted)' }}>
             Clear all
           </button>
         )}
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'error'   && <p style={{ color: '#b91c1c' }}>Failed to load eligibility list.</p>}
       {status === 'ok' && filtered.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
           {records.length === 0 ? 'No student attendance records yet.' : 'No students match these filters.'}
         </div>
       )}
 
       {filtered.length > 0 && (
         <>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>Showing {filtered.length} of {records.length}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Showing {filtered.length} of {records.length}</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -145,18 +145,18 @@ function AllStudentsTab() {
                     <tr key={`${r.student_id}-${r.unit_id}-${i}`} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{r.student_name}</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.student_id}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.student_id}</div>
                       </td>
-                      <td style={{ padding: '8px 10px', color: '#64748b' }}>{r.course_name}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{r.course_name}</td>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{r.unit_name}</div>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.unit_id}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.unit_id}</div>
                       </td>
-                      <td style={{ padding: '8px 10px', color: '#64748b', whiteSpace: 'nowrap' }}>{r.current_year ? `Y${r.current_year}` : '—'}{r.semester ? ` / S${r.semester}` : ''}</td>
-                      <td style={{ padding: '8px 10px', color: '#64748b' }}>{r.intake_session || '—'}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>{r.current_year ? `Y${r.current_year}` : '—'}{r.semester ? ` / S${r.semester}` : ''}</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{r.intake_session || '—'}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'center' }}>{r.sessions_attended}/{r.sessions_held}</td>
                       <td style={{ padding: '8px 10px', fontWeight: 700, color: elig ? '#16a34a' : '#ef4444' }}>{r.attendance_percentage}%</td>
-                      <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{r.threshold}%</td>
+                      <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{r.threshold}%</td>
                       <td style={{ padding: '8px 10px' }}><StatusPill status={r.status} deficit={r.deficit_sessions} /></td>
                     </tr>
                   )
@@ -176,7 +176,7 @@ function FilterSelect({ label, value, onChange, options, prefix, labels }: {
 }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)}
-      style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, background: '#fff', color: value ? '#1e293b' : '#64748b', cursor: 'pointer' }}>
+      style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, background: '#fff', color: value ? '#1e293b' : 'var(--muted)', cursor: 'pointer' }}>
       <option value="">{label}: all</option>
       {options.map(o => <option key={o} value={o}>{labels?.[o] ?? `${prefix ?? ''}${o}`}</option>)}
     </select>
@@ -196,7 +196,7 @@ function LookupTab() {
 
   return (
     <div>
-      <p style={{ color: '#64748b', marginBottom: 16 }}>Look up a single student's attendance and eligibility status by registration number.</p>
+      <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Look up a single student's attendance and eligibility status by registration number.</p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
         <input value={studentId} onChange={e => setStudentId(e.target.value)}
@@ -209,14 +209,14 @@ function LookupTab() {
         </button>
       </div>
 
-      {query && status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {query && status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {query && status === 'error'   && <p style={{ color: '#b91c1c' }}>Student not found.</p>}
 
       {status === 'ok' && data && (
         <div>
           <div style={{ marginBottom: 16 }}>
             <strong>{data.student_id}</strong>
-            <span style={{ color: '#94a3b8', marginLeft: 8 }}>AY {data.academic_year} · Sem {data.semester}</span>
+            <span style={{ color: 'var(--muted)', marginLeft: 8 }}>AY {data.academic_year} · Sem {data.semester}</span>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
@@ -229,11 +229,11 @@ function LookupTab() {
             <tbody>
               {data.units.map(u => (
                 <tr key={u.unit_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px 12px' }}><div style={{ fontWeight: 600 }}>{u.unit_name}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{u.unit_id}</div></td>
+                  <td style={{ padding: '8px 12px' }}><div style={{ fontWeight: 600 }}>{u.unit_name}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>{u.unit_id}</div></td>
                   <td style={{ padding: '8px 12px' }}>{u.sessions_held}</td>
                   <td style={{ padding: '8px 12px' }}>{u.sessions_attended}</td>
                   <td style={{ padding: '8px 12px', fontWeight: 600 }}>{u.attendance_percentage}%</td>
-                  <td style={{ padding: '8px 12px', color: '#94a3b8' }}>{u.threshold}%</td>
+                  <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>{u.threshold}%</td>
                   <td style={{ padding: '8px 12px' }}><StatusPill status={u.status} deficit={u.deficit_sessions} /></td>
                 </tr>
               ))}

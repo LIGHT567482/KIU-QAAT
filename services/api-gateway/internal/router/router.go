@@ -94,6 +94,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(5, 30)).
 		Post("/api/v1/auth/lecturer-login", handlers.LecturerStaffLogin(adminPool))
 
+	// Emergency standby coordinator login: a student exchanges code + reg-no for a
+	// COORDINATOR token (issued for the absent coordinator) to run that day's session.
+	r.With(middleware.PublicIPRateLimit(5, 20)).
+		Post("/api/v1/auth/coordinator-standby-login", handlers.CoordinatorStandbyLogin(adminPool))
+
 	// Public branding lookup for the captive portals (no JWT). Display-safe
 	// fields only, keyed by the tenant_id carried in the student/lecturer QR.
 	r.Get("/api/v1/branding/public", handlers.GetPublicBranding(adminPool))
@@ -379,6 +384,15 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/coordinator/last-roster", handlers.CoordinatorLastRoster(pool))
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Get("/api/v1/coordinator/active-sessions", handlers.CoordinatorActiveSessions(pool))
+
+		// Emergency standby coordinator — the coordinator delegates their cohort's
+		// session to a student of that cohort (coordinator-only; never an admin).
+		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
+			Post("/api/v1/coordinator/standby", handlers.CreateCoordinatorStandby(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
+			Get("/api/v1/coordinator/standby", handlers.ListCoordinatorStandby(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
+			Post("/api/v1/coordinator/standby/{id}/revoke", handlers.RevokeCoordinatorStandby(adminPool))
 
 		// Lecturer dashboard (their assigned units + student attendance matrix).
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).

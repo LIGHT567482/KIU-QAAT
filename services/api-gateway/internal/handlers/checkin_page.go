@@ -9,6 +9,9 @@ import "net/http"
 func CheckinPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// Release the TCP socket promptly — on a small classroom hotspot we don't want
+	// idle keep-alive connections lingering while students rotate through.
+	w.Header().Set("Connection", "close")
 	_, _ = w.Write([]byte(checkinPageHTML))
 }
 
@@ -50,8 +53,9 @@ const checkinPageHTML = `<!DOCTYPE html>
   button.primary:disabled{background:#94a3b8;cursor:default}
   .error{margin-top:12px;padding:11px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c;font-size:13px;text-align:center;display:none}
 
-  /* Success screen */
-  .success{text-align:center;display:none}
+  /* Success screen (hidden via inline style like its sibling screens, so show()
+     — which clears the inline display — reliably reveals it) */
+  .success{text-align:center}
   .check{font-size:56px;margin-bottom:12px}
   .present{font-size:22px;font-weight:700;color:#16a34a;margin-bottom:4px}
   .student-name-big{font-size:17px;font-weight:600;color:var(--text);margin-bottom:14px}
@@ -60,7 +64,12 @@ const checkinPageHTML = `<!DOCTYPE html>
   .pct-bar{background:var(--border);border-radius:100px;height:8px;margin-bottom:8px;overflow:hidden}
   .pct-fill{height:100%;border-radius:100px;background:var(--brand);transition:width .6s ease}
   .pct-label{font-size:12px;color:var(--muted);margin-bottom:16px;text-align:center}
-  .disconnect{font-size:13px;color:#166534;background:#dcfce7;border:1px solid #86efac;border-radius:10px;padding:12px 14px;margin-bottom:18px;line-height:1.45}
+  /* Disconnect call-to-action — the slot-freeing nudge (manual rotation) */
+  .disconnect{background:#fffbeb;border:2px solid #f59e0b;border-radius:14px;padding:16px 14px;margin:8px 0 18px;text-align:center}
+  .disc-title{font-size:18px;font-weight:800;color:#b45309;margin-bottom:6px}
+  .disc-sub{font-size:13px;color:#92400e;line-height:1.45;margin-bottom:12px}
+  .disc-ring{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;border-radius:50%;border:3px solid #f59e0b;font-size:20px;font-weight:800;color:#b45309;animation:discpulse 1s infinite}
+  @keyframes discpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.09)}}
   button.outline{width:100%;padding:13px;font-size:14px;font-weight:600;color:var(--brand);background:var(--brand-weak);border:2px solid var(--border);border-radius:12px;cursor:pointer}
   button.outline:hover{filter:brightness(.97)}
 
@@ -130,15 +139,23 @@ const checkinPageHTML = `<!DOCTYPE html>
   </div>
 
   <!-- ── Success ───────────────────────────────────────────────────────────── -->
-  <div id="screen-success" class="success">
+  <div id="screen-success" class="success" style="display:none">
     <div class="check">&#x2705;</div>
-    <div class="present">Presence noted</div>
+    <div class="present">You're marked present</div>
     <div class="student-name-big" id="success-name"></div>
+
+    <!-- The slot-freeing nudge — on a small class hotspot only ~10 phones fit at
+         once, so each student must disconnect to let the next one check in. -->
+    <div class="disconnect">
+      <div class="disc-title">&#x1F4F4; Turn your Wi-Fi OFF now</div>
+      <div class="disc-sub">A classmate needs your spot. <strong>Disconnect from the class Wi-Fi</strong> so the next student can check in.</div>
+      <div class="disc-ring" id="disc-ring">10</div>
+    </div>
+
     <div class="unit" id="unit-name"></div>
     <div class="meta" id="meta-line"></div>
     <div class="pct-bar"><div class="pct-fill" id="pct-fill" style="width:0%"></div></div>
     <div class="pct-label" id="pct-label"></div>
-    <div class="disconnect">&#x2705; Done &mdash; please <strong>disconnect from the network</strong> so others can check in.</div>
     <button class="outline" id="btn-history">View attendance history</button>
   </div>
 </div>
@@ -291,6 +308,7 @@ document.getElementById('btn-submit').addEventListener('click', async function()
     }
 
     if (data.status === 'PRESENT') {
+      clearRetry(); // stop any polling so we hold no connection / Wi-Fi slot
       document.getElementById('success-name').textContent = data.student_name || '';
       document.getElementById('unit-name').textContent = data.unit_name || '';
       var meta = [data.lecturer_name, data.session_date].filter(Boolean).join(' · ');
@@ -299,6 +317,7 @@ document.getElementById('btn-submit').addEventListener('click', async function()
       document.getElementById('pct-fill').style.width = pct + '%';
       document.getElementById('pct-label').textContent = 'Attendance this unit: ' + pct + '%';
       show('screen-success');
+      startDisconnectCountdown();
       return;
     }
 
@@ -329,6 +348,31 @@ document.getElementById('btn-submit').addEventListener('click', async function()
 document.getElementById('code').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') document.getElementById('btn-submit').click();
 });
+
+// ── Disconnect nudge ──────────────────────────────────────────────────────────
+// A small hotspot only holds ~10 phones at once, so each student must drop off the
+// Wi-Fi to free a slot. The web can't force a disconnect, so we count down and tell
+// them clearly. (The native coordinator app surfaces the same message natively.)
+function startDisconnectCountdown() {
+  var ring = document.getElementById('disc-ring');
+  if (!ring) return;
+  var s = 10;
+  ring.textContent = s;
+  var iv = setInterval(function() {
+    s--;
+    if (s <= 0) {
+      clearInterval(iv);
+      ring.textContent = '✓';
+      ring.style.borderColor = '#16a34a';
+      ring.style.color = '#16a34a';
+      ring.style.animation = 'none';
+      var sub = document.querySelector('.disc-sub');
+      if (sub) sub.innerHTML = 'You can <strong>close this page and turn Wi-Fi off</strong> now.';
+    } else {
+      ring.textContent = s;
+    }
+  }, 1000);
+}
 
 document.getElementById('btn-history').addEventListener('click', function() {
   location.href = '/student/attendance?t=' + encodeURIComponent(token);

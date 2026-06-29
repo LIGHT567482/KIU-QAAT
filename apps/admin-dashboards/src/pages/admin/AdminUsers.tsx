@@ -77,9 +77,9 @@ function UsersInner() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Home</a>
+          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Administration</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Staff accounts &amp; the institution's academic period.</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Staff accounts &amp; the institution's academic period.</p>
         </div>
         <button onClick={() => setCreating(c => !c)} style={btn}>
           {creating ? 'Cancel' : '+ Add User'}
@@ -100,13 +100,13 @@ function UsersInner() {
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <input value={form.local} placeholder="username" onChange={e => setForm(f => ({ ...f, local: e.target.value }))}
                   style={{ flex: 1, padding: '8px 10px', borderRadius: '6px 0 0 6px', border: '1px solid #e2e8f0', borderRight: 0, fontSize: 14, boxSizing: 'border-box' }} />
-                <span style={{ padding: '8px 10px', borderRadius: '0 6px 6px 0', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#64748b', fontSize: 13, whiteSpace: 'nowrap' }}>@{domain || '…'}</span>
+                <span style={{ padding: '8px 10px', borderRadius: '0 6px 6px 0', border: '1px solid #e2e8f0', background: '#f1f5f9', color: 'var(--muted)', fontSize: 13, whiteSpace: 'nowrap' }}>@{domain || '…'}</span>
               </div>
             </label>
             <Field label="Password"     value={form.password}  onChange={v => setForm(f => ({ ...f, password: v }))}  type="password" />
             <label>
               <div style={labelStyle}>Role</div>
-              <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={{ ...selectStyle, color: form.role ? '#1e293b' : '#94a3b8' }}>
+              <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={{ ...selectStyle, color: form.role ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select role —</option>
                 {ROLES.map(r => <option key={r} value={r} style={{ color: '#1e293b' }}>{r.replace(/_/g, ' ')}</option>)}
               </select>
@@ -144,7 +144,7 @@ function UsersInner() {
         </div>
       )}
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
@@ -163,13 +163,13 @@ function UsersInner() {
                   <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, fontWeight: 600, color: '#0369a1' }}>{u.coordinator_code}</div>
                 )}
               </td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{u.email}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{u.email}</td>
               <td style={{ padding: '10px 12px' }}>
                 <span style={{ background: roleColor(u.role).bg, color: roleColor(u.role).text, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>
                   {u.role.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 12 }}>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 12 }}>
                 {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}
               </td>
               <td style={{ padding: '10px 12px' }}>
@@ -244,7 +244,7 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <strong style={{ fontSize: 14 }}>Active Academic Period</strong>
-          <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
             {info?.active_academic_year && info.active_semester
               ? <>{info.active_academic_year} · Semester {info.active_semester}</>
               : <span style={{ color: '#b45309' }}>⚠ Not set</span>}
@@ -273,7 +273,7 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div>
             <strong style={{ fontSize: 14 }}>Clear last semester's attendance</strong>
-            <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Wipes attendance + sessions. Keeps students, lecturers, courses, cohorts and the timetable.</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Wipes attendance + sessions. Keeps students, lecturers, courses, cohorts and the timetable.</div>
           </div>
           <button onClick={() => { setClrOpen(o => !o); setClrErr(null); setClrDone(null) }} style={{ ...btn, background: '#b91c1c' }}>{clrOpen ? 'Cancel' : 'Clear data'}</button>
         </div>
@@ -349,13 +349,13 @@ function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
     finally { setBusy(false) }
   }
 
-  if (isSet === null) return <p style={{ color: '#94a3b8' }}>Loading…</p>
+  if (isSet === null) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
 
   return (
     <div style={{ maxWidth: 380, margin: '60px auto', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 28, textAlign: 'center' }}>
       <div style={{ fontSize: 40 }}>🔒</div>
       <h2 style={{ margin: '8px 0 4px' }}>{isSet ? 'Enter Users passcode' : 'Set a Users passcode'}</h2>
-      <p style={{ color: '#64748b', fontSize: 13, marginBottom: 18 }}>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 18 }}>
         {isSet
           ? 'This page is protected. Enter the passcode set by the administrator.'
           : 'No passcode is set yet. Create one to protect the Users page from here on.'}

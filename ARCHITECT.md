@@ -7,16 +7,18 @@
 
 ## 1. Architectural Overview
 
-QAAT follows a **Decentralised Edge-Cloud Hybrid Architecture**. The core principle is that all attendance operations during a live session are fully offline, executed on the Coordinator's PWA device (the Edge Server). The cloud is only involved in pre-session data provisioning and post-session synchronisation.
+QAAT follows a **Decentralised Edge-Cloud Hybrid Architecture**. The core principle is that all attendance operations during a live session are **fully offline**, executed on the Coordinator's laptop, which is simultaneously the **room Wi-Fi hotspot**, the **LAN server**, and the **local database**. The cloud is only involved in pre-session data provisioning and post-session synchronisation.
+
+> **Proximity model (current):** BLE beacons / RSSI were **removed** (migration 039). Proximity is now proven by the phone **being on the coordinator's hotspot LAN** plus the **live rotating room code**. In the diagram below, read the "beacon" box as the laptop's hotspot — every phone joins it and submits over the LAN.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        PHYSICAL CLASSROOM                           │
 │                                                                     │
-│  ┌──────────────┐    BLE     ┌──────────────┐   LAN (HTTP:8080)   │
-│  │  BLE Beacon  │──────────►│  Coordinator  │◄────────────────────┤
-│  │  (iBeacon /  │   RSSI    │  PWA (Edge    │                     │
-│  │  Eddystone)  │           │   Server)     │   ┌──────────────┐  │
+│  ┌──────────────┐  joins AP  ┌──────────────┐  LAN (HTTPS:8443)   │
+│  │  Phones on   │──────────►│  Coordinator  │◄────────────────────┤
+│  │  the laptop  │  same-LAN │  PWA (Edge    │                     │
+│  │  Wi-Fi AP    │ + rm code │   Server)     │   ┌──────────────┐  │
 │  └──────────────┘           │   IndexedDB   │   │   Students   │  │
 │                             │   AES-256     │   │  (Camera QR) │  │
 │                             └──────┬────────┘   └──────────────┘  │
@@ -93,8 +95,8 @@ The most critical component. Runs entirely in the browser as an installable PWA.
 │  │  │  State      │  │   (RSA-2048 + HMAC)       │  │   │
 │  │  │  Machine    │  └──────────────────────────┘  │   │
 │  │  └─────────────┘  ┌──────────────────────────┐  │   │
-│  │  ┌─────────────┐  │   BLE Proximity Engine   │  │   │
-│  │  │  Sync       │  │   (Web Bluetooth API)    │  │   │
+│  │  ┌─────────────┐  │   LAN Proximity Engine   │  │   │
+│  │  │  Sync       │  │  (same-LAN + room code)  │  │   │
 │  │  │  Queue      │  └──────────────────────────┘  │   │
 │  │  │  Manager    │  ┌──────────────────────────┐  │   │
 │  │  └─────────────┘  │  Hardware Fingerprint    │  │   │
@@ -115,9 +117,9 @@ The most critical component. Runs entirely in the browser as an installable PWA.
 
 **Key responsibilities:**
 - Daily Manifest fetch and encrypted local storage
-- Session initialisation with BLE beacon verification
+- Session initialisation on the coordinator's hotspot (captures the coordinator's LAN IP for the same-network proximity gate)
 - Lecturer gate-open/close QR code generation and verification
-- Student QR scan validation (RSA + roster + BLE + fingerprint + duplicate check)
+- Student check-in validation (signed QR + roster + live room code + same-LAN proximity + one-device-one-person + duplicate check)
 - AES-256 session package sealing and outbox queuing
 - Chunked Resume-Sync upload via Service Worker
 
@@ -204,7 +206,8 @@ students_extended (1) ─────── (N) attendance_logs
 students_extended (1) ─────── (1) hardware_vault
 sessions (0..1) ────────────── (1) lecturer_attendance_logs
 tenants (1) ──────────────── (N) venues
-venues (1) ───────────────── (1) ble_beacons
+sessions (1) ─── stamp ────── coordinator_ip   (same-LAN proximity; ble_beacons dropped — mig 039)
+coordinator_delegations (N) ─ (1) course_offerings   (standby coordinator — mig 042)
 ```
 
 ### 4.3 Data Flow — Session Lifecycle
@@ -252,7 +255,7 @@ Admin ──► GET /api/v1/admin/tenants/{id}/lecturer-attendance
                     │    IDLE     │
                     └──────┬──────┘
                            │ Coordinator selects Course Unit
-                           │ + BLE Beacon detected (RSSI ≥ threshold)
+                           │ + opens session on the hotspot (LAN IP stamped)
                     ┌──────▼──────────────┐
                     │ PENDING_LECTURER    │ ◄── Gate-Open QR displayed (15-min TTL)
                     └──────┬──────────────┘
@@ -299,7 +302,7 @@ Admin ──► GET /api/v1/admin/tenants/{id}/lecturer-attendance
 
 | Threat | Mitigation |
 |---|---|
-| Proxy Attendance | BLE proximity (RSSI) + hardware fingerprint binding + one-device-per-session — both the fingerprint and RSSI are measured **on the student's handset** (the LAN scan page) and submitted with the scan, so they bind the student's device, not the Coordinator's |
+| Proxy Attendance | **Same-LAN proximity** (the phone must be on the coordinator's hotspot — its egress IP must match the coordinator's `sessions.coordinator_ip`) + a **live rotating room code** read off the coordinator's screen + hardware-fingerprint **one-device-one-person** binding per session. All measured on the student's handset and submitted with the check-in, so they bind the student's device, not the coordinator's |
 | QR Code Sharing | QR uniquely bound to student_id + hardware fingerprint on first scan |
 | Ghost Lectures | Mandatory Lecturer Gate-Open scan + GHOST_LECTURE_SUSPECTED flag (<5% attendance) |
 | Session Replay | JWT `jti` claim + Gate-Open QR 15-min TTL |
@@ -333,7 +336,7 @@ Admin ──► GET /api/v1/admin/tenants/{id}/lecturer-attendance
 
 Each tenant has isolated:
 - RSA key pair (stored in HSM per tenant)
-- Policy configuration (threshold, RSSI, session durations, branding)
+- Policy configuration (attendance threshold (≥75% floor), session window/durations, branding)
 - Academic calendar and course hierarchy
 - Student roster and attendance records
 
@@ -420,7 +423,7 @@ PENDING ──► UPLOADING ──► SYNCED
 | PWA Runtime | Browser (Chrome/Safari/Firefox) | Chrome 90+, Safari 14+ | No app store dependency |
 | PWA Storage | IndexedDB | Browser native | Large offline data capacity |
 | PWA Sync | Service Worker + Background Sync | W3C Level 1 | Offline-first sync |
-| PWA BLE | Web Bluetooth API | W3C 2023 | Proximity enforcement |
+| PWA proximity | Same-LAN (egress IP) + rotating room code | — | Hardware-free proximity enforcement (replaced Web Bluetooth) |
 | Backend API | Go (Golang) | 1.21+ | High throughput, low latency |
 | QR Service | Node.js | 20+ | Rich cryptography ecosystem |
 | Database | PostgreSQL | 15+ | RLS support, JSON support, sharding |

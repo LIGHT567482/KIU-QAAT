@@ -34,7 +34,7 @@ export default function QADeviceReset() {
   return (
     <div style={{ maxWidth: 480 }}>
       <h2 style={{ marginBottom: 4 }}>Device Binding Reset</h2>
-      <p style={{ color: '#64748b', marginBottom: 24 }}>
+      <p style={{ color: 'var(--muted)', marginBottom: 24 }}>
         Clears a student's hardware fingerprint so they can re-bind on their next scan.
         This action is logged to the audit trail.
       </p>

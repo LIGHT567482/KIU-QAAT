@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
-const CSV_COLS = ['student_id', 'full_name', 'course_id', 'academic_year', 'current_year', 'semester', 'intake_session', 'level']
+// email is OPTIONAL — supply it only to email a student their QR; identity is the reg-no.
+const CSV_COLS = ['student_id', 'full_name', 'email', 'course_id', 'academic_year', 'current_year', 'semester', 'intake_session', 'level']
 function toCSV(rows: Record<string, unknown>[], cols: string[]): string {
   const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
   return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n')
@@ -75,7 +76,7 @@ export default function AdminStudents() {
   const [creating, setCreating] = useState(false)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState({
-    student_id: '', full_name: '',
+    student_id: '', full_name: '', email: '',
     offering_id: '', level: '', current_year: 0, semester: 0,
     academic_year: '', intake_session: '',
   })
@@ -186,16 +187,17 @@ export default function AdminStudents() {
   async function handleCreate() {
     setSaving(true); setError(null)
     try {
-      // Students are identified by their reg-no only — no email/password entered;
-      // the server auto-handles a hidden identity for the QR / check-in path.
+      // Students are identified by their reg-no only — the server auto-handles a
+      // hidden identity for the check-in path. Email is OPTIONAL and used solely to
+      // email the student their QR; reg-no-only students need none.
       await api.post(`/api/v1/admin/tenants/${tenantId}/students`, {
-        student_id: form.student_id, full_name: form.full_name,
+        student_id: form.student_id, full_name: form.full_name, email: form.email,
         offering_id: form.offering_id, level: form.level,
         current_year: form.current_year, semester: form.semester,
         academic_year: form.academic_year, intake_session: form.intake_session,
       })
       setCreating(false)
-      setForm({ student_id: '', full_name: '', offering_id: '', level: '', current_year: 0, semester: 0, academic_year: '', intake_session: '' })
+      setForm({ student_id: '', full_name: '', email: '', offering_id: '', level: '', current_year: 0, semester: 0, academic_year: '', intake_session: '' })
       setPick({ course: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
@@ -221,9 +223,9 @@ export default function AdminStudents() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: '#64748b', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
+          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
           <h2 style={{ margin: '4px 0 0' }}>Students</h2>
-          <p style={{ color: '#64748b', margin: '4px 0 0', fontSize: 13 }}>Tenant: {tenantId}</p>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Tenant: {tenantId}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <button onClick={() => download('students_template.csv', CSV_COLS.join(',') + '\n')} style={btnGhost} title="Download a blank CSV with the required columns">Template</button>
@@ -244,7 +246,7 @@ export default function AdminStudents() {
           <span style={{ fontSize: 13, color: '#1e40af', fontWeight: 600 }}>📱 Student progress portal (share with your students):</span>
           <code style={{ flex: '1 1 240px', minWidth: 0, fontSize: 12, color: '#1e3a8a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{portalLink}</code>
           <button onClick={() => { navigator.clipboard?.writeText(portalLink); }} style={{ ...btnGhost, padding: '6px 12px' }}>Copy link</button>
-          <span style={{ flexBasis: '100%', fontSize: 11, color: '#64748b' }}>Students open this link and enter only their registration number. The link is scoped to this institution, so it can only show your students.</span>
+          <span style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted)' }}>Students open this link and enter only their registration number. The link is scoped to this institution, so it can only show your students.</span>
         </div>
       )}
 
@@ -260,7 +262,7 @@ export default function AdminStudents() {
             <h3 style={{ margin: 0 }}>Intakes</h3>
             <button onClick={() => setIntakeEdit(false)} style={{ ...btnGhost, padding: '4px 10px' }}>Close</button>
           </div>
-          <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 14px' }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 14px' }}>
             These are the intakes (e.g. January, May, August) offered when registering a student.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
@@ -270,7 +272,7 @@ export default function AdminStudents() {
                 <button onClick={() => setIntakeDraft(d => d.filter((_, j) => j !== i))} style={{ border: 'none', background: 'transparent', color: '#6366f1', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
               </span>
             ))}
-            {intakeDraft.length === 0 && <span style={{ color: '#94a3b8', fontSize: 13 }}>No intakes yet — add at least one.</span>}
+            {intakeDraft.length === 0 && <span style={{ color: 'var(--muted)', fontSize: 13 }}>No intakes yet — add at least one.</span>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={newIntake} onChange={e => setNewIntake(e.target.value)} placeholder="e.g. January Intake"
@@ -288,14 +290,14 @@ export default function AdminStudents() {
             <h3 style={{ margin: 0 }}>Levels of study</h3>
             <button onClick={() => setLevelEdit(false)} style={{ ...btnGhost, padding: '4px 10px' }}>Close</button>
           </div>
-          <p style={{ color: '#64748b', fontSize: 13, margin: '0 0 14px' }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 14px' }}>
             The levels of education (e.g. Certificate, Diploma, Degree) offered at registration, and how many <strong>years</strong> each one is studied — a Degree may be 3 years while a Masters is 2.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
             {levelDraft.map((it, i) => (
               <div key={`${it}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ flex: 1, background: '#ecfeff', color: '#155e75', padding: '6px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600 }}>{it}</span>
-                <label style={{ fontSize: 12, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   Years:
                   <input type="number" min={1} max={10} value={yearsDraft[it] ?? 3}
                     onChange={e => setYearsDraft(y => ({ ...y, [it]: Number(e.target.value) }))}
@@ -305,7 +307,7 @@ export default function AdminStudents() {
                   style={{ border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>Remove</button>
               </div>
             ))}
-            {levelDraft.length === 0 && <span style={{ color: '#94a3b8', fontSize: 13 }}>No levels yet — add at least one.</span>}
+            {levelDraft.length === 0 && <span style={{ color: 'var(--muted)', fontSize: 13 }}>No levels yet — add at least one.</span>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={newLevel} onChange={e => setNewLevel(e.target.value)} placeholder="e.g. Masters"
@@ -320,16 +322,17 @@ export default function AdminStudents() {
       {creating && (
         <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 24 }}>
           <h3 style={{ margin: '0 0 16px' }}>Register Student</h3>
-          <p style={{ color: '#64748b', fontSize: 13, marginTop: -8, marginBottom: 16 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>
             Only the registration number and name are needed — the student is identified by their reg-no.
           </p>
           {error && <div style={errorBox}>{error}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Input label="Registration Number" value={form.student_id} onChange={v => setForm(f => ({ ...f, student_id: v }))} placeholder="e.g. NUT/CS/2024/001" />
             <Input label="Full Name" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} placeholder="e.g. Jane Doe" />
+            <Input label="Email (optional — emails them their QR)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="leave blank to skip" />
 
-            {/* Course → Session resolves the offering; Level + Course group are the
-                student's own attributes. */}
+            {/* Course → Session resolves the offering; Level is the student's own
+                attribute. */}
             <label style={{ display: 'block' }}>
               <div style={labelStyle}>Course</div>
               <select value={pick.course} onChange={e => { setPick({ course: e.target.value }); setForm(f => ({ ...f, offering_id: '' })) }} style={selectStyle}>
@@ -361,7 +364,7 @@ export default function AdminStudents() {
 
             <label style={{ display: 'block' }}>
               <div style={labelStyle}>Intake</div>
-              <select value={form.intake_session} onChange={e => setForm(f => ({ ...f, intake_session: e.target.value }))} style={{ ...selectStyle, color: form.intake_session ? '#1e293b' : '#94a3b8' }}>
+              <select value={form.intake_session} onChange={e => setForm(f => ({ ...f, intake_session: e.target.value }))} style={{ ...selectStyle, color: form.intake_session ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 {intakeOptions.map(s => <option key={s} value={s} style={{ color: '#1e293b' }}>{s}</option>)}
               </select>
@@ -369,7 +372,7 @@ export default function AdminStudents() {
 
             <label style={{ display: 'block' }}>
               <div style={labelStyle}>Year of Study</div>
-              <select value={form.current_year || ''} onChange={e => setForm(f => ({ ...f, current_year: Number(e.target.value) }))} style={{ ...selectStyle, color: form.current_year ? '#1e293b' : '#94a3b8' }}>
+              <select value={form.current_year || ''} onChange={e => setForm(f => ({ ...f, current_year: Number(e.target.value) }))} style={{ ...selectStyle, color: form.current_year ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 {[1, 2, 3, 4].map(y => <option key={y} value={y} style={{ color: '#1e293b' }}>Year {y}</option>)}
               </select>
@@ -377,7 +380,7 @@ export default function AdminStudents() {
 
             <label style={{ display: 'block' }}>
               <div style={labelStyle}>Semester</div>
-              <select value={form.semester || ''} onChange={e => setForm(f => ({ ...f, semester: Number(e.target.value) }))} style={{ ...selectStyle, color: form.semester ? '#1e293b' : '#94a3b8' }}>
+              <select value={form.semester || ''} onChange={e => setForm(f => ({ ...f, semester: Number(e.target.value) }))} style={{ ...selectStyle, color: form.semester ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 <option value={1} style={{ color: '#1e293b' }}>Semester 1</option>
                 <option value={2} style={{ color: '#1e293b' }}>Semester 2</option>
@@ -386,7 +389,7 @@ export default function AdminStudents() {
 
             <Input label="Academic Year" value={form.academic_year} onChange={v => setForm(f => ({ ...f, academic_year: v }))} placeholder="e.g. 2024/2025" />
           </div>
-          <p style={{ fontSize: 12, color: '#64748b', margin: '12px 0 0' }}>
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
             The student is identified by their registration number. Their attendance QR is available from the “Show QR” button after registration.
           </p>
           <button
@@ -426,7 +429,7 @@ export default function AdminStudents() {
         )}
       </div>
 
-      {status === 'loading' && <p style={{ color: '#94a3b8' }}>Loading…</p>}
+      {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
@@ -441,9 +444,9 @@ export default function AdminStudents() {
             <tr key={s.student_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{s.student_id}</td>
               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{s.full_name}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b' }}>{s.course_name}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{s.course_name}</td>
               <td style={{ padding: '10px 12px', textAlign: 'center' }}>Y{s.current_year}/S{s.semester}</td>
-              <td style={{ padding: '10px 12px', color: '#64748b', fontSize: 12 }}>{s.intake_session}</td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 12 }}>{s.intake_session}</td>
               <td style={{ padding: '10px 12px' }}>
                 <span style={{
                   background: s.enrollment_status === 'ACTIVE' ? '#f0fdf4' : '#fef2f2',
@@ -473,7 +476,7 @@ export default function AdminStudents() {
           ))}
           {status === 'ok' && list.length === 0 && (
             <tr>
-              <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+              <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
                 {(students ?? []).length === 0
                   ? 'No students registered yet. Click "+ Register Student" to add one.'
                   : 'No students match the search.'}
@@ -484,7 +487,7 @@ export default function AdminStudents() {
       </table>
 
       {status === 'ok' && (students ?? []).length > 0 && (
-        <p style={{ color: '#94a3b8', fontSize: 12, marginTop: 12 }}>
+        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 12 }}>
           Showing {list.length} of {(students ?? []).length} students
         </p>
       )}
@@ -537,7 +540,7 @@ function EditStudentModal({ tenantId, student, offerings, intakeOptions, onClose
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 460, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ margin: '0 0 2px' }}>Edit student</h3>
-        <div style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace', marginBottom: 16 }}>{student.student_id}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 16 }}>{student.student_id}</div>
         {err && <div style={errorBox}>{err}</div>}
         <Input label="Full Name" value={f.full_name} onChange={v => setF(s => ({ ...s, full_name: v }))} />
         <div style={{ display: 'flex', gap: 10 }}>
@@ -594,9 +597,9 @@ function QrModal({ tenantId, student, onClose }: { tenantId: string; student: { 
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, textAlign: 'center', maxWidth: 380, width: '100%' }}>
         <h3 style={{ margin: '0 0 4px' }}>{student.name}</h3>
-        <div style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace', marginBottom: 16 }}>{student.id}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 16 }}>{student.id}</div>
         {err && <div style={errorBox}>{err}</div>}
-        {!data && !err && <p style={{ color: '#94a3b8' }}>Generating QR…</p>}
+        {!data && !err && <p style={{ color: 'var(--muted)' }}>Generating QR…</p>}
         {data && (
           <>
             <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -605,7 +608,7 @@ function QrModal({ tenantId, student, onClose }: { tenantId: string; student: { 
                 <img src={data.logo_url} alt="" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 56, height: 56, objectFit: 'contain', background: '#fff', borderRadius: 8, padding: 4, boxShadow: '0 0 0 3px #fff' }} />
               )}
             </div>
-            <p style={{ fontSize: 12, color: '#64748b', margin: '12px 0 16px' }}>Scan with a phone camera to open the attendance portal.</p>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 16px' }}>Scan with a phone camera to open the attendance portal.</p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
               <a href={data.image} download={`qr-${student.id}.png`} style={{ ...btnPrimary, textDecoration: 'none' }}>Download</a>
               <button onClick={onClose} style={btnGhost}>Close</button>

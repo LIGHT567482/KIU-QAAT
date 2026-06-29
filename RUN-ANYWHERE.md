@@ -40,6 +40,18 @@ with no internet and QR codes never break. Stop: `sudo nmcli connection down Hot
 (macOS/Windows have no `nmcli` — use the OS "share Wi‑Fi" or a small travel router;
 the app is identical, only this step differs.)
 
+## Coordinator hub: laptop vs phone, and capacity
+- **Fully-offline hub today = this Linux laptop** (it runs the server + DB + hotspot). A phone can
+  run the coordinator *PWA* (open/close, show the code) but **cannot** run this stack — for a
+  phone-as-hub see the native Android app plan in
+  [apps/coordinator-pwa/ANDROID.md](apps/coordinator-pwa/ANDROID.md).
+- **One access point ≈ one classroom.** A hotspot holds ~**10** phones on a stock Android, ~**20–40**
+  on this laptop. Students **rotate**: the check-in screen tells each student to turn Wi-Fi **off**
+  the moment they see ✓, freeing a slot for the next. Big groups take several rotation cycles
+  (minutes). For more capacity: add an external Wi-Fi router/AP in the room, run several
+  coordinators/APs in parallel, or put this laptop's server on campus Wi-Fi. See
+  [docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md) to find your hardware's real ceiling.
+
 ## Notes
 - Self-signed cert → on each device **Advanced ▸ Proceed** once per port (or trust
   `infra/certs/qaat.crt`).
