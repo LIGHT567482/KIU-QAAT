@@ -40,6 +40,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <CoordinatorQRBoot />
         <LecturerQRBoot />
         <Routes>
           <Route path="/login"        element={<Login />} />
@@ -113,6 +114,34 @@ export default function App() {
 // token for a LECTURER session (passwordless) and drop them on their dashboard.
 const API = (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL
   ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
+
+// When a coordinator scans their QR it opens this app at /?cqr=<token>. We exchange the
+// token for a COORDINATOR session (passwordless) and drop them on their dashboard.
+function CoordinatorQRBoot() {
+  const { login } = useAuth()
+  const navigate = useNavigate()
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    const cqr = new URLSearchParams(location.search).get('cqr')
+    if (!cqr) return
+    ;(async () => {
+      try {
+        const res = await fetch(`${API}/api/v1/coordinator/qr-login`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ qr: cqr }),
+        })
+        const d = await res.json()
+        if (!res.ok || !d.access_token) throw new Error(d.message || 'QR sign-in failed')
+        const p = JSON.parse(atob(d.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+        login(d.access_token, { userId: p.sub, tenantId: p.tenant_id, role: p.role, expiresAt: p.exp })
+        window.history.replaceState({}, '', location.pathname)
+        navigate('/coordinator', { replace: true })
+      } catch (e) { setErr(e instanceof Error ? e.message : 'QR sign-in failed') }
+    })()
+  }, [login, navigate])
+  if (err) return <div style={{ padding: 16, background: '#fef2f2', color: '#b91c1c', fontSize: 14 }}>Coordinator QR sign-in: {err}</div>
+  return null
+}
 
 function LecturerQRBoot() {
   const { login } = useAuth()

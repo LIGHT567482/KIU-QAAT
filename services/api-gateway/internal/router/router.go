@@ -97,6 +97,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(30, 60)).
 		Get("/api/v1/lecturer-portal/attendance", handlers.LecturerPortalAttendance(adminPool))
 
+	// Coordinator passwordless dashboard login by scanning their personal QR (public:
+	// the HMAC-signed QR encodes coordinator_id|offering_id|tenant_id).
+	r.With(middleware.PublicIPRateLimit(10, 60)).
+		Post("/api/v1/coordinator/qr-login", handlers.CoordinatorQRLogin(adminPool))
+
 	// Emergency standby coordinator login: a student exchanges code + reg-no for a
 	// COORDINATOR token (issued for the absent coordinator) to run that day's session.
 	r.With(middleware.PublicIPRateLimit(5, 20)).
@@ -308,6 +313,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/admin/tenants/{tenant_id}/coordinators/export.xlsx", handlers.ExportCoordinatorsXLSX(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/coordinators/import", handlers.ImportCoordinators(adminPool))
+		// The coordinator's personal QR (scan → passwordless dashboard login scoped to their cohort).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/coordinators/{user_id}/qr", handlers.AdminCoordinatorQR(adminPool))
 
 		// Offerings = (program + study session), each with its own coordinator (own tenant).
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
