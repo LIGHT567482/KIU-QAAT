@@ -1,17 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, useRef, type FormEvent } from 'react'
 import { useTheme, ThemeToggle, applyPalette } from './theme'
-
-// One passwordless portal: a student types their registration number and sees
-// their own attendance / exam eligibility. No accounts, no login — the reg-no is
-// the only thing asked for. The portal link carries the institution (its domain)
-// as ?org=, so a reg-no only ever resolves within that tenant — a student of one
-// institution can never see another institution's students.
 
 const API = (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
-// The institution this portal is scoped to (its domain or institution id), from
-// the link the student opened, e.g. https://…:3003/?org=kiu.ac.ug
 const URL_ORG = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('org') ?? '').trim() : ''
+const URL_QR  = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('qr') ?? '').trim() : ''
 
 interface Brand { name: string; logo_url: string; motto: string; brand_color: string; sidebar_color: string; background_color: string; footer_color: string }
 
@@ -35,17 +28,31 @@ interface Progress {
   units:         Unit[]
 }
 
+interface QRData {
+  student_id:    string
+  serial_number: string
+  token:         string
+  url:           string
+  image:         string
+}
+
+type View = 'login' | 'progress' | 'qr' | 'scan'
+
 export default function App() {
   const { theme, toggle } = useTheme()
   const [reg, setReg]         = useState('')
-  const [org, setOrg]         = useState(URL_ORG)            // institution domain — fixed if it came in the link
+  const [org, setOrg]         = useState(URL_ORG)
   const [brand, setBrand]     = useState<Brand | null>(null)
   const [data, setData]       = useState<Progress | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
-  // Resolve the institution from the link so we can show its logo + name (and tint
-  // the page) before any reg-no is entered.
+  // QR-login state
+  const [jwt, setJwt]         = useState<string | null>(null)
+  const [qrData, setQrData]   = useState<QRData | null>(null)
+  const [qrLoading, setQrLoading] = useState(false)
+  const [view, setView]       = useState<View>(URL_QR ? 'scan' : 'login')
+
   useEffect(() => {
     if (!URL_ORG) return
     fetch(`${API}/api/v1/branding/public?org=${encodeURIComponent(URL_ORG)}`)
@@ -53,6 +60,75 @@ export default function App() {
       .then((b: Brand | null) => { if (b) { setBrand(b); applyPalette(b) } })
       .catch(() => {})
   }, [])
+
+  // Auto QR login: when the portal is opened via ?qr=TOKEN, exchange it for a JWT.
+  useEffect(() => {
+    if (!URL_QR) return
+    ;(async () => {
+      setLoading(true); setError(null)
+      try {
+        const res = await fetch(`${API}/api/v1/student/qr-login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ qr: URL_QR }),
+        })
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}))
+          throw new Error(d.message || 'QR login failed')
+        }
+        const authData = await res.json()
+        const token = authData.access_token
+        if (!token) throw new Error('No access token returned')
+        setJwt(token)
+        setView('progress')
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not log in with QR code.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
+
+  async function fetchProgress(token: string) {
+    setLoading(true); setError(null)
+    try {
+      // Resolve student info from the JWT.
+      const meRes = await fetch(`${API}/api/v1/student/my-qr`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!meRes.ok) throw new Error('Could not load student profile')
+      const me = await meRes.json()
+      const pRes = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(me.student_id)}&org=${encodeURIComponent(org || URL_ORG)}`)
+      if (!pRes.ok) {
+        const d = await pRes.json().catch(() => ({}))
+        throw new Error(d.message || 'No attendance records found.')
+      }
+      setData(await pRes.json())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load data.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadMyQR(token: string) {
+    setQrLoading(true)
+    try {
+      const res = await fetch(`${API}/api/v1/student/my-qr`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('Could not load QR code')
+      setQrData(await res.json())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load QR code.')
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (jwt && view === 'progress' && !data) fetchProgress(jwt)
+  }, [jwt, view])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -66,6 +142,7 @@ export default function App() {
         throw new Error(d.message || 'No record found for that registration number.')
       }
       setData(await res.json())
+      setView('progress')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your attendance.')
     } finally {
@@ -73,11 +150,16 @@ export default function App() {
     }
   }
 
-  const title = brand?.name || data?.institution || 'Student Attendance Portal'
+  async function handleQRLogin(jwtToken: string) {
+    setJwt(jwtToken)
+    setView('progress')
+    fetchProgress(jwtToken)
+  }
+
+  const title = brand?.name || data?.institution || 'QAAT Student Portal'
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--app-bg)' }}>
-      {/* Institution header — logo + name on top of every view. */}
       <header style={{ background: 'var(--sidebar, var(--brand))', color: '#fff', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           {brand?.logo_url
@@ -88,33 +170,98 @@ export default function App() {
             {brand?.motto && <div style={{ fontSize: 11, opacity: .85 }}>{brand.motto}</div>}
           </div>
         </div>
-        <ThemeToggle theme={theme} toggle={toggle} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {jwt && view !== 'qr' && (
+            <button onClick={() => { loadMyQR(jwt); setView('qr') }}
+              style={navBtn}>My QR</button>
+          )}
+          {jwt && view === 'progress' && (
+            <button onClick={() => { setView('qr'); loadMyQR(jwt) }}
+              style={navBtn}>My QR</button>
+          )}
+          {view !== 'login' && !jwt && (
+            <button onClick={() => { setView('login'); setError(null) }}
+              style={navBtn}>Back</button>
+          )}
+          <ThemeToggle theme={theme} toggle={toggle} />
+        </div>
       </header>
 
       <div style={{ flex: 1, maxWidth: 600, margin: '0 auto', width: '100%', padding: '24px 16px', boxSizing: 'border-box', fontFamily: 'system-ui', color: 'var(--text)' }}>
-        <form onSubmit={submit} style={{ marginBottom: 20 }}>
-          {!URL_ORG && (
-            <input value={org} onChange={e => setOrg(e.target.value)}
-              placeholder="Institution (e.g. kiu.ac.ug)" style={{ ...inp, width: '100%', marginBottom: 8 }} />
-          )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={reg} onChange={e => setReg(e.target.value)} autoFocus
-              placeholder="Enter your registration number" style={{ ...inp, flex: 1 }} />
-            <button type="submit" disabled={loading || !reg.trim() || !org.trim()} style={{ ...btn, marginTop: 0, whiteSpace: 'nowrap' }}>
-              {loading ? 'Checking…' : 'View progress'}
-            </button>
-          </div>
-        </form>
+        {view === 'login' && !jwt && (
+          <form onSubmit={submit} style={{ marginBottom: 20 }}>
+            {!URL_ORG && (
+              <input value={org} onChange={e => setOrg(e.target.value)}
+                placeholder="Institution (e.g. kiu.ac.ug)" style={{ ...inp, width: '100%', marginBottom: 8 }} />
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input value={reg} onChange={e => setReg(e.target.value)} autoFocus
+                placeholder="Enter your registration number" style={{ ...inp, flex: 1 }} />
+              <button type="submit" disabled={loading || !reg.trim() || !org.trim()} style={{ ...btn, marginTop: 0, whiteSpace: 'nowrap' }}>
+                {loading ? 'Checking\u2026' : 'View progress'}
+              </button>
+            </div>
+          </form>
+        )}
 
-        {error && <div style={errorBox}>{error}</div>}
-        {!data && !error && !loading && (
+        {view === 'scan' && URL_QR && (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>{loading ? '\u231B' : '\u2705'}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>
+              {loading ? 'Signing in with your QR code\u2026' : 'QR login successful'}
+            </div>
+            {error && <div style={errorBox}>{error}</div>}
+          </div>
+        )}
+
+        {error && view !== 'scan' && <div style={errorBox}>{error}</div>}
+
+        {view === 'qr' && qrData && (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Your QR Code</h2>
+            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
+              Scan this QR to sign in to attendance sessions. You can download or screenshot it.
+            </p>
+            <div style={{
+              display: 'inline-block', padding: 16, borderRadius: 12,
+              background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,.1)', marginBottom: 16,
+            }}>
+              <img src={qrData.image} alt="Your QR code"
+                style={{ width: 260, height: 260, display: 'block' }} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+              Serial: {qrData.serial_number}
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <a href={qrData.image} download={`qr-${qrData.serial_number}.png`}
+                style={{ ...btn, textDecoration: 'none', display: 'inline-block' }}>
+                Download QR
+              </a>
+              <button onClick={() => { setQrData(null); setView('progress') }}
+                style={{ ...btn, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}>
+                Back to progress
+              </button>
+            </div>
+          </div>
+        )}
+
+        {view === 'qr' && qrLoading && !qrData && (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)' }}>
+            Loading your QR code\u2026
+          </div>
+        )}
+
+        {view === 'login' && !jwt && !data && !error && !loading && (
           <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>
             {org ? 'Type your registration number above and submit to see your attendance and exam eligibility.'
-                 : 'Open your institution’s portal link, then enter your registration number to see your attendance.'}
+                 : 'Open your institution\u2019s portal link, then enter your registration number to see your attendance.'}
           </p>
         )}
-        {data && <Results data={data} onBack={() => { setData(null); setError(null); setReg('') }} />}
+
+        {data && view !== 'qr' && <Results data={data} onBack={() => { setData(null); setError(null); setReg('') }}
+          onShowQR={jwt ? () => { loadMyQR(jwt); setView('qr') } : undefined} />}
       </div>
+
       <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '10px 16px', fontSize: 11, textAlign: 'center' }}>
         Powered by LIGHT TECHNOLOGIES
       </footer>
@@ -122,23 +269,30 @@ export default function App() {
   )
 }
 
-function Results({ data, onBack }: { data: Progress; onBack?: () => void }) {
+function Results({ data, onBack, onShowQR }: { data: Progress; onBack?: () => void; onShowQR?: () => void }) {
   const allEligible = data.units.length > 0 && data.units.every(u => u.status === 'ELIGIBLE')
   return (
     <div>
-      {onBack && (
-        <button onClick={onBack} style={{
-          background: 'none', border: 'none', color: 'var(--brand, #2563eb)', cursor: 'pointer',
-          fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4,
-        }}>
-          ← Check another registration number
-        </button>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            background: 'none', border: 'none', color: 'var(--brand, #2563eb)', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4,
+          }}>
+            \u2190 Check another number
+          </button>
+        )}
+        {onShowQR && (
+          <button onClick={onShowQR} style={navBtn}>
+            My QR Code
+          </button>
+        )}
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: 18 }}>{data.full_name || data.student_id}</div>
           <div style={{ color: 'var(--muted)', fontSize: 13 }}>
-            {data.student_id}{data.academic_year ? ` · ${data.academic_year}` : ''} · Semester {data.semester}
+            {data.student_id}{data.academic_year ? ` \u00b7 ${data.academic_year}` : ''} \u00b7 Semester {data.semester}
           </div>
         </div>
         {data.units.length > 0 && (
@@ -203,7 +357,7 @@ function UnitCard({ unit: u }: { unit: Unit }) {
         {u.sessions_attended} of {u.sessions_held} sessions attended
         {!eligible && u.deficit_sessions !== undefined && (
           <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: 8 }}>
-            · Need {u.deficit_sessions} more to reach {u.threshold}%
+            \u00b7 Need {u.deficit_sessions} more to reach {u.threshold}%
           </span>
         )}
       </div>
@@ -212,5 +366,6 @@ function UnitCard({ unit: u }: { unit: Unit }) {
 }
 
 const inp:      React.CSSProperties = { padding: '10px 12px', fontSize: 15, borderRadius: 6, border: '1px solid var(--border)', boxSizing: 'border-box', background: 'var(--surface)', color: 'var(--text)' }
-const btn:      React.CSSProperties = { padding: 12, fontSize: 15, fontWeight: 600, borderRadius: 6, background: 'var(--brand)', color: 'var(--brand-contrast)', border: 'none', cursor: 'pointer' }
+const btn:      React.CSSProperties = { padding: '12px 20px', fontSize: 15, fontWeight: 600, borderRadius: 6, background: 'var(--brand)', color: 'var(--brand-contrast)', border: 'none', cursor: 'pointer' }
+const navBtn:   React.CSSProperties = { padding: '6px 14px', fontSize: 13, fontWeight: 600, borderRadius: 6, background: 'rgba(255,255,255,.15)', color: '#fff', border: 'none', cursor: 'pointer' }
 const errorBox: React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '10px 14px', borderRadius: 6, marginBottom: 16 }

@@ -160,6 +160,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Live/active sessions the student may attend right now (#4a).
 		r.With(middleware.RequireRole(middleware.RoleStudent)).
 			Get("/api/v1/student/live-sessions", handlers.StudentLiveSessions(pool))
+		// Student's own QR code (signed token + image) for download from the portal.
+		r.With(middleware.RequireRole(middleware.RoleStudent)).
+			Get("/api/v1/student/my-qr", handlers.StudentMyQR(adminPool))
 
 		// ── Synchronisation (→ sync-receiver) ─────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
