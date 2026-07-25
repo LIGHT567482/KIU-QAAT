@@ -28,6 +28,8 @@ type User struct {
 	PasswordHash        string     `db:"password_hash"`
 	Role                Role       `db:"role"`
 	FullName            string     `db:"full_name"`
+	Title               string     `db:"title"`
+	RegistrationNumber  string     `db:"registration_number"`
 	IsActive            bool       `db:"is_active"`
 	TOTPSecretEnc       *string    `db:"totp_secret_enc"`
 	TOTPEnabled         bool       `db:"totp_enabled"`

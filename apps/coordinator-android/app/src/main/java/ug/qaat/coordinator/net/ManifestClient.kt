@@ -17,7 +17,10 @@ class ManifestClient(private val dao: AppDao) {
     private val http = Net.client()
     private val base = Net.baseUrl
 
-    data class UnitInfo(val unitId: String, val unitName: String)
+    data class UnitInfo(
+        val unitId: String, val unitName: String,
+        val lecturerStaffId: String = "", val lecturerName: String = "", val lecturerPhone: String = "",
+    )
     data class Parsed(
         val academicYear: String,
         val institutionPublicKeyPem: String,
@@ -39,7 +42,10 @@ class ManifestClient(private val dao: AppDao) {
         val sessions = j.optJSONArray("sessions")
         if (sessions != null) for (i in 0 until sessions.length()) {
             val s = sessions.getJSONObject(i)
-            units.add(UnitInfo(s.getString("unit_id"), s.optString("unit_name", s.getString("unit_id"))))
+            units.add(UnitInfo(
+                s.getString("unit_id"), s.optString("unit_name", s.getString("unit_id")),
+                s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
+            ))
         }
 
         val rosterByUnit = LinkedHashMap<String, List<RosterEntity>>()

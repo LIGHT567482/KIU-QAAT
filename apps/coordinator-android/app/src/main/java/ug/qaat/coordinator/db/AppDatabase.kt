@@ -101,6 +101,14 @@ interface AppDao {
     @Query("SELECT * FROM sessions WHERE unitId = :u ORDER BY sessionDate")
     fun sessionsForUnit(u: String): List<SessionEntity>
 
+    // Closed sessions whose sealed package hasn't reached the backend yet (offline close
+    // or a failed upload) — the retry/sync-now path re-seals and uploads these.
+    @Query("SELECT * FROM sessions WHERE status IN ('PENDING_SYNC','CLOSED') ORDER BY sessionDate")
+    fun pendingSyncSessions(): List<SessionEntity>
+
+    @Query("SELECT COUNT(*) FROM sessions WHERE status IN ('PENDING_SYNC','CLOSED')")
+    fun pendingSyncCount(): Int
+
     @Query("SELECT * FROM sessions ORDER BY sessionDate DESC LIMIT 50")
     fun recentSessions(): kotlinx.coroutines.flow.Flow<List<SessionEntity>>
 

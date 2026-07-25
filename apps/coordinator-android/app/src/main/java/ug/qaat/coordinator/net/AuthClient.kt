@@ -21,7 +21,19 @@ class AuthClient {
     data class Result(
         val token: String, val jti: String?, val role: String,
         val userId: String, val tenantId: String, val deviceBindingKey: String?,
+        val fullName: String, val title: String, val registrationNo: String,
     )
+
+    /** Change the signed-in coordinator's password. @return error message, or null on success. */
+    suspend fun changePassword(token: String, current: String, newPassword: String): String? {
+        val r = http.post("$base/api/v1/auth/change-password") {
+            header("Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
+            setBody(JSONObject().put("current_password", current).put("new_password", newPassword).toString())
+        }
+        if (r.status.value in 200..299) return null
+        return runCatching { JSONObject(r.bodyAsText()).optString("message", "Could not change password") }
+            .getOrDefault("Could not change password")
+    }
 
     suspend fun tenantLookup(email: String): String {
         val r = http.get("$base/api/v1/auth/tenant-lookup") { url { parameters.append("email", email) } }
@@ -43,11 +55,14 @@ class AuthClient {
         require(r.status.isSuccess()) { j.optString("message", "Login failed") }
         return Result(
             token = j.getString("access_token"),
-            jti = j.optString("jti", null),
+            jti = j.optString("jti").takeIf { it.isNotEmpty() },
             role = j.optString("role", "COORDINATOR"),
             userId = j.getString("user_id"),
             tenantId = tenantId,
-            deviceBindingKey = j.optString("device_binding_key", null),
+            deviceBindingKey = j.optString("device_binding_key").takeIf { it.isNotEmpty() },
+            fullName = j.optString("full_name", ""),
+            title = j.optString("title", ""),
+            registrationNo = j.optString("registration_number", ""),
         )
     }
 }

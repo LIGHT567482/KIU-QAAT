@@ -28,13 +28,19 @@ if [ ! -f keys/auth_private.pem ]; then
   openssl rsa -in keys/auth_private.pem -pubout -out keys/auth_public.pem
 fi
 
-# 3) Ensure a TLS cert exists (self-signed, covers the hotspot IP + localhost + qaat.local).
-if [ ! -f infra/certs/qaat.crt ]; then
-  say "Generating self-signed TLS cert…"
+# 3) Ensure a TLS cert exists (self-signed, covers the current LAN IP + hotspot IP +
+#    localhost + qaat.local). The LAN IP is detected so phones on the home Wi-Fi don't
+#    hit a hostname mismatch when DHCP changes it. Re-generate anytime with:
+#      QAAT_REGEN_CERT=1 ./setup.sh   (or delete infra/certs/qaat.crt first)
+LAN_IP=$(ip -4 addr show 2>/dev/null | grep -oE 'inet (192\.168|10|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9.]+' | awk '{print $2}' | grep -v '^127\.' | grep -v '^10\.42\.0\.1$' | head -1)
+if [ ! -f infra/certs/qaat.crt ] || [ -n "$QAAT_REGEN_CERT" ]; then
+  say "Generating self-signed TLS cert (LAN IP: ${LAN_IP:-none detected})…"
   mkdir -p infra/certs
+  SAN="IP:10.42.0.1,IP:127.0.0.1,DNS:localhost,DNS:qaat.local"
+  [ -n "$LAN_IP" ] && SAN="IP:${LAN_IP},${SAN}"
   openssl req -x509 -newkey rsa:2048 -nodes -keyout infra/certs/qaat.key -out infra/certs/qaat.crt -days 825 \
     -subj "/CN=qaat-local" \
-    -addext "subjectAltName=IP:10.42.0.1,IP:127.0.0.1,DNS:localhost,DNS:qaat.local"
+    -addext "subjectAltName=${SAN}"
 fi
 
 # 4) Build images + start. The DB auto-runs all migrations + the platform seed on

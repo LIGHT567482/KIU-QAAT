@@ -57,7 +57,7 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(ous.day_of_week, 0),
 			       COALESCE(to_char(ous.session_start, 'HH24:MI'), ''),
 			       COALESCE(ous.session_duration_minutes, 0),
-			       COALESCE(string_agg(DISTINCT l.full_name, ', '), '')
+			       COALESCE(string_agg(DISTINCT l.full_name || CASE WHEN COALESCE(l.phone,'')<>'' THEN ' ('||l.phone||')' ELSE '' END, ', '), '')
 			FROM course_offerings o
 			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
 			       AND cu.year = o.study_year AND cu.semester = o.semester AND cu.level = o.level
@@ -101,21 +101,30 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			Duration  int    `json:"duration_minutes"`
 			Room      string `json:"room"`
 			Lecturer  string `json:"lecturer_name"`
+			Phone     string `json:"lecturer_phone"`
 		}
 		slots := []slot{}
 		srows, serr := conn.Query(r.Context(), `
 			SELECT s.unit_id, COALESCE(cu.name, s.unit_id), s.day_of_week,
 			       to_char(s.start_time,'HH24:MI'), s.duration_minutes,
-			       COALESCE(s.room,''), COALESCE(l.full_name,'')
+			       COALESCE(s.room,''),
+			       COALESCE(NULLIF(l.full_name,''), la_l.full_name, ''),
+			       COALESCE(NULLIF(l.phone,''),     la_l.phone,     '')
 			FROM timetable_slots s
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
 			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
+			-- fall back to the unit's assignment when the slot has no lecturer set
+			LEFT JOIN LATERAL (
+			    SELECT l2.full_name, l2.phone FROM lecturer_assignments la
+			    JOIN lecturers l2 ON l2.lecturer_id = la.lecturer_id AND l2.tenant_id = la.tenant_id
+			    WHERE la.unit_id = s.unit_id AND la.tenant_id = s.tenant_id ORDER BY la.academic_year DESC LIMIT 1
+			) la_l ON true
 			WHERE s.offering_id = $1::uuid
 			ORDER BY s.day_of_week, s.start_time`, offeringID)
 		if serr == nil {
 			for srows.Next() {
 				var s slot
-				srows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.Lecturer) //nolint:errcheck
+				srows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.Lecturer, &s.Phone) //nolint:errcheck
 				slots = append(slots, s)
 			}
 			srows.Close()
@@ -181,6 +190,62 @@ func CoordinatorStudents(pool *pgxpool.Pool) http.HandlerFunc {
 			rows.Scan(&s.StudentID, &s.FullName, &s.Email, &s.CurrentYear, &s.Semester, //nolint:errcheck
 				&s.AcademicYear, &s.IntakeSession, &s.Status)
 			out = append(out, s)
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// GET /api/v1/coordinator/attendance — per-student, per-unit attendance summary for
+// the coordinator's cohort (drives the chronic-absentee + trend views). Sorted by the
+// lowest attendance first so at-risk students surface immediately.
+func CoordinatorAttendance(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		coordID := middleware.GetUserID(r.Context())
+
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+
+		rows, err := conn.Query(r.Context(), `
+			SELECT se.student_id, se.full_name, s.unit_id, s.unit_name,
+			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
+			       COALESCE(t.attendance_threshold, 75)
+			FROM course_offerings o
+			JOIN students_extended se ON se.offering_id = o.offering_id
+			JOIN student_attendance_summary s ON s.student_id = se.student_id AND s.tenant_id = se.tenant_id
+			JOIN tenants t ON t.tenant_id = o.tenant_id
+			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
+			ORDER BY s.attendance_percentage ASC, se.full_name`, coordID, tenantID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		defer rows.Close()
+
+		type row struct {
+			StudentID         string  `json:"student_id"`
+			FullName          string  `json:"full_name"`
+			UnitID            string  `json:"unit_id"`
+			UnitName          string  `json:"unit_name"`
+			SessionsHeld      int     `json:"sessions_held"`
+			SessionsAttended  int     `json:"sessions_attended"`
+			AttendancePercent float64 `json:"attendance_percentage"`
+			Threshold         int     `json:"threshold"`
+		}
+		out := []row{}
+		for rows.Next() {
+			var x row
+			rows.Scan(&x.StudentID, &x.FullName, &x.UnitID, &x.UnitName, //nolint:errcheck
+				&x.SessionsHeld, &x.SessionsAttended, &x.AttendancePercent, &x.Threshold)
+			out = append(out, x)
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
@@ -322,5 +387,124 @@ func CoordinatorActiveSessions(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{"sessions": sessions})
+	}
+}
+
+// GET /api/v1/coordinator/trends — weekly attendance-rate trend across the
+// coordinator's cohort (mirrors the phone app's Trends screen). Each week's rate =
+// (attendances that week) / (sessions that week × enrolled students).
+func CoordinatorTrends(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		coordID := middleware.GetUserID(r.Context())
+
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+
+		threshold := 75
+		_ = conn.QueryRow(r.Context(),
+			`SELECT COALESCE(attendance_threshold,75) FROM tenants WHERE tenant_id=$1`, tenantID).Scan(&threshold)
+
+		rows, err := conn.Query(r.Context(), `
+			WITH sess AS (
+			  SELECT s.session_id, date_trunc('week', s.session_date)::date AS wk,
+			         (SELECT COUNT(DISTINCT al.student_id) FROM attendance_logs al WHERE al.session_id = s.session_id) AS attended
+			  FROM sessions s
+			  WHERE s.coordinator_id = $1 AND s.tenant_id = $2
+			    AND s.session_status IN ('CLOSED','AUTO_CLOSED')
+			),
+			enrolled AS (
+			  SELECT COUNT(*)::int AS n FROM students_extended se
+			  JOIN course_offerings o ON o.offering_id = se.offering_id
+			  WHERE o.coordinator_id = $1 AND o.tenant_id = $2 AND se.enrollment_status = 'ACTIVE'
+			)
+			SELECT to_char(wk,'YYYY-MM-DD'),
+			       COALESCE(SUM(attended),0)::int,
+			       (COUNT(*) * GREATEST((SELECT n FROM enrolled),1))::int
+			FROM sess GROUP BY wk ORDER BY wk`, coordID, tenantID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		defer rows.Close()
+
+		type week struct {
+			Label   string  `json:"label"`
+			RatePct float64 `json:"rate_pct"`
+			Below   bool    `json:"below_threshold"`
+		}
+		weeks := []week{}
+		totA, totP := 0, 0
+		var bestI, worstI = -1, -1
+		for rows.Next() {
+			var label string
+			var att, poss int
+			rows.Scan(&label, &att, &poss) //nolint:errcheck
+			rate := 0.0
+			if poss > 0 {
+				rate = float64(att) / float64(poss) * 100
+			}
+			rate = float64(int(rate*10+0.5)) / 10
+			weeks = append(weeks, week{label, rate, rate < float64(threshold)})
+			totA += att
+			totP += poss
+			i := len(weeks) - 1
+			if bestI < 0 || rate > weeks[bestI].RatePct {
+				bestI = i
+			}
+			if worstI < 0 || rate < weeks[worstI].RatePct {
+				worstI = i
+			}
+		}
+
+		avg := 0.0
+		if totP > 0 {
+			avg = float64(int(float64(totA)/float64(totP)*1000+0.5)) / 10
+		}
+		trend := "STABLE"
+		if len(weeks) >= 2 {
+			d := weeks[len(weeks)-1].RatePct - weeks[len(weeks)-2].RatePct
+			if d > 1 {
+				trend = "RISING"
+			} else if d < -1 {
+				trend = "FALLING"
+			}
+		}
+		belowCount := 0
+		for _, wk := range weeks {
+			if wk.Below {
+				belowCount++
+			}
+		}
+		var best, worst *week
+		if bestI >= 0 {
+			best = &weeks[bestI]
+		}
+		if worstI >= 0 {
+			worst = &weeks[worstI]
+		}
+		current := 0.0
+		if len(weeks) > 0 {
+			current = weeks[len(weeks)-1].RatePct
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"threshold":         threshold,
+			"weeks":             weeks,
+			"current_week_rate": current,
+			"semester_average":  avg,
+			"best_week":         best,
+			"worst_week":        worst,
+			"weeks_below":       belowCount,
+			"trend":             trend,
+		})
 	}
 }

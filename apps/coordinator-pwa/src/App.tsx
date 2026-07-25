@@ -7,13 +7,26 @@ import Dashboard from './pages/Dashboard'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
+// True when the browser reports no network connectivity.
+function useOnlineStatus() {
+  const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const go = () => setOnline(true)
+    const goOff = () => setOnline(false)
+    globalThis.addEventListener('online', go)
+    globalThis.addEventListener('offline', goOff)
+    return () => { globalThis.removeEventListener('online', go); globalThis.removeEventListener('offline', goOff) }
+  }, [])
+  return online
+}
+
 export default function App() {
   const { isAuthenticated, isExpired } = useAuthStore()
   const token = useAuthStore(s => s.token)
-  useTheme() // initialise + inject theme CSS for the whole app
+  const online = useOnlineStatus()
+  useTheme()
 
-  // Apply the tenant's brand palette across EVERY page of the PWA (not just the
-  // screens that mount BrandHeader) as soon as the coordinator is authenticated.
+  // Apply the tenant's brand palette if online, or from cached manifest if offline.
   useEffect(() => {
     if (!token) return
     fetch(`${API}/api/v1/branding`, { headers: { Authorization: `Bearer ${token}` } })
@@ -22,11 +35,15 @@ export default function App() {
       .catch(() => {})
   }, [token])
 
-  // Coordinators land on their dashboard; "Take attendance" opens the session
-  // screen, and closing a session offers "Go to my dashboard" back here.
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard')
 
-  const body = (!isAuthenticated || isExpired())
+  // ── Offline-first auth logic ──────────────────────────────────────────────
+  // If we have a token (even expired), show the dashboard — the user can still
+  // view cached data and take attendance. Only force login when there is NO
+  // token at all.
+  const showLogin = !isAuthenticated
+
+  const body = showLogin
     ? <Login />
     : view === 'session'
       ? <SessionPage onGoDashboard={() => setView('dashboard')} />
@@ -34,6 +51,22 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--app-bg)' }}>
+      {/* Offline banner */}
+      {!online && isAuthenticated && (
+        <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px 16px', fontSize: 13, textAlign: 'center', borderBottom: '1px solid #fde68a' }}>
+          Offline — attendance data will sync when connectivity is restored.
+        </div>
+      )}
+      {!online && showLogin && (
+        <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px 16px', fontSize: 13, textAlign: 'center', borderBottom: '1px solid #fde68a' }}>
+          You are offline. Sign in was required earlier — connect to the internet to log in.
+        </div>
+      )}
+      {isAuthenticated && isExpired() && online && (
+        <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px 16px', fontSize: 13, textAlign: 'center', borderBottom: '1px solid #fde68a' }}>
+          Session expired — sign in again to refresh data. <button onClick={() => useAuthStore.getState().logout()} style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: 13 }}>Sign in</button>
+        </div>
+      )}
       <div style={{ flex: 1 }}>{body}</div>
       <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '10px 16px', fontSize: 11, textAlign: 'center' }}>
         Powered by LIGHT TECHNOLOGIES

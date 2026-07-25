@@ -16,15 +16,22 @@ class HotspotManager(private val context: Context) {
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
 
     fun start(onReady: (Info) -> Unit, onError: (String) -> Unit) {
-        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifi.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
-            override fun onStarted(res: WifiManager.LocalOnlyHotspotReservation) {
-                reservation = res
-                val (ssid, pass) = readConfig(res)
-                onReady(Info(ssid, pass))
-            }
-            override fun onFailed(reason: Int) = onError("hotspot failed: $reason")
-        }, null)
+        // startLocalOnlyHotspot throws SecurityException without the runtime location/
+        // nearby-wifi permission, and IllegalStateException in some states — catch both so a
+        // hotspot problem never crashes the app; the session can still run over shared Wi-Fi.
+        try {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifi.startLocalOnlyHotspot(object : WifiManager.LocalOnlyHotspotCallback() {
+                override fun onStarted(res: WifiManager.LocalOnlyHotspotReservation) {
+                    reservation = res
+                    val (ssid, pass) = readConfig(res)
+                    onReady(Info(ssid, pass))
+                }
+                override fun onFailed(reason: Int) = onError("hotspot failed: $reason")
+            }, null)
+        } catch (e: Throwable) {
+            onError(e.message ?: "hotspot permission/availability error")
+        }
     }
 
     fun stop() { reservation?.close(); reservation = null }

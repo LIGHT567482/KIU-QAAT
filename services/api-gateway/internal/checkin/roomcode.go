@@ -77,6 +77,34 @@ func Validate(secret []byte, code string, now time.Time) bool {
 	return false
 }
 
+// StaticCode returns a per-session code that does NOT rotate — used for STUDENTS.
+// A student's proximity is proven by being connected to the coordinator's LAN
+// hotspot (mandatory) plus their own device-bound QR, so their code need only
+// identify the room; it stays constant for the whole session (easier to display
+// and type). Derived deterministically from the session secret (salted with a
+// fixed label so it never collides with a rotating step), so it needs no storage
+// and is still effectively-random 6 digits, not guessable.
+func StaticCode(secret []byte) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("student-static-v1"))
+	sum := mac.Sum(nil)
+	offset := sum[len(sum)-1] & 0x0f
+	bin := (uint32(sum[offset]&0x7f) << 24) |
+		(uint32(sum[offset+1]) << 16) |
+		(uint32(sum[offset+2]) << 8) |
+		uint32(sum[offset+3])
+	return zeroPad(bin % pow10[Digits])
+}
+
+// ValidateStatic reports whether code equals the session's static student code
+// (constant-time). The lecturer keeps the rotating Validate() above.
+func ValidateStatic(secret []byte, code string) bool {
+	if len(code) != Digits {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(StaticCode(secret)), []byte(code)) == 1
+}
+
 // SecondsRemaining returns how many seconds until the current code rotates.
 // Used by the coordinator's display to render a countdown.
 func SecondsRemaining(now time.Time) int {

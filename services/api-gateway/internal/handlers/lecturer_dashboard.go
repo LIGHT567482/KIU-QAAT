@@ -15,127 +15,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
-// POST /api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}/create-login
-// Creates (or resets) a LECTURER login keyed to the lecturer's STAFF ID — no email
-// is asked for. A hidden in-domain email is synthesised from the staff ID for the
-// users row; the lecturer signs in with staff ID + password. Body: optional
-// {"password"}; if omitted a strong one is generated and returned once.
-func CreateLecturerLogin(adminPool *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
-		lecturerID := chi.URLParam(r, "lecturer_id")
-
-		var req struct {
-			Password string `json:"password"`
-		}
-		_ = decodeJSON(r, &req)
-
-		var staffID, name, existingUser, domain string
-		if err := adminPool.QueryRow(r.Context(), `
-			SELECT COALESCE(l.staff_id,''), l.full_name, COALESCE(l.user_id::text,''), COALESCE(t.domain,'')
-			FROM lecturers l JOIN tenants t ON t.tenant_id = l.tenant_id
-			WHERE l.lecturer_id = $1::uuid AND l.tenant_id = $2`,
-			lecturerID, tenantID).Scan(&staffID, &name, &existingUser, &domain); err != nil {
-			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "lecturer not found"))
-			return
-		}
-		if staffID == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("NO_STAFF_ID", "this lecturer has no staff ID — set one first, then create the login"))
-			return
-		}
-
-		password := strings.TrimSpace(req.Password)
-		generated := ""
-		if password == "" {
-			password = randPassword()
-			generated = password
-		}
-		if len(password) < 8 {
-			writeJSON(w, http.StatusBadRequest, errBody("WEAK_PASSWORD", "password must be ≥ 8 characters"))
-			return
-		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "password hashing failed"))
-			return
-		}
-
-		if existingUser != "" {
-			// Reset the password on the already-linked account.
-			if _, err := adminPool.Exec(r.Context(),
-				`UPDATE users SET password_hash = $1, role = 'LECTURER' WHERE user_id = $2::uuid`,
-				string(hash), existingUser); err != nil {
-				writeJSON(w, http.StatusInternalServerError, errBody("LOGIN_FAILED", err.Error()))
-				return
-			}
-		} else {
-			email := synthEmail(staffID, strings.ToLower(strings.TrimSpace(domain)))
-			var userID string
-			if err := adminPool.QueryRow(r.Context(), `
-				INSERT INTO users (tenant_id, email, password_hash, role, full_name, is_active)
-				VALUES ($1, $2, $3, 'LECTURER', $4, true)
-				ON CONFLICT (tenant_id, email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = 'LECTURER'
-				RETURNING user_id::text`,
-				tenantID, email, string(hash), name).Scan(&userID); err != nil {
-				writeJSON(w, http.StatusConflict, errBody("LOGIN_FAILED", err.Error()))
-				return
-			}
-			_, _ = adminPool.Exec(r.Context(), `UPDATE lecturers SET user_id = $1::uuid WHERE lecturer_id = $2::uuid AND tenant_id = $3`,
-				userID, lecturerID, tenantID)
-		}
-
-		resp := map[string]string{"staff_id": staffID, "status": "CREATED"}
-		if generated != "" {
-			resp["password"] = generated // shown once so the admin can hand it over
-		}
-		writeJSON(w, http.StatusCreated, resp)
-	}
-}
-
-// POST /api/v1/auth/lecturer-login  (public) — {"staff_id","password"}.
-// Lecturers sign in with their staff ID + password; no email needed.
-func LecturerStaffLogin(adminPool *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			StaffID  string `json:"staff_id"`
-			Password string `json:"password"`
-		}
-		if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.StaffID) == "" || req.Password == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "staff_id and password are required"))
-			return
-		}
-		var tenantID, userID, hash string
-		err := adminPool.QueryRow(r.Context(), `
-			SELECT l.tenant_id::text, COALESCE(l.user_id::text,''), COALESCE(u.password_hash,'')
-			FROM lecturers l LEFT JOIN users u ON u.user_id = l.user_id
-			WHERE l.staff_id = $1 ORDER BY l.created_at LIMIT 1`,
-			strings.TrimSpace(req.StaffID)).Scan(&tenantID, &userID, &hash)
-		if err != nil || userID == "" || hash == "" {
-			writeJSON(w, http.StatusUnauthorized, errBody("INVALID_CREDENTIALS", "no dashboard login for that staff ID — ask your admin to create one"))
-			return
-		}
-		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
-			writeJSON(w, http.StatusUnauthorized, errBody("INVALID_CREDENTIALS", "incorrect staff ID or password"))
-			return
-		}
-		tokenResp, code := mintLecturerToken(r.Context(), userID, tenantID)
-		if code != http.StatusOK {
-			writeJSON(w, http.StatusBadGateway, errBody("TOKEN_FAILED", "could not issue lecturer token"))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(tokenResp)
-	}
-}
-
+// randPassword generates a short strong password (shared: used by admin user/lecturer
+// creation flows elsewhere). Lecturers themselves no longer log in with a password.
 func randPassword() string {
 	b := make([]byte, 9)
 	_, _ = rand.Read(b)

@@ -273,6 +273,9 @@ type loginResponse struct {
 	JTI              string `json:"jti"`
 	Role             string `json:"role"`
 	UserID           string `json:"user_id"`
+	FullName         string `json:"full_name,omitempty"`
+	Title            string `json:"title,omitempty"`
+	RegistrationNo   string `json:"registration_number,omitempty"`
 	TenantID         string `json:"tenant_id"`
 	DeviceBindingKey string `json:"device_binding_key,omitempty"`
 }
@@ -400,6 +403,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		JTI:              jti,
 		Role:             string(user.Role),
 		UserID:           user.UserID,
+		FullName:         user.FullName,
+		Title:            user.Title,
+		RegistrationNo:   user.RegistrationNumber,
 		TenantID:         user.TenantID,
 		DeviceBindingKey: bindingKey,
 	})

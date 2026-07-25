@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth, type Role } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 import { useTheme, ThemeToggle, applyPalette } from '../theme'
@@ -7,6 +7,7 @@ import { useTheme, ThemeToggle, applyPalette } from '../theme'
 interface Branding {
   name: string; logo_url: string; motto: string
   brand_color: string; sidebar_color: string; background_color: string; footer_color: string
+  text_color_light?: string; text_color_dark?: string
 }
 
 interface RoleLayoutProps {
@@ -17,6 +18,8 @@ interface RoleLayoutProps {
 export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
   const { user, isAuthenticated } = useAuth()
   const [brand, setBrand] = useState<Branding | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   // Institution branding + colour palette, fetched once and applied app-wide.
   useEffect(() => {
@@ -40,6 +43,7 @@ export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
         flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--app-bg)',
       }}>
         <main style={{ flex: 1, padding: 24, color: 'var(--text)' }}>
+          <GoBack navigate={navigate} location={location} />
           <Outlet />
         </main>
         <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '12px 24px', fontSize: 12, textAlign: 'center' }}>
@@ -98,6 +102,8 @@ function adminNav(tenantId: string): NavLink[] {
     { label: 'Lecturers',           path: `${t}/lecturers` },
     { label: 'Assignments',         path: `${t}/lecturer-assignments` },
     { label: 'Lecturer Attendance', path: `${t}/lecturer-attendance` },
+    { label: 'Employees',           path: `${t}/employees` },
+    { label: 'Reports',             path: '/admin/reports' },
     { label: 'Venues',              path: `${t}/venues` },
     { label: 'Settings',            path: '/admin/settings' },
   ]
@@ -219,3 +225,19 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 }
 const pwInp: React.CSSProperties = { width: '100%', padding: '10px', borderRadius: 6, border: '1px solid var(--border,#e2e8f0)', fontSize: 14, marginBottom: 10, boxSizing: 'border-box', background: 'var(--surface,#fff)', color: 'var(--text,#0f172a)' }
 const pwBtn: React.CSSProperties = { padding: '10px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
+
+// A back-button shown on every sub-page so the user can always go back to the
+// previous page. Hidden on the base role route (e.g. /vc, /qa/live, /admin).
+function GoBack({ navigate: nav, location: loc }: { navigate: ReturnType<typeof useNavigate>; location: ReturnType<typeof useLocation> }) {
+  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/live', '/admin', '/lecturer']
+  const isBase = baseRoutes.some(b => loc.pathname === b || loc.pathname === b + '/')
+  if (isBase) return null
+  return (
+    <button onClick={() => nav(-1)} style={{
+      background: 'none', border: 'none', color: 'var(--brand, #2563eb)', cursor: 'pointer',
+      fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4,
+    }}>
+      ← Back
+    </button>
+  )
+}

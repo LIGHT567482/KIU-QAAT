@@ -7,7 +7,12 @@ import { useQuery } from '../../lib/useApi'
 // lecturer + room. One timetable per cohort (offering). Supports bulk import.
 
 const KIU_GREEN = '#1a7a3f'
-const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+const DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+// A weekend cohort runs Sat–Sun; every other session type runs Mon–Fri.
+const daysFor = (sessionType: string): number[] =>
+  (sessionType || '').toLowerCase().includes('weekend') ? [6, 7] : [1, 2, 3, 4, 5]
+// How many one-hour rows a session covers (08:00–11:00 = 180 min → 3 rows).
+const spanOf = (mins: number) => Math.max(1, Math.ceil((mins || 60) / 60))
 const TT_COLS = ['course_id', 'level', 'study_year', 'semester', 'session_type', 'unit_id', 'unit_name', 'day', 'start_time', 'duration_minutes', 'room', 'staff_id']
 
 interface Offering {
@@ -81,7 +86,8 @@ export default function Timetable() {
     for (const s of curSlots) {
       const h = hourOf(s.start_time)
       if (h < lo) lo = h
-      if (h + 1 > hi) hi = h + 1
+      // Widen to cover the WHOLE duration so a multi-hour block has enough rows to span.
+      if (h + spanOf(s.duration_minutes) > hi) hi = h + spanOf(s.duration_minutes)
     }
     return Array.from({ length: Math.max(1, hi - lo) }, (_, i) => lo + i)
   }, [current, curSlots])
@@ -125,7 +131,18 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
   offering: Offering; slots: Slot[]; units: OverviewRow[]; rows: number[]; onChanged: () => void; cohortLabel: string
 }) {
   const [adding, setAdding] = useState(false)
-  const cellSlots = (day: number, hour: number) => slots.filter(s => s.day_of_week === day && hourOf(s.start_time) === hour)
+  // Weekend cohorts show Sat–Sun columns; everyone else Mon–Fri.
+  const days = daysFor(offering.session_type)
+  // Pre-compute where each slot STARTS and which lower cells it COVERS, so a multi-hour
+  // block renders as a single cell spanning several rows (rowSpan) instead of one cell.
+  const covered = new Set<string>()
+  const startAt = new Map<string, Slot[]>()
+  for (const s of slots) {
+    const sh = hourOf(s.start_time)
+    const k = `${s.day_of_week}-${sh}`
+    startAt.set(k, [...(startAt.get(k) ?? []), s])
+    for (let i = 1; i < spanOf(s.duration_minutes); i++) covered.add(`${s.day_of_week}-${sh + i}`)
+  }
 
   async function del(slotId: string) {
     if (!confirm('Remove this lecture from the timetable?')) return
@@ -147,26 +164,32 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
           <thead>
             <tr style={{ background: KIU_GREEN, color: '#fff' }}>
               <th style={{ ...th, width: 76 }}>Time</th>
-              {[1, 2, 3, 4, 5].map(d => <th key={d} style={th}>{DAYS[d]}</th>)}
+              {days.map(d => <th key={d} style={th}>{DAYS[d]}</th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map(hour => (
               <tr key={hour}>
                 <td style={timeCell}>{String(hour).padStart(2, '0')}:00<br />{String(hour + 1).padStart(2, '0')}:00</td>
-                {[1, 2, 3, 4, 5].map(d => (
-                  <td key={d} style={cell}>
-                    {cellSlots(d, hour).map(s => (
-                      <div key={s.slot_id} style={card} title="Click × to remove">
-                        <button onClick={() => del(s.slot_id)} style={delBtn}>×</button>
-                        <div style={{ fontWeight: 800, color: KIU_GREEN, fontSize: 12 }}>{s.unit_id}</div>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{s.unit_name}</div>
-                        {s.lecturer_name && <div style={{ fontSize: 11, color: '#475569' }}>Lecturer: {s.lecturer_name}</div>}
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.start_time}–{endTime(s.start_time, s.duration_minutes)}{s.room ? ` · Room: ${s.room}` : ''}</div>
-                      </div>
-                    ))}
-                  </td>
-                ))}
+                {days.map(d => {
+                  const key = `${d}-${hour}`
+                  if (covered.has(key)) return null // a block above spans into this cell
+                  const here = startAt.get(key) ?? []
+                  const span = here.length ? Math.max(...here.map(s => spanOf(s.duration_minutes))) : 1
+                  return (
+                    <td key={d} style={cell} rowSpan={span}>
+                      {here.map(s => (
+                        <div key={s.slot_id} style={card} title="Click × to remove">
+                          <button onClick={() => del(s.slot_id)} style={delBtn}>×</button>
+                          <div style={{ fontWeight: 800, color: KIU_GREEN, fontSize: 12 }}>{s.unit_id}</div>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{s.unit_name}</div>
+                          {s.lecturer_name && <div style={{ fontSize: 11, color: '#475569' }}>Lecturer: {s.lecturer_name}</div>}
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.start_time}–{endTime(s.start_time, s.duration_minutes)}{s.room ? ` · Room: ${s.room}` : ''}</div>
+                        </div>
+                      ))}
+                    </td>
+                  )
+                })}
               </tr>
             ))}
           </tbody>
@@ -186,8 +209,9 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
 function AddSlot({ offering, units, onDone, onCancel }: {
   offering: Offering; units: OverviewRow[]; onDone: () => void; onCancel: () => void
 }) {
+  const ttDays = daysFor(offering.session_type)
   const [unit, setUnit] = useState('')
-  const [day, setDay] = useState(1)
+  const [day, setDay] = useState(ttDays[0])
   const [start, setStart] = useState(offering.session_type.toLowerCase().startsWith('eve') ? '17:00' : '08:00')
   const [dur, setDur] = useState(60)
   const [room, setRoom] = useState('')
@@ -210,7 +234,7 @@ function AddSlot({ offering, units, onDone, onCancel }: {
   return (
     <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
       <Field label="Unit"><select value={unit} onChange={e => setUnit(e.target.value)} style={sel_}><option value="">— select —</option>{uniqUnits.map(u => <option key={u.unit_id} value={u.unit_id}>{u.unit_id} — {u.unit_name}</option>)}</select></Field>
-      <Field label="Day"><select value={day} onChange={e => setDay(Number(e.target.value))} style={sel_}>{[1, 2, 3, 4, 5].map(d => <option key={d} value={d}>{DAYS[d]}</option>)}</select></Field>
+      <Field label="Day"><select value={day} onChange={e => setDay(Number(e.target.value))} style={sel_}>{ttDays.map(d => <option key={d} value={d}>{DAYS[d]}</option>)}</select></Field>
       <Field label="Start"><input type="time" value={start} onChange={e => setStart(e.target.value)} style={inp} /></Field>
       <Field label="Minutes"><input type="number" min={15} max={300} value={dur} onChange={e => setDur(Number(e.target.value))} style={{ ...inp, width: 80 }} /></Field>
       <Field label="Room"><input value={room} onChange={e => setRoom(e.target.value)} placeholder="e.g. C01 O.B." style={{ ...inp, width: 120 }} /></Field>

@@ -113,7 +113,7 @@ export default function App() {
                  : 'Open your institution’s portal link, then enter your registration number to see your attendance.'}
           </p>
         )}
-        {data && <Results data={data} />}
+        {data && <Results data={data} onBack={() => { setData(null); setError(null); setReg('') }} />}
       </div>
       <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '10px 16px', fontSize: 11, textAlign: 'center' }}>
         Powered by LIGHT TECHNOLOGIES
@@ -122,10 +122,18 @@ export default function App() {
   )
 }
 
-function Results({ data }: { data: Progress }) {
+function Results({ data, onBack }: { data: Progress; onBack?: () => void }) {
   const allEligible = data.units.length > 0 && data.units.every(u => u.status === 'ELIGIBLE')
   return (
     <div>
+      {onBack && (
+        <button onClick={onBack} style={{
+          background: 'none', border: 'none', color: 'var(--brand, #2563eb)', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          ← Check another registration number
+        </button>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: 18 }}>{data.full_name || data.student_id}</div>

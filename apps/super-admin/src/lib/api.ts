@@ -49,6 +49,8 @@ export interface Tenant {
   sidebar_color: string
   background_color: string
   footer_color: string
+  text_color_light?: string
+  text_color_dark?: string
   motto: string
   slogan: string
   address: string
@@ -74,5 +76,7 @@ export interface Branding {
   sidebar_color: string
   background_color: string
   footer_color: string
+  text_color_light?: string
+  text_color_dark?: string
   address: string
 }

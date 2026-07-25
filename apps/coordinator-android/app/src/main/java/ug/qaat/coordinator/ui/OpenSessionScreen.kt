@@ -2,28 +2,33 @@ package ug.qaat.coordinator.ui
 
 import android.content.Intent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ug.qaat.coordinator.service.SessionService
 import ug.qaat.coordinator.session.SessionController
 
 /**
- * Pick today's unit + the present lecturer, start the hotspot/server, and open the
- * session (SessionController.open → server.setLive). After this, students can check in.
+ * Pick today's unit, start the hotspot/server, and open the session. The LECTURER is
+ * identified AUTOMATICALLY from the chosen unit (the assignment carried in the manifest) —
+ * the coordinator never types a staff ID. A manual field only appears as a fallback when a
+ * unit has no assigned lecturer on file.
  */
 @Composable
 fun OpenSessionScreen(onOpened: () -> Unit) {
     val ctx = LocalContext.current
     val units = AppState.manifest?.units.orEmpty()
     var selectedUnit by remember { mutableStateOf(units.firstOrNull()?.unitId) }
-    var staffId by remember { mutableStateOf("") }
+    var manualStaffId by remember { mutableStateOf("") }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Open a session", style = MaterialTheme.typography.titleLarge)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("Take attendance", style = MaterialTheme.typography.titleLarge)
 
         if (AppState.manifest == null) { Text("No manifest — sign in while online first."); return }
         if (units.isEmpty()) { Text("No units scheduled for today in the manifest."); return }
@@ -37,23 +42,45 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         Text("2. Unit", style = MaterialTheme.typography.titleSmall)
         units.forEach { u ->
-            Row(Modifier.fillMaxWidth().selectable(selectedUnit == u.unitId) { selectedUnit = u.unitId }.padding(8.dp)) {
+            Row(Modifier.fillMaxWidth().selectable(selectedUnit == u.unitId) { selectedUnit = u.unitId }.padding(vertical = 6.dp)) {
                 RadioButton(selectedUnit == u.unitId, { selectedUnit = u.unitId })
                 Spacer(Modifier.width(8.dp))
-                Text("${u.unitName} (${u.unitId})")
+                Column {
+                    Text("${u.unitName} (${u.unitId})")
+                    if (u.lecturerName.isNotBlank()) Text("Lecturer: ${u.lecturerName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        Text("3. Lecturer staff ID (present today)", style = MaterialTheme.typography.titleSmall)
-        OutlinedTextField(staffId, { staffId = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("e.g. KIU/STAFF/001") })
+        // The lecturer is resolved from the selected unit's assignment.
+        val sel = units.firstOrNull { it.unitId == selectedUnit }
+        val autoStaffId = sel?.lecturerStaffId.orEmpty()
+        val effectiveStaffId = autoStaffId.ifBlank { manualStaffId.trim() }
+
+        Spacer(Modifier.height(16.dp))
+        Text("3. Lecturer", style = MaterialTheme.typography.titleSmall)
+        if (autoStaffId.isNotBlank()) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(sel?.lecturerName?.ifBlank { autoStaffId } ?: autoStaffId, fontWeight = FontWeight.SemiBold)
+                    Text("Staff ID: $autoStaffId" + (sel?.lecturerPhone?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Identified automatically for this unit.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            Text("No lecturer is assigned to this unit yet — enter the present lecturer's staff ID.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(manualStaffId, { manualStaffId = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. KIU/STAFF/001") })
+        }
 
         Spacer(Modifier.height(20.dp))
         Button(
-            enabled = selectedUnit != null && staffId.isNotBlank(),
+            enabled = selectedUnit != null && effectiveStaffId.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
-            onClick = { SessionController.open(selectedUnit!!, staffId.trim()); onOpened() },
-        ) { Text("Open session") }
+            onClick = { SessionController.open(selectedUnit!!, effectiveStaffId); onOpened() },
+        ) { Text("Start taking attendance") }
     }
 }

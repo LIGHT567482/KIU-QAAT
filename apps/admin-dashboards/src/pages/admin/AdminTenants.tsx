@@ -24,6 +24,7 @@ export default function AdminHome() {
     { label: 'Students',    href: `/admin/tenants/${tenantId}/students`,     desc: 'Enrolment records' },
     { label: 'Lecturers',   href: `/admin/tenants/${tenantId}/lecturers`,    desc: 'Lecturer directory' },
     { label: 'Coordinators',href: `/admin/tenants/${tenantId}/coordinators`, desc: 'Directory, contacts & cohorts' },
+    { label: 'Employees',   href: `/admin/tenants/${tenantId}/employees`,    desc: 'Staff registry & tablet attendance' },
   ]
 
   const now = new Date()
@@ -45,9 +46,9 @@ export default function AdminHome() {
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>{info?.motto || 'Manage your institution'}</p>
 
       <div style={{ fontSize: 13, color: 'var(--muted)', margin: '8px 0 20px' }}>
-        Active period: {info?.active_academic_year && info.active_semester
-          ? <strong style={{ color: 'var(--text)' }}>{info.active_academic_year} · Semester {info.active_semester}</strong>
-          : <span style={{ color: '#b45309' }}>not set</span>} · managed under <strong>Administration</strong>.
+        Active period: {info?.active_academic_year
+          ? <strong style={{ color: 'var(--text)' }}>{info.active_academic_year}</strong>
+          : <span style={{ color: '#b45309' }}>not set</span>} · advanced by semester under <strong>Administration</strong>.
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>

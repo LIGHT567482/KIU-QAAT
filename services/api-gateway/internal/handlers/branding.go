@@ -88,6 +88,8 @@ type branding struct {
 	BackgroundOverlay  string `json:"background_overlay_color"`
 	BackgroundOverlayO int    `json:"background_overlay_opacity"`
 	FooterColor        string `json:"footer_color"`
+	TextColorLight     string `json:"text_color_light"`
+	TextColorDark      string `json:"text_color_dark"`
 	Address            string `json:"address"`
 	ActiveAcademicYear string `json:"active_academic_year"`
 	ActiveSemester     int    `json:"active_semester"`
@@ -103,6 +105,7 @@ const brandingSelect = `
 	       COALESCE(background_blur, 0), COALESCE(background_brightness, 100),
 	       COALESCE(background_contrast, 100), COALESCE(background_overlay_color, ''),
 	       COALESCE(background_overlay_opacity, 0), COALESCE(footer_color, ''),
+	       COALESCE(text_color_light, ''), COALESCE(text_color_dark, ''),
 	       COALESCE(address, ''), COALESCE(active_academic_year, ''),
 	       COALESCE(active_semester, 0)
 	FROM tenants WHERE tenant_id = $1`
@@ -122,7 +125,7 @@ func GetBranding(pool *pgxpool.Pool) http.HandlerFunc {
 			&b.Motto, &b.Slogan, &b.BrandColor,
 			&b.SidebarColor, &b.BackgroundColor, &b.BackgroundImage,
 			&b.BackgroundBlur, &b.BackgroundBright, &b.BackgroundContrast,
-			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.Address,
+			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.TextColorLight, &b.TextColorDark, &b.Address,
 			&b.ActiveAcademicYear, &b.ActiveSemester)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
@@ -156,7 +159,7 @@ func GetPublicBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			&b.Motto, &b.Slogan, &b.BrandColor,
 			&b.SidebarColor, &b.BackgroundColor, &b.BackgroundImage,
 			&b.BackgroundBlur, &b.BackgroundBright, &b.BackgroundContrast,
-			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.Address,
+			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.TextColorLight, &b.TextColorDark, &b.Address,
 			&b.ActiveAcademicYear, &b.ActiveSemester)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
@@ -188,6 +191,8 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			BackgroundOverlay  string `json:"background_overlay_color"`
 			BackgroundOverlayO int    `json:"background_overlay_opacity"`
 			FooterColor     string `json:"footer_color"`
+			TextColorLight  string `json:"text_color_light"`
+			TextColorDark   string `json:"text_color_dark"`
 			Motto           string `json:"motto"`
 			Slogan          string `json:"slogan"`
 			Address         string `json:"address"`
@@ -211,7 +216,7 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_BACKGROUND", "background image must be an https URL or a base64 PNG/JPEG/WebP/GIF data URL (no SVG)"))
 			return
 		}
-		for _, c := range []string{req.BrandColor, req.SidebarColor, req.BackgroundColor, req.FooterColor, req.BackgroundOverlay} {
+		for _, c := range []string{req.BrandColor, req.SidebarColor, req.BackgroundColor, req.FooterColor, req.BackgroundOverlay, req.TextColorLight, req.TextColorDark} {
 			if !validColor(c) {
 				writeJSON(w, http.StatusBadRequest, errBody("INVALID_COLOR", "colours must be #rgb or #rrggbb hex"))
 				return
@@ -240,13 +245,15 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			  background_brightness      = $13,
 			  background_contrast        = $14,
 			  background_overlay_color   = NULLIF($15,''),
-			  background_overlay_opacity = $16
+			  background_overlay_opacity = $16,
+			  text_color_light           = NULLIF($17,''),
+			  text_color_dark            = NULLIF($18,'')
 			WHERE tenant_id = $1`,
 			tenantID, req.InstitutionID, req.LogoURL, req.BrandColor, req.SidebarColor,
 			req.BackgroundColor, req.FooterColor,
 			req.Motto, req.Slogan, req.Address, req.BackgroundImage,
 			req.BackgroundBlur, req.BackgroundBright, req.BackgroundContrast,
-			req.BackgroundOverlay, req.BackgroundOverlayO)
+			req.BackgroundOverlay, req.BackgroundOverlayO, req.TextColorLight, req.TextColorDark)
 		if err != nil {
 			msg := err.Error()
 			if strings.Contains(msg, "institution_id") {

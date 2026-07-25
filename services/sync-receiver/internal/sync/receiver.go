@@ -313,7 +313,7 @@ func Complete(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		written, duplicates, err := writeAttendanceLogs(r.Context(), pool, plaintext, tenantID, coordID)
+		written, duplicates, rejectedNoLecturer, err := writeAttendanceLogs(r.Context(), pool, plaintext, tenantID, coordID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "WRITE_ERROR", err.Error())
 			return
@@ -328,10 +328,11 @@ func Complete(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		go refreshEligibilityView(context.Background(), pool, tenantID)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":             "SYNCED",
-			"records_written":    written,
-			"duplicates_rejected": duplicates,
-			"sync_timestamp":     time.Now().UTC().Format(time.RFC3339),
+			"status":                "SYNCED",
+			"records_written":       written,
+			"duplicates_rejected":   duplicates,
+			"rejected_no_lecturer":  rejectedNoLecturer,
+			"sync_timestamp":        time.Now().UTC().Format(time.RFC3339),
 		})
 	}
 }
@@ -372,7 +373,7 @@ func decryptPackage(ctx context.Context, pool *pgxpool.Pool, coordinatorID, tena
 // never relying on a BYPASSRLS role. The coordinator_id is taken from the
 // verified JWT subject, not from the (forgeable) record body, so it anchors the
 // vector clock to the device that actually authenticated.
-func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte, tenantID, coordinatorID string) (written, duplicates int, err error) {
+func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte, tenantID, coordinatorID string) (written, duplicates, rejectedNoLecturer int, err error) {
 	// The outer wrapper is a JSON object produced by sealSessionPackage in the PWA.
 	var pkg struct {
 		Session struct {
@@ -394,12 +395,12 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 		// Do NOT silently report success. If the payload can't be parsed (e.g.
 		// it is corrupt/forged), surface a hard error so the upload is not marked
 		// SYNCED with zero records written.
-		return 0, 0, fmt.Errorf("payload could not be parsed as an attendance package: %w", err)
+		return 0, 0, 0, fmt.Errorf("payload could not be parsed as an attendance package: %w", err)
 	}
 
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("acquire conn: %w", err)
+		return 0, 0, 0, fmt.Errorf("acquire conn: %w", err)
 	}
 	defer conn.Release()
 
@@ -407,7 +408,7 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 	// is_local=false persists across the per-statement implicit transactions pgx
 	// issues; this connection is released (and the pool clears the GUC) afterward.
 	if _, err := conn.Exec(ctx, "SELECT set_config('app.current_tenant', $1, false)", tenantID); err != nil {
-		return 0, 0, fmt.Errorf("set tenant: %w", err)
+		return 0, 0, 0, fmt.Errorf("set tenant: %w", err)
 	}
 
 	// Phone-hub: the session was opened OFFLINE on the device, so its session_id does
@@ -421,7 +422,7 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			ON CONFLICT (session_id) DO NOTHING`,
 			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate,
 		); err != nil {
-			return 0, 0, fmt.Errorf("create session from package: %w", err)
+			return 0, 0, 0, fmt.Errorf("create session from package: %w", err)
 		}
 	}
 
@@ -431,11 +432,52 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 	// consistent across paths (so they dedup) and within varchar(50).
 	hashToReg, err := buildHashIndex(ctx, conn, tenantID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("build student hash index: %w", err)
+		return 0, 0, 0, fmt.Errorf("build student hash index: %w", err)
 	}
 	unresolved := 0
 
+	// ── LECTURER-SCAN GATE ────────────────────────────────────────────────────
+	// Attendance is persisted ONLY for sessions where the assigned lecturer actually
+	// scanned the coordinator's QR (lecturer_attendance_logs.lecturer_scanned_at set).
+	// Records for a session with no lecturer scan are NOT written — the lecture is
+	// unverified, so its attendance is not valid. (TODO phone-hub: when the offline
+	// package carries the lecturer's scan, also seed lecturer_attendance_logs here.)
+	sessionSet := map[string]struct{}{}
+	if pkg.Session.SessionID != "" {
+		sessionSet[pkg.Session.SessionID] = struct{}{}
+	}
 	for _, rec := range pkg.AttendanceRecords {
+		if rec.SessionID != "" {
+			sessionSet[rec.SessionID] = struct{}{}
+		}
+	}
+	sessIDs := make([]string, 0, len(sessionSet))
+	for id := range sessionSet {
+		sessIDs = append(sessIDs, id)
+	}
+	verified := map[string]bool{}
+	if len(sessIDs) > 0 {
+		vRows, vErr := conn.Query(ctx, `
+			SELECT session_id::text FROM lecturer_attendance_logs
+			WHERE tenant_id = $1 AND session_id = ANY($2) AND lecturer_scanned_at IS NOT NULL`,
+			tenantID, sessIDs)
+		if vErr != nil {
+			return 0, 0, 0, fmt.Errorf("check lecturer scans: %w", vErr)
+		}
+		for vRows.Next() {
+			var s string
+			_ = vRows.Scan(&s)
+			verified[s] = true
+		}
+		vRows.Close()
+	}
+
+	for _, rec := range pkg.AttendanceRecords {
+		// Skip attendance for any session the lecturer never scanned (unverified lecture).
+		if !verified[rec.SessionID] {
+			rejectedNoLecturer++
+			continue
+		}
 		studentID := hashToReg[rec.StudentIDHash]
 		if studentID == "" {
 			// Fallback: a value that already fits the column is treated as a raw
@@ -463,7 +505,7 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 		if execErr != nil {
 			// A genuine write failure aborts the batch rather than being
 			// miscounted as a duplicate.
-			return written, duplicates, fmt.Errorf("insert log %s: %w", rec.LogID, execErr)
+			return written, duplicates, rejectedNoLecturer, fmt.Errorf("insert log %s: %w", rec.LogID, execErr)
 		}
 		// ON CONFLICT DO NOTHING returns no error; 0 rows affected means the
 		// vector clock already existed → a real duplicate.
@@ -477,7 +519,7 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 		slog.Warn("sync: attendance records with unresolved student hashes were skipped",
 			"count", unresolved, "tenant", tenantID)
 	}
-	return written, duplicates, nil
+	return written, duplicates, rejectedNoLecturer, nil
 }
 
 // buildHashIndex maps HMAC-SHA256(student_hash_key, reg_no) → reg_no for the tenant,

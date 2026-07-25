@@ -115,15 +115,6 @@ export default function AdminLecturers() {
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = '' }
   }
 
-  async function createLogin(l: Lecturer) {
-    if (!confirm(`Create a dashboard login for ${l.full_name}? They'll sign in with their staff ID (${l.staff_id || 'set one first'}).`)) return
-    try {
-      const res = await api.post<{ staff_id: string; password?: string }>(`/api/v1/admin/tenants/${tenantId}/lecturers/${l.lecturer_id}/create-login`, {})
-      alert(`Login created.\n\nStaff ID: ${res.staff_id}${res.password ? `\nPassword: ${res.password}\n\nGive these to the lecturer now — the password won't be shown again.` : ''}`)
-      refetch()
-    } catch (e) { alert(e instanceof Error ? e.message : 'Could not create login') }
-  }
-
   const [search, setSearch] = useState('')
   const q = search.trim().toLowerCase()
   const lecturers = (status === 'ok' ? (data ?? []) : []).filter(l =>
@@ -243,7 +234,6 @@ export default function AdminLecturers() {
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(l)} style={btnSmall}>Edit</button>
                 <button onClick={() => makeEnroll(l)} style={{ ...btnSmall, marginLeft: 6, background: '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}>Enroll FP</button>
-                <button onClick={() => createLogin(l)} style={{ ...btnSmall, marginLeft: 6, background: '#ecfdf5', borderColor: '#a7f3d0', color: '#065f46' }} title="Create a dashboard login for this lecturer">Login</button>
                 <button onClick={() => showQR(l)} style={{ ...btnSmall, marginLeft: 6, background: '#fef9c3', borderColor: '#fde68a', color: '#854d0e' }} title="Show this lecturer's QR — scan to open their dashboard">QR</button>
               </td>
             </tr>

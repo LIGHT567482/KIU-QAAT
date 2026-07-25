@@ -32,7 +32,8 @@ type openSessionRequest struct {
 type openSessionResponse struct {
 	SessionID        string `json:"session_id"`
 	TenantID         string `json:"tenant_id"`
-	CheckinCode      string `json:"checkin_code"`
+	CheckinCode      string `json:"checkin_code"`  // rotating (lecturer)
+	StudentCode      string `json:"student_code"`  // static (students)
 	SecondsRemaining int    `json:"seconds_remaining"`
 	CheckinWindowEnd string `json:"checkin_window_end"`
 }
@@ -179,6 +180,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			SessionID:        sessionID,
 			TenantID:         tenantID,
 			CheckinCode:      checkin.Derive(secret, now),
+			StudentCode:      checkin.StaticCode(secret),
 			SecondsRemaining: checkin.SecondsRemaining(now),
 			CheckinWindowEnd: windowEnd.Format(time.RFC3339),
 		})
@@ -186,7 +188,8 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type checkinCodeResponse struct {
-	Code             string `json:"code"`
+	Code             string `json:"code"`           // rotating — the LECTURER's live digit code
+	StudentCode      string `json:"student_code"`   // static — the STUDENT room code (does not rotate)
 	SecondsRemaining int    `json:"seconds_remaining"`
 	SessionStatus    string `json:"session_status"`
 	CheckinCount     int    `json:"checkin_count"`
@@ -212,6 +215,7 @@ func CheckinCode(pool *pgxpool.Pool) http.HandlerFunc {
 		now := time.Now().UTC()
 		writeJSON(w, http.StatusOK, checkinCodeResponse{
 			Code:             checkin.Derive(secret, now),
+			StudentCode:      checkin.StaticCode(secret),
 			SecondsRemaining: checkin.SecondsRemaining(now),
 			SessionStatus:    status,
 			CheckinCount:     count,

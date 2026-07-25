@@ -84,6 +84,8 @@ object SessionController {
                         GateAction.END -> gateState = GateState.ENDED
                     }
                 },
+                // Students may only check in once the lecturer has passed the START gate.
+                lecturerStarted = { gateState == GateState.STARTED },
                 onCheckin = { fields, result ->
                     // Live-roster row: name/reg-no come from the scanned QR (the durable
                     // ledger keeps the hash). The PRESENT attendance row is written by the validator.
@@ -133,9 +135,10 @@ object SessionController {
     private fun startTicker() {
         ticker?.cancel()
         ticker = scope.launch {
+            AppState.roomCode = RoomCode.staticCode(secret) // static student code (does not rotate)
             while (isActive) {
                 val now = System.currentTimeMillis() / 1000
-                AppState.roomCode = RoomCode.derive(secret, now)
+                AppState.lecturerCode = RoomCode.derive(secret, now) // rotating — lecturer
                 AppState.secondsLeft = RoomCode.secondsRemaining(now)
                 delay(1000)
             }

@@ -33,6 +33,32 @@ object RoomCode {
     /** Seconds until the current code rotates (for the coordinator's countdown). */
     fun secondsRemaining(epochSeconds: Long): Int = (STEP_SECONDS - epochSeconds % STEP_SECONDS).toInt()
 
+    /**
+     * StaticCode — the per-session code for STUDENTS (does NOT rotate). Port of
+     * checkin.StaticCode in roomcode.go: HMAC of the secret salted with a fixed label,
+     * no time component. A student's proximity is proven by the mandatory hotspot LAN +
+     * their device-bound QR, so their code only needs to identify the room. The lecturer
+     * keeps the rotating derive()/validate().
+     */
+    fun staticCode(secret: ByteArray): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(secret, "HmacSHA256"))
+        val sum = mac.doFinal("student-static-v1".toByteArray(Charsets.US_ASCII))
+        val offset = (sum[sum.size - 1].toInt() and 0x0f)
+        val bin = ((sum[offset].toInt() and 0x7f) shl 24) or
+            ((sum[offset + 1].toInt() and 0xff) shl 16) or
+            ((sum[offset + 2].toInt() and 0xff) shl 8) or
+            (sum[offset + 3].toInt() and 0xff)
+        val code = (bin.toLong() and 0xffffffffL) % MOD
+        return code.toString().padStart(DIGITS, '0')
+    }
+
+    /** Whether code equals the session's static student code (constant-time). */
+    fun validateStatic(secret: ByteArray, code: String): Boolean {
+        if (code.trim().length != DIGITS) return false
+        return constantTimeEquals(staticCode(secret), code.trim())
+    }
+
     private fun deriveStep(secret: ByteArray, step: Long): String {
         val msg = ByteArray(8)
         var s = step

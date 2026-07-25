@@ -7,6 +7,7 @@ interface AuthState {
   jti: string | null
   role: string | null
   userId: string | null
+  fullName: string | null
   tenantId: string | null
   expiresAt: number | null   // unix timestamp
   isAuthenticated: boolean
@@ -21,6 +22,7 @@ interface LoginPayload {
   jti: string
   role: string
   user_id: string
+  full_name?: string
   tenant_id: string
   expires_in: number
   device_binding_key?: string
@@ -33,6 +35,7 @@ export const useAuthStore = create<AuthState>()(
       jti: null,
       role: null,
       userId: null,
+      fullName: null,
       tenantId: null,
       expiresAt: null,
       isAuthenticated: false,
@@ -46,6 +49,7 @@ export const useAuthStore = create<AuthState>()(
           jti: payload.jti,
           role: payload.role,
           userId: payload.user_id,
+          fullName: payload.full_name ?? null,
           tenantId: payload.tenant_id,
           expiresAt: Math.floor(Date.now() / 1000) + payload.expires_in,
           isAuthenticated: true,
@@ -54,7 +58,7 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         set({
-          token: null, jti: null, role: null, userId: null,
+          token: null, jti: null, role: null, userId: null, fullName: null,
           tenantId: null, expiresAt: null, isAuthenticated: false,
         })
       },
@@ -66,16 +70,17 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'qaat-auth',
-      // Persist into sessionStorage so a page reload keeps the coordinator signed
-      // in (no re-login), while the token is still cleared when the tab closes —
-      // a much smaller XSS exposure window than localStorage. The token is
-      // included so API calls survive a refresh.
-      storage: createJSONStorage(() => sessionStorage),
+      // Persist into localStorage so the coordinator stays signed in across app
+      // restarts — essential for offline-first: the user logs in once while online,
+      // and the token survives phone reboots and app restarts so the PWA opens
+      // directly to the dashboard without requiring the server.
+      storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         token: state.token,
         jti: state.jti,
         role: state.role,
         userId: state.userId,
+        fullName: state.fullName,
         tenantId: state.tenantId,
         expiresAt: state.expiresAt,
         isAuthenticated: state.isAuthenticated,

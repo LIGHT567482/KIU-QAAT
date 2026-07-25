@@ -14,6 +14,7 @@ import { startLANValidationHost } from '../sync/lan-host'
 import { activateLANServer, deactivateLANServer } from '../sync/lan-server'
 import QRCodeLib from 'qrcode'
 import { BrandHeader } from '../components/BrandHeader'
+import StandbyPanel from '../components/StandbyPanel'
 import { useAuthStore } from '../store/auth'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
@@ -21,7 +22,8 @@ const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `
 interface ServerSession {
   session_id: string
   tenant_id: string
-  checkin_code: string
+  checkin_code: string   // rotating — lecturer's live digit code
+  student_code: string   // static — the student room code (does not rotate)
   seconds_remaining: number
   checkin_window_end: string
 }
@@ -65,8 +67,16 @@ export default function SessionPage({ onGoDashboard }: { onGoDashboard?: () => v
       .then((d: { offering: typeof cohort; units: typeof cohortUnits } | null) => {
         if (d) { setCohortUnits(d.units ?? []); setCohort(d.offering) }
       })
-      .catch(() => {})
-  }, [])
+      .catch(async () => {
+        // Offline fallback: derive units from the cached daily manifest.
+        const manifest = await getDecryptedManifest()
+        if (manifest?.sessions?.length) {
+          setCohortUnits(manifest.sessions.map((s: { unit_id: string; unit_name: string }) => ({
+            unit_id: s.unit_id, name: s.unit_name, year: 0, semester: 0,
+          })))
+        }
+      })
+  }, [getDecryptedManifest])
 
   // Auto-timers when session goes ACTIVE.
   useEffect(() => {
@@ -209,16 +219,30 @@ export default function SessionPage({ onGoDashboard }: { onGoDashboard?: () => v
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: 16, fontFamily: 'system-ui' }}>
       <BrandHeader />
-      <h2 style={{ marginBottom: 4 }}>Session</h2>
+      {onGoDashboard && (
+        <button onClick={onGoDashboard} style={{
+          background: 'none', border: 'none', color: 'var(--brand, #2563eb)', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          ← Dashboard
+        </button>
+      )}
+      <h2 style={{ marginBottom: 4 }}>Attendance</h2>
       <StatusBadge state={state.value as string} />
 
       {state.value === 'IDLE' && (
-        <UnitSelector
-          units={cohortUnits}
-          cohort={cohort}
-          onSelect={handleUnitSelect}
-          selectedUnit={selectedUnit}
-        />
+        <>
+          <UnitSelector
+            units={cohortUnits}
+            cohort={cohort}
+            onSelect={handleUnitSelect}
+            selectedUnit={selectedUnit}
+          />
+          {/* Emergency standby lives inside the Attendance feature. */}
+          <div style={{ marginTop: 16 }}>
+            <StandbyPanel token={useAuthStore.getState().token} />
+          </div>
+        </>
       )}
 
       {state.value === 'PENDING_LECTURER' && (
@@ -236,33 +260,80 @@ export default function SessionPage({ onGoDashboard }: { onGoDashboard?: () => v
             setBlockedSessionId(null)
             setOpenError(null)
           }}
-          onManualOpen={async (lecturerId: string) => {
-            setOpenError(null)
-            setBlockedSessionId(null)
-            try {
-              const token = useAuthStore.getState().token
-              const res = await fetch(`${API}/api/v1/sessions/open`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  unit_id: state.context.unit_id,
-                  venue_id: state.context.venue_id,
-                  lecturer_id: lecturerId,
-                }),
-              })
-              if (!res.ok) {
-                const err = await res.json().catch(() => ({})) as { message?: string; error?: string; session_id?: string }
-                setOpenError(err.message ?? `Server error ${res.status}`)
-                if (err.error === 'SESSION_ALREADY_OPEN' && err.session_id) setBlockedSessionId(err.session_id)
-                return
+            onManualOpen={async (lecturerId: string) => {
+              setOpenError(null)
+              setBlockedSessionId(null)
+              try {
+                const token = useAuthStore.getState().token
+                const res = await fetch(`${API}/api/v1/sessions/open`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    unit_id: state.context.unit_id,
+                    venue_id: state.context.venue_id,
+                    lecturer_id: lecturerId,
+                  }),
+                })
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({})) as { message?: string; error?: string; session_id?: string }
+                  if (err.error === 'SESSION_ALREADY_OPEN' && err.session_id) { setBlockedSessionId(err.session_id); return }
+                  if (!navigator.onLine) {
+                    // Offline: create a local session
+                    const localId = crypto.randomUUID()
+                    setServerSession({
+                      session_id: localId,
+                      tenant_id: (manifest as { tenant_id?: string })?.tenant_id ?? '',
+                      checkin_code: '------',
+                      student_code: '------',
+                      seconds_remaining: 0,
+                      checkin_window_end: new Date(Date.now() + 120 * 60_000).toISOString(),
+                    })
+                    await db.sessions.put({
+                      session_id: localId,
+                      status: 'ACTIVE',
+                      date: new Date().toISOString().split('T')[0],
+                      unit_id: state.context.unit_id ?? '',
+                      unit_name: state.context.unit_name ?? '',
+                      venue_id: state.context.venue_id ?? '',
+                      gate_open_time: new Date().toISOString(),
+                      created_at: new Date().toISOString(),
+                    })
+                    send({ type: 'LECTURER_GATE_OPEN', lecturer_id: lecturerId || 'MANUAL-OPEN' })
+                    return
+                  }
+                  setOpenError(err.message ?? `Server error ${res.status}`)
+                  return
+                }
+                const session = await res.json() as ServerSession
+                setServerSession(session)
+                send({ type: 'LECTURER_GATE_OPEN', lecturer_id: lecturerId || 'MANUAL-OPEN' })
+              } catch (e) {
+                if (!navigator.onLine) {
+                  const localId = crypto.randomUUID()
+                  setServerSession({
+                    session_id: localId,
+                    tenant_id: (manifest as { tenant_id?: string })?.tenant_id ?? '',
+                    checkin_code: '------',
+                    student_code: '------',
+                    seconds_remaining: 0,
+                    checkin_window_end: new Date(Date.now() + 120 * 60_000).toISOString(),
+                  })
+                  await db.sessions.put({
+                    session_id: localId,
+                    status: 'ACTIVE',
+                    date: new Date().toISOString().split('T')[0],
+                    unit_id: state.context.unit_id ?? '',
+                    unit_name: state.context.unit_name ?? '',
+                    venue_id: state.context.venue_id ?? '',
+                    gate_open_time: new Date().toISOString(),
+                    created_at: new Date().toISOString(),
+                  })
+                  send({ type: 'LECTURER_GATE_OPEN', lecturer_id: lecturerId || 'MANUAL-OPEN' })
+                  return
+                }
+                setOpenError(e instanceof Error ? e.message : 'Network error')
               }
-              const session = await res.json() as ServerSession
-              setServerSession(session)
-              send({ type: 'LECTURER_GATE_OPEN', lecturer_id: lecturerId || 'MANUAL-OPEN' })
-            } catch (e) {
-              setOpenError(e instanceof Error ? e.message : 'Network error')
-            }
-          }}
+            }}
         />
       )}
 
@@ -380,7 +451,8 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
   const [schedDur, setSchedDur] = useState(60)
   const [schedErr, setSchedErr] = useState<string | null>(null)
 
-  // Fetch lecturers assigned to this unit on mount
+  // Fetch lecturers assigned to this unit on mount.
+  // Offline: show a blank list — the coordinator can still open without selection.
   useEffect(() => {
     if (!unitId) return
     setLoadingLecturers(true)
@@ -389,7 +461,7 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
     })
       .then(r => r.ok ? r.json() : [])
       .then((data: { lecturer_id: string; full_name: string; department: string }[]) => setLecturers(data))
-      .catch(() => setLecturers([]))
+      .catch(() => { if (!navigator.onLine) setLecturers([]) })
       .finally(() => setLoadingLecturers(false))
   }, [unitId, token])
 
@@ -412,13 +484,16 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
     setSchedErr(null)
     if (!sched?.schedule_locked) {
       if (!schedStart || schedDur < 5) { setSchedErr('Set the lecture start time and length first.'); return }
-      const res = await fetch(`${API}/api/v1/coordinator/units/${unitId}/schedule`, {
-        method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_start: schedStart, session_duration_minutes: schedDur }),
-      })
-      if (!res.ok && res.status !== 409) {
-        const e = await res.json().catch(() => ({})) as { message?: string }
-        setSchedErr(e.message ?? 'Could not save schedule'); return
+      // Skip schedule save when offline — the local session will sync later.
+      if (navigator.onLine) {
+        const res = await fetch(`${API}/api/v1/coordinator/units/${unitId}/schedule`, {
+          method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_start: schedStart, session_duration_minutes: schedDur }),
+        })
+        if (!res.ok && res.status !== 409) {
+          const e = await res.json().catch(() => ({})) as { message?: string }
+          setSchedErr(e.message ?? 'Could not save schedule'); return
+        }
       }
     }
     await onManualOpen(lecturerId)
@@ -502,7 +577,7 @@ function PendingLecturer({ unitId, unitName, openError, blockedSessionId, onClos
         onClick={async () => { setOpening(true); await openWith(selectedLecturer); setOpening(false) }}
         style={{ width: '100%', padding: 14, background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 15, cursor: (!selectedLecturer || opening) ? 'not-allowed' : 'pointer', opacity: (!selectedLecturer || opening) ? 0.5 : 1 }}
       >
-        {opening ? 'Opening session…' : 'Open Session'}
+        {opening ? 'Opening…' : 'Take attendance'}
       </button>
 
       <button
@@ -524,10 +599,9 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
   token: string | null
 }) {
   const [timeLeft,    setTimeLeft]    = useState('')
-  const [roomCode,    setRoomCode]    = useState(serverSession?.checkin_code ?? '')
+  const [studentCode, setStudentCode] = useState(serverSession?.student_code ?? '')
   const [lecturerQRErr, setLecturerQRErr] = useState<string | null>(null)
   const [showLecturerQR, setShowLecturerQR] = useState(false)
-  const [codeSecsLeft,setCodeSecsLeft]= useState(serverSession?.seconds_remaining ?? 15)
   const [liveCount,   setLiveCount]   = useState(count)
   const [roster,      setRoster]      = useState<RosterStudent[]>([])
   const [rosterSearch,setRosterSearch]= useState('')
@@ -557,9 +631,8 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
           headers: { Authorization: `Bearer ${token}` },
         })
         if (res.ok) {
-          const d = await res.json() as { code: string; seconds_remaining: number; checkin_count: number }
-          setRoomCode(d.code)
-          setCodeSecsLeft(d.seconds_remaining)
+          const d = await res.json() as { code: string; student_code: string; seconds_remaining: number; checkin_count: number }
+          if (d.student_code) setStudentCode(d.student_code)
           if (typeof d.checkin_count === 'number') setLiveCount(d.checkin_count)
         }
       } catch { /* ignore */ }
@@ -616,12 +689,14 @@ function ActiveSession({ unitName, count, checkinWindowEnd, lastScan, onEnd, ser
 
   return (
     <div>
-      {/* Room code — the big projector display */}
+      {/* Student room code — STATIC for the whole session (students on the hotspot
+          scan their own QR and type this code). The lecturer's code rotates and
+          lives in the "Show Lecturer QR" modal. */}
       {serverSession && (
         <div style={{ background: '#0f172a', borderRadius: 12, padding: '20px 24px', marginBottom: 16, textAlign: 'center' }}>
-          <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>ROOM CODE</div>
-          <div style={{ color: '#fff', fontSize: 'clamp(34px, 11vw, 52px)', fontWeight: 800, letterSpacing: 'clamp(6px, 3vw, 12px)', fontFamily: 'monospace' }}>{roomCode}</div>
-          <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>changes in {codeSecsLeft}s</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>STUDENT ROOM CODE</div>
+          <div style={{ color: '#fff', fontSize: 'clamp(34px, 11vw, 52px)', fontWeight: 800, letterSpacing: 'clamp(6px, 3vw, 12px)', fontFamily: 'monospace' }}>{studentCode}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>students enter this code · stays the same all session</div>
         </div>
       )}
 

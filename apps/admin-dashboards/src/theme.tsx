@@ -82,6 +82,19 @@ export interface Palette {
   sidebar_color?: string
   background_color?: string
   footer_color?: string
+  text_color_light?: string
+  text_color_dark?: string
+}
+
+// The tenant's per-theme text colours, remembered so --text is re-applied when the
+// user toggles light/dark (some tenants' backgrounds hide the default text).
+let tenantText: { light?: string; dark?: string } = {}
+function applyTextForTheme() {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement.style
+  const t = current === 'dark' ? tenantText.dark : tenantText.light
+  if (t && HEX.test(t)) root.setProperty('--text', t)
+  else root.removeProperty('--text')  // fall back to the theme default
 }
 
 // readableOn returns a legible text colour (near-black or white) for a given
@@ -116,6 +129,8 @@ export function applyPalette(p?: Palette | null) {
     root.setProperty('--footer', p.footer_color)
     root.setProperty('--footer-text', readableOn(p.footer_color))
   }
+  tenantText = { light: p.text_color_light, dark: p.text_color_dark }
+  applyTextForTheme()
 }
 
 // Back-compat: set just the accent colour.
@@ -131,6 +146,7 @@ const listeners = new Set<() => void>()
 function apply(t: Theme) {
   current = t
   if (typeof document !== 'undefined') document.documentElement.dataset.theme = t
+  applyTextForTheme()   // re-apply the tenant's per-theme text colour
   try { localStorage.setItem(KEY, t) } catch { /* ignore */ }
   listeners.forEach(l => l())
 }

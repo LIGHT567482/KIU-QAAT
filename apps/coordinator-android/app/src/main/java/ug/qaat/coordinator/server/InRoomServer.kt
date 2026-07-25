@@ -29,6 +29,8 @@ class InRoomServer(
         val roomCodeSecret: ByteArray,
         val gateContext: () -> LecturerGateContext,
         val onGate: (GateAction) -> Unit,
+        // Whether the lecturer has scanned to START — students may only check in after.
+        val lecturerStarted: () -> Boolean = { true },
         // Called after each student submission with the QR's display fields + the result,
         // so the app can record the live-roster row (name/reg-no) and session history.
         val onCheckin: suspend (QrFields, ValidationResult) -> Unit = { _, _ -> },
@@ -53,8 +55,12 @@ class InRoomServer(
             // Student check-in: form qr, room_code, fingerprint.
             post("/submit") {
                 val cur = live.get() ?: return@post call.json(mapOf("status" to "REJECTED", "reason" to "SESSION_NOT_ACTIVE"))
+                // Lecturer-started gate: no student attendance until the lecturer has scanned to START.
+                if (!cur.lecturerStarted())
+                    return@post call.json(mapOf("status" to "REJECTED", "reason" to "LECTURER_NOT_STARTED"))
                 val p = call.receiveParameters()
-                if (!RoomCode.validate(cur.roomCodeSecret, p["room_code"] ?: "", System.currentTimeMillis() / 1000))
+                // Students use the STATIC room code (does not rotate); proximity is the mandatory hotspot LAN.
+                if (!RoomCode.validateStatic(cur.roomCodeSecret, p["room_code"] ?: ""))
                     return@post call.json(mapOf("status" to "REJECTED", "reason" to "PROXIMITY_FAILED"))
                 val qr = p["qr"] ?: ""
                 val r = validator.validate(qr, cur.session, DeviceContext(p["fingerprint"] ?: ""))
@@ -73,9 +79,10 @@ class InRoomServer(
                     biometricVerified = p["biometric_verified"] == "true",
                     ctx = cur.gateContext(),
                 )
-                if (res.ok && res.action != null) cur.onGate(res.action)
+                val gateAction = res.action  // local capture: res.action is a cross-module property, not smart-castable
+                if (res.ok && gateAction != null) cur.onGate(gateAction)
                 call.json(buildMap {
-                    put("status", if (res.ok) (if (res.action == GateAction.START) "STARTED" else "ENDED") else "REJECTED")
+                    put("status", if (res.ok) (if (gateAction == GateAction.START) "STARTED" else "ENDED") else "REJECTED")
                     res.rejection?.let { put("reason", it.name) }
                 })
             }
@@ -97,8 +104,13 @@ class InRoomServer(
 
             get("/status") {
                 val cur = live.get()
-                val code = cur?.let { RoomCode.derive(it.roomCodeSecret, System.currentTimeMillis() / 1000) } ?: ""
-                call.json(mapOf("active" to (cur != null).toString(), "room_code" to code))
+                val lecturerCode = cur?.let { RoomCode.derive(it.roomCodeSecret, System.currentTimeMillis() / 1000) } ?: ""
+                val studentCode = cur?.let { RoomCode.staticCode(it.roomCodeSecret) } ?: ""
+                call.json(mapOf(
+                    "active" to (cur != null).toString(),
+                    "room_code" to lecturerCode,       // rotating — lecturer
+                    "student_code" to studentCode,      // static — students
+                ))
             }
         }
     }.also { it.start(wait = false) }

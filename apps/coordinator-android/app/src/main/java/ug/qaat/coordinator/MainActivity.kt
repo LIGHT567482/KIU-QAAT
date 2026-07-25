@@ -1,23 +1,52 @@
 package ug.qaat.coordinator
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import ug.qaat.coordinator.di.Graph
+import ug.qaat.coordinator.net.Net
+import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.ui.CoordinatorApp
 
 /**
- * Hosts the coordinator UI (bottom-nav across the verified-feature screens):
- * Session (live roster + room code + announce), Absentees, Trends, Sync audit.
- *
- * To exercise it on the emulator, wire a "dev: open session" that pulls the manifest
- * and calls SessionService.server.setLive(...) + sets AppState.currentSessionId/UnitId —
- * see EMULATOR_TESTING.md §3.
+ * Hosts the coordinator UI. Requests the runtime permissions the in-room hotspot/server
+ * need (location / nearby-wifi / notifications) so "Take attendance" doesn't fail.
  */
 class MainActivity : ComponentActivity() {
+    private val permLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { /* best-effort */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Graph.init(applicationContext)
+        Net.init(applicationContext)      // load the embedded, pinned QAAT cert
+        SessionStore.init(applicationContext)
+        SessionStore.restoreTheme()
+        Net.setBaseUrl(SessionStore.serverUrl())   // runtime server override (local ⇄ cloud)
+        // Auto-login: restore the cached session so the app opens straight to work — no
+        // re-login. The cached manifest (for fully-offline attendance) is hydrated off the
+        // main thread by CoordinatorApp.
+        runCatching { SessionStore.restore() }
+        requestRuntimePermissions()
         setContent { CoordinatorApp() }   // CoordinatorApp owns the branded MaterialTheme
+    }
+
+    /** LocalOnlyHotspot needs location (all APIs) or NEARBY_WIFI_DEVICES (API 33+); the
+     *  foreground notification needs POST_NOTIFICATIONS (API 33+). Ask for whatever's missing. */
+    private fun requestRuntimePermissions() {
+        val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            needed += Manifest.permission.NEARBY_WIFI_DEVICES
+            needed += Manifest.permission.POST_NOTIFICATIONS
+        }
+        val toAsk = needed.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (toAsk.isNotEmpty()) runCatching { permLauncher.launch(toAsk.toTypedArray()) }
     }
 }

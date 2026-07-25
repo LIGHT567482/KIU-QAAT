@@ -2,19 +2,45 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme'
 import SyncAudit from '../components/SyncAudit'
+import ChronicAbsentee from '../components/ChronicAbsentee'
+import Trends from '../components/Trends'
+import { processOutboxQueue } from '../sync/outbox'
+import { db } from '../db/vault'
+import { decrypt } from '../crypto/vault-crypto'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-// Weekday columns for the timetable (Mon→Sun match day_of_week 1..7).
-const WEEK = [1, 2, 3, 4, 5, 6, 7]
+// Colored weekly-grid timetable, matching the admin dashboard's institution-PDF look.
+const KIU_GREEN = '#1a7a3f'
+const TT_DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+// A weekend cohort runs Sat–Sun; everyone else Mon–Fri (same rule as the admin dashboard).
+const daysFor = (sessionType: string): number[] =>
+  (sessionType || '').toLowerCase().includes('weekend') ? [6, 7] : [1, 2, 3, 4, 5]
+// How many one-hour rows a session covers (08:00–11:00 = 180 min → 3 rows).
+const spanOf = (mins: number) => Math.max(1, Math.ceil((mins || 60) / 60))
+const hourOf = (hhmm: string) => parseInt((hhmm || '').split(':')[0] || '0', 10)
+// 24h "HH:MM" → "h:MM AM/PM".
+function ampm(hhmm: string): string {
+  if (!hhmm) return ''
+  const [h, m] = hhmm.split(':').map(Number)
+  const suffix = h < 12 ? 'AM' : 'PM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${suffix}`
+}
+function endHHMM(start: string, mins: number): string {
+  if (!start) return ''
+  const [h, m] = start.split(':').map(Number)
+  const t = h * 60 + m + (mins || 60)
+  return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+}
 
 interface Unit {
   unit_id: string; name: string; year: number; semester: number
-  day_of_week: number; session_start: string; session_duration_minutes: number; lecturers: string; room?: string
+  day_of_week: number; session_start: string; session_duration_minutes: number; lecturers: string; room?: string; lecturer_phone?: string
 }
 interface Slot {
   unit_id: string; unit_name: string; day_of_week: number; start_time: string
-  duration_minutes: number; room: string; lecturer_name: string
+  duration_minutes: number; room: string; lecturer_name: string; lecturer_phone?: string
 }
 interface Offering {
   course_name: string; level: string; intake: string; study_year: number; semester: number; session_type: string
@@ -34,16 +60,19 @@ interface LastRoster {
 }
 
 export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () => void }) {
-  const { token, logout } = useAuthStore(s => ({ token: s.token, logout: s.logout }))
+  const { token, logout, fullName } = useAuthStore(s => ({ token: s.token, logout: s.logout, fullName: s.fullName }))
+  const displayName = (fullName && fullName.trim()) || 'Coordinator'
   const { theme, toggle } = useTheme()
   const [overview, setOverview] = useState<{ offering: Offering | null; units: Unit[]; slots?: Slot[] } | null>(null)
   const [students, setStudents] = useState<Student[]>([])
   const [last, setLast] = useState<LastRoster | null>(null)
-  const [brand, setBrand] = useState<{ name: string; logo_url: string; motto: string } | null>(null)
-  const [tab, setTab] = useState<'timetable' | 'units' | 'students' | 'roster'>('timetable')
+  const [brand, setBrand] = useState<{ name: string; logo_url: string; motto: string; slogan: string } | null>(null)
+  const [tab, setTab] = useState<'timetable' | 'units' | 'students' | 'roster' | 'trends'>('timetable')
   const [pwOpen, setPwOpen] = useState(false)
   const [active, setActive] = useState<ActiveSession[]>([])
   const [closingId, setClosingId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
 
   // Live sessions are polled (and refreshed after a close) so the coordinator
   // always sees what's currently open — the same sessions that block starting a
@@ -56,15 +85,98 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
       .catch(() => {})
   }, [token])
 
-  useEffect(() => {
+  const loadAll = useCallback(async () => {
     if (!token) return
     const h = { Authorization: `Bearer ${token}` }
     const j = (r: Response) => (r.ok ? r.json() : null)
-    fetch(`${API}/api/v1/coordinator/overview`, { headers: h }).then(j).then(setOverview).catch(() => {})
-    fetch(`${API}/api/v1/coordinator/students`, { headers: h }).then(j).then((s) => setStudents(s ?? [])).catch(() => {})
-    fetch(`${API}/api/v1/coordinator/last-roster`, { headers: h }).then(j).then(setLast).catch(() => {})
-    fetch(`${API}/api/v1/branding`, { headers: h }).then(j).then(setBrand).catch(() => {})
+
+    // Try API — if any fetch fails, fall back to the cached daily manifest.
+    const [overviewData, studentsData, rosterData, brandData] = await Promise.all([
+      fetch(`${API}/api/v1/coordinator/overview`, { headers: h }).then(j),
+      fetch(`${API}/api/v1/coordinator/students`, { headers: h }).then(j),
+      fetch(`${API}/api/v1/coordinator/last-roster`, { headers: h }).then(j),
+      fetch(`${API}/api/v1/branding`, { headers: h }).then(j),
+    ])
+
+    if (overviewData) {
+      setOverview(overviewData)
+    } else {
+      // Offline fallback: derive overview from cached manifest
+      const cached = await loadManifestCached()
+      const sessions = (cached as Record<string, unknown>)?.sessions as Array<Record<string, unknown>> | undefined
+      if (sessions?.length) {
+        const units = sessions.map((s: Record<string, unknown>) => ({
+          unit_id: String(s.unit_id ?? ''), name: String(s.unit_name ?? ''), year: 0, semester: 0,
+          day_of_week: Number(s.day_of_week ?? 0), session_start: String(s.scheduled_start ?? ''),
+          session_duration_minutes: Number(s.session_duration_minutes ?? 60),
+          lecturers: String(s.lecturer_name ?? ''),
+          room: String(s.venue_id ?? ''),
+        }))
+        setOverview({ offering: null, units })
+      }
+    }
+
+    if (studentsData) {
+      setStudents(studentsData)
+    } else {
+      // Offline fallback: derive student list from manifest roster
+      const cached = await loadManifestCached()
+      const roster = (cached as Record<string, unknown>)?.roster as Record<string, Array<Record<string, string>>> | undefined
+      if (roster) {
+        const allStudents: Student[] = []
+        const seen = new Set<string>()
+        for (const unitRoster of Object.values(roster)) {
+          for (const entry of unitRoster) {
+            const hash = entry.student_id_hash
+            if (!seen.has(hash)) {
+              seen.add(hash)
+              allStudents.push({
+                student_id: hash, full_name: entry.qr_serial_number,
+                email: '', current_year: 0, semester: 0, intake_session: '', enrollment_status: 'ACTIVE',
+              })
+            }
+          }
+        }
+        setStudents(allStudents)
+      }
+    }
+
+    if (rosterData) {
+      setLast(rosterData)
+    } else {
+      // Offline fallback: build last-roster from IndexedDB attendance
+      const localSessions = await db.sessions.toArray()
+      const recent = localSessions.sort((a, b) => ((b.created_at ?? '') > (a.created_at ?? '') ? 1 : -1))[0]
+      if (recent) {
+        const records = await db.attendance_records.where('session_id').equals(recent.session_id ?? '').toArray()
+        setLast({
+          session: { unit_name: recent.unit_name ?? '', session_date: recent.date ?? '', closed_at: recent.created_at ?? '', present: records.length, total: records.length },
+          roster: records.map(r => ({ student_id: r.student_id_hash, full_name: '', status: 'PRESENT' as const, checkin_time: r.checkin_timestamp })),
+        })
+      }
+    }
+
+    if (brandData) {
+      setBrand(brandData)
+    } else {
+      const cached = await loadManifestCached()
+      if (cached?.institution_public_key) {
+        setBrand({ name: 'QAAT', logo_url: '', motto: 'Offline mode', slogan: 'Attendance will sync when online' })
+      }
+    }
   }, [token])
+
+  useEffect(() => { loadAll() }, [loadAll])
+
+  // Pull current data + upload any attendances still waiting to sync — mirrors the
+  // phone app's "Refresh data & sync" so both devices behave the same.
+  async function refreshAndSync() {
+    setRefreshing(true); setRefreshMsg(null)
+    await loadAll(); loadActive()
+    try { await processOutboxQueue() } catch { /* offline — will retry */ }
+    setRefreshing(false); setRefreshMsg('Data refreshed and pending attendance synced.')
+    setTimeout(() => setRefreshMsg(null), 4000)
+  }
 
   useEffect(() => {
     loadActive()
@@ -96,12 +208,12 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
             ? <img src={brand.logo_url} alt="" style={{ height: 68, width: 68, objectFit: 'contain', borderRadius: 6 }} />
             : <div style={{ height: 68, width: 68, borderRadius: 6, background: 'var(--brand)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(brand?.name ?? 'Q').slice(0, 1)}</div>}
           <div>
-            <div style={{ fontWeight: 700 }}>{brand?.name ?? 'QAAT'}</div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{brand?.name ?? 'QAAT'}</div>
+            {brand?.slogan && <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>{brand.slogan}</div>}
             {brand?.motto && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{brand.motto}</div>}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {onTakeAttendance && <button onClick={onTakeAttendance} style={btnPrimary}>Take attendance</button>}
           <button onClick={toggle} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} aria-label="Toggle light or dark theme"
             style={{ background: 'none', border: '1px solid var(--border,#e2e8f0)', color: 'inherit', borderRadius: 6, padding: '7px 11px', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>
             {theme === 'dark' ? '☀' : '☾'}
@@ -111,6 +223,20 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
         </div>
       </header>
       {pwOpen && <ChangePasswordModal token={token} onClose={() => setPwOpen(false)} />}
+
+      {/* Welcome + refresh — greets the coordinator by the name on their credential and
+          re-pulls data + syncs pending attendance, mirroring the phone app's Home. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>Welcome, {displayName} 👋</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Ready when you are — refresh today's data, then take attendance.</div>
+        </div>
+        <button onClick={refreshAndSync} disabled={refreshing}
+          style={{ ...btnPrimary, background: 'var(--brand)', opacity: refreshing ? 0.6 : 1 }}>
+          {refreshing ? 'Refreshing…' : '⟳ Refresh data & sync'}
+        </button>
+      </div>
+      {refreshMsg && <div style={{ background: '#ecfdf5', color: '#065f46', padding: '8px 12px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>{refreshMsg}</div>}
 
       {off ? (
         <div style={{ background: 'var(--surface, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
@@ -147,19 +273,24 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
         </div>
       )}
 
-      <StandbyPanel token={token} />
+      {/* Primary action — opens the Attendance feature (session flow). */}
+      {onTakeAttendance && (
+        <button onClick={onTakeAttendance} style={{ ...btnPrimary, width: '100%', padding: 14, fontSize: 15, marginBottom: 14 }}>
+          Attendance
+        </button>
+      )}
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        {(['timetable', 'units', 'students', 'roster'] as const).map(t => (
+        {(['timetable', 'units', 'students', 'roster', 'trends'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{ ...tabBtn, ...(tab === t ? tabActive : {}) }}>
-            {t === 'timetable' ? 'Timetable' : t === 'units' ? `Units (${overview?.units.length ?? 0})` : t === 'students' ? `Students (${students.length})` : 'Last roster'}
+            {t === 'timetable' ? 'Timetable' : t === 'units' ? `Units (${overview?.units.length ?? 0})` : t === 'students' ? `Students (${students.length})` : t === 'roster' ? 'Last roster' : 'Trends'}
           </button>
         ))}
       </div>
 
-      {tab === 'timetable' && <Timetable units={
+      {tab === 'timetable' && <Timetable sessionType={off?.session_type ?? ''} units={
         (overview?.slots?.length
-          ? overview.slots.map(s => ({ unit_id: s.unit_id, name: s.unit_name, year: 0, semester: 0, day_of_week: s.day_of_week, session_start: s.start_time, session_duration_minutes: s.duration_minutes, lecturers: s.lecturer_name, room: s.room }))
+          ? overview.slots.map(s => ({ unit_id: s.unit_id, name: s.unit_name, year: 0, semester: 0, day_of_week: s.day_of_week, session_start: s.start_time, session_duration_minutes: s.duration_minutes, lecturers: s.lecturer_name, room: s.room, lecturer_phone: s.lecturer_phone }))
           : overview?.units) ?? []
       } />}
 
@@ -175,8 +306,10 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
       )}
 
       {tab === 'students' && (
-        <Table head={['Reg No.', 'Name', 'Year/Sem', 'Intake', 'Status']}
-          rows={students.map(s => [s.student_id, s.full_name, `Y${s.current_year}/S${s.semester}`, s.intake_session || '—', s.enrollment_status])}
+        // The rest (year/semester, intake, level) is inherited from the coordinator's
+        // own cohort, so the roster only needs reg-no, name and status.
+        <Table head={['Reg No.', 'Student name', 'Status']}
+          rows={students.map(s => [s.student_id, s.full_name, s.enrollment_status])}
           empty="No students enrolled in this session yet." />
       )}
 
@@ -193,6 +326,9 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
         ) : <Empty msg="No closed/synced session yet. Close a session to see its roster here." />
       )}
 
+      {tab === 'trends' && <Trends />}
+
+      <ChronicAbsentee />
       <SyncAudit />
     </div>
   )
@@ -201,21 +337,31 @@ export default function Dashboard({ onTakeAttendance }: { onTakeAttendance?: () 
 // Weekly timetable — groups the coordinator's units by weekday so they can see,
 // at a glance, which sessions run on which day and at what time. Today's column
 // is highlighted so "is there a session today?" is unambiguous.
-function Timetable({ units }: { units: Unit[] }) {
+function Timetable({ units, sessionType }: { units: Unit[]; sessionType: string }) {
   // JS getDay(): 0=Sun..6=Sat → our day_of_week 1=Mon..7=Sun.
   const jsDay = new Date().getDay()
   const todayDow = jsDay === 0 ? 7 : jsDay
 
   const scheduled = units.filter(u => u.day_of_week >= 1 && u.day_of_week <= 7 && u.session_start)
   const unscheduled = units.filter(u => !(u.day_of_week >= 1 && u.day_of_week <= 7 && u.session_start))
-  const byDay = (d: number) =>
-    scheduled.filter(u => u.day_of_week === d).sort((a, b) => a.session_start.localeCompare(b.session_start))
 
-  const endTime = (start: string, mins: number) => {
-    if (!start || !mins) return ''
-    const [h, m] = start.split(':').map(Number)
-    const t = h * 60 + m + mins
-    return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+  // Weekend cohort → Sat/Sun columns; otherwise Mon–Fri (same as the admin dashboard).
+  const days = daysFor(sessionType)
+
+  // Hour rows: widened to cover the WHOLE duration of every session so a multi-hour
+  // block has enough rows to span.
+  let lo = 8, hi = 19
+  for (const u of scheduled) { const h = hourOf(u.session_start); if (h < lo) lo = h; if (h + spanOf(u.session_duration_minutes) > hi) hi = h + spanOf(u.session_duration_minutes) }
+  const rows = Array.from({ length: Math.max(1, hi - lo) }, (_, i) => lo + i)
+
+  // Where each unit STARTS + which lower cells it COVERS, so a unit spans all the cells
+  // for its full running time (rowSpan) instead of sitting in one cell.
+  const covered = new Set<string>()
+  const startAt = new Map<string, Unit[]>()
+  for (const u of scheduled) {
+    const sh = hourOf(u.session_start); const k = `${u.day_of_week}-${sh}`
+    startAt.set(k, [...(startAt.get(k) ?? []), u])
+    for (let i = 1; i < spanOf(u.session_duration_minutes); i++) covered.add(`${u.day_of_week}-${sh + i}`)
   }
 
   if (scheduled.length === 0 && unscheduled.length === 0) {
@@ -224,35 +370,46 @@ function Timetable({ units }: { units: Unit[] }) {
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-        Your weekly schedule. Set or change a unit's day &amp; time from “Take attendance” when you open its session.
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(96px, 1fr))', gap: 8, overflowX: 'auto' }}>
-        {WEEK.map(d => {
-          const isToday = d === todayDow
-          const items = byDay(d)
-          return (
-            <div key={d} style={{
-              border: `1px solid ${isToday ? 'var(--brand)' : 'var(--border,#e2e8f0)'}`,
-              borderRadius: 10, padding: 8, background: isToday ? 'color-mix(in srgb, var(--brand) 8%, transparent)' : 'var(--surface,#fff)', minWidth: 96,
-            }}>
-              <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6, color: isToday ? 'var(--brand)' : 'inherit' }}>
-                {DAYS[d]}{isToday ? ' · today' : ''}
-              </div>
-              {items.length === 0
-                ? <div style={{ fontSize: 11, color: 'var(--muted)' }}>—</div>
-                : items.map(u => (
-                    <div key={u.unit_id} style={{ background: 'var(--bg,#f1f5f9)', borderRadius: 8, padding: '6px 8px', marginBottom: 6 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12 }}>{u.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {u.session_start}{u.session_duration_minutes ? `–${endTime(u.session_start, u.session_duration_minutes)}` : ''}{u.room ? ` · ${u.room}` : ''}
-                      </div>
-                      {u.lecturers && <div style={{ fontSize: 10, color: 'var(--muted)' }}>{u.lecturers}</div>}
-                    </div>
-                  ))}
-            </div>
-          )
-        })}
+      <div style={{ border: `2px solid ${KIU_GREEN}`, borderRadius: 10, overflow: 'hidden', background: '#fff', color: '#0f172a' }}>
+        <div style={{ textAlign: 'center', padding: '10px 12px', color: KIU_GREEN }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Lectures Timetable</div>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 480 }}>
+            <thead>
+              <tr style={{ background: KIU_GREEN, color: '#fff' }}>
+                <th style={{ ...ttTh, width: 84 }}>Time</th>
+                {days.map(d => <th key={d} style={ttTh}>{TT_DAYS[d]}{d === todayDow ? ' •' : ''}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(hour => (
+                <tr key={hour}>
+                  <td style={ttTimeCell}>{ampm(`${String(hour).padStart(2, '0')}:00`)}</td>
+                  {days.map(d => {
+                    const key = `${d}-${hour}`
+                    if (covered.has(key)) return null // a block above spans into this cell
+                    const here = startAt.get(key) ?? []
+                    const span = here.length ? Math.max(...here.map(u => spanOf(u.session_duration_minutes))) : 1
+                    return (
+                      <td key={d} rowSpan={span} style={{ ...ttCell, background: d === todayDow ? `color-mix(in srgb, ${KIU_GREEN} 6%, #fff)` : '#fff' }}>
+                        {here.map(u => (
+                          <div key={u.unit_id} style={ttCard}>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: KIU_GREEN }}>{u.name}</div>
+                            <div style={{ fontSize: 11, color: '#334155' }}>
+                              {ampm(u.session_start)}{u.session_duration_minutes ? `–${ampm(endHHMM(u.session_start, u.session_duration_minutes))}` : ''}{u.room ? ` · ${u.room}` : ''}
+                            </div>
+                            {u.lecturers && <div style={{ fontSize: 10, color: '#64748b' }}>{u.lecturers}{u.lecturer_phone ? ` · ☎ ${u.lecturer_phone}` : ''}</div>}
+                          </div>
+                        ))}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       {unscheduled.length > 0 && (
         <div style={{ marginTop: 14 }}>
@@ -269,6 +426,11 @@ function Timetable({ units }: { units: Unit[] }) {
     </div>
   )
 }
+
+const ttTh: React.CSSProperties = { padding: '8px 8px', textAlign: 'center', fontSize: 12, borderRight: '1px solid rgba(255,255,255,.25)' }
+const ttTimeCell: React.CSSProperties = { padding: '6px 6px', textAlign: 'center', fontSize: 10, fontWeight: 700, color: KIU_GREEN, background: '#f0fdf4', borderBottom: '1px solid #e2e8f0', borderRight: `1px solid ${KIU_GREEN}`, whiteSpace: 'nowrap', verticalAlign: 'top' }
+const ttCell: React.CSSProperties = { padding: 4, borderBottom: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', verticalAlign: 'top', height: 56 }
+const ttCard: React.CSSProperties = { background: '#fff', border: `1px solid ${KIU_GREEN}`, borderLeft: `4px solid ${KIU_GREEN}`, borderRadius: 6, padding: '4px 6px', marginBottom: 4 }
 
 function Table({ head, rows, empty }: { head: string[]; rows: (string | number)[][]; empty: string }) {
   if (rows.length === 0) return <Empty msg={empty} />
@@ -289,79 +451,6 @@ function Table({ head, rows, empty }: { head: string[]; rows: (string | number)[
 }
 function Empty({ msg }: { msg: string }) {
   return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: 24 }}>{msg}</p>
-}
-
-// Emergency standby — the coordinator authorises a student of their OWN cohort to
-// run a session in their absence. Issues a code the coordinator reads out; the
-// student signs in with it on the login screen.
-interface Standby { delegation_id: string; code: string; deputy_reg: string; deputy_name: string; expires_at: string }
-function StandbyPanel({ token }: { token: string | null }) {
-  const [open, setOpen] = useState(false)
-  const [reg, setReg] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [list, setList] = useState<Standby[]>([])
-
-  const load = useCallback(() => {
-    if (!token) return
-    fetch(`${API}/api/v1/coordinator/standby`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => (r.ok ? r.json() : [])).then((d: Standby[]) => setList(Array.isArray(d) ? d : [])).catch(() => {})
-  }, [token])
-  useEffect(() => { if (open) load() }, [open, load])
-
-  async function issue() {
-    if (!reg.trim()) return
-    setBusy(true); setErr(null)
-    try {
-      const res = await fetch(`${API}/api/v1/coordinator/standby`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ deputy_reg: reg.trim() }),
-      })
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.message || 'Could not create standby')
-      setReg(''); load()
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') } finally { setBusy(false) }
-  }
-  async function revoke(id: string) {
-    if (!confirm('Revoke this standby? The student will no longer be able to run your session.')) return
-    await fetch(`${API}/api/v1/coordinator/standby/${id}/revoke`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
-    load()
-  }
-
-  return (
-    <div style={{ border: '1px solid var(--border,#e2e8f0)', borderRadius: 12, padding: '10px 14px', marginBottom: 16, background: 'var(--surface,#fff)' }}>
-      <button onClick={() => setOpen(o => !o)} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'inherit', fontWeight: 700, fontSize: 13, padding: 0 }}>
-        <span>🆘 Emergency standby {list.length > 0 && <span style={{ color: '#b45309' }}>· {list.length} active</span>}</span>
-        <span style={{ color: 'var(--muted)' }}>{open ? '▾' : '▸'}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 10 }}>
-          <p style={{ fontSize: 12, color: 'var(--muted,#64748b)', margin: '0 0 10px' }}>
-            Going to be absent? Authorise a student <strong>from your own cohort</strong> to run the session today. Read them the code — they sign in with “standby code” on the login screen. Valid until end of day.
-          </p>
-          {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '6px 10px', borderRadius: 6, marginBottom: 8, fontSize: 12 }}>{err}</div>}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={reg} onChange={e => setReg(e.target.value)} placeholder="Standby student's registration number"
-              style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border,#e2e8f0)', fontSize: 13, background: 'var(--surface,#fff)', color: 'inherit' }} />
-            <button onClick={issue} disabled={busy || !reg.trim()} style={{ padding: '8px 14px', background: '#b45309', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', opacity: busy || !reg.trim() ? 0.6 : 1 }}>{busy ? 'Issuing…' : 'Issue code'}</button>
-          </div>
-          {list.length > 0 && (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {list.map(s => (
-                <div key={s.delegation_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, background: 'var(--bg,#f8fafc)', borderRadius: 8, padding: '8px 10px' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 16, letterSpacing: 1 }}>{s.code}</span>
-                    <div style={{ fontSize: 11, color: 'var(--muted,#64748b)' }}>{s.deputy_name || s.deputy_reg} · until {new Date(s.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                  </div>
-                  <button onClick={() => revoke(s.delegation_id)} style={{ padding: '5px 10px', background: 'none', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>Revoke</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function ChangePasswordModal({ token, onClose }: { token: string | null; onClose: () => void }) {
@@ -399,6 +488,22 @@ function ChangePasswordModal({ token, onClose }: { token: string | null; onClose
       </div>
     </div>
   )
+}
+
+// Load the cached daily manifest from IndexedDB (decrypts it in the process).
+async function loadManifestCached(): Promise<Record<string, unknown> | null> {
+  const userId = useAuthStore.getState().userId
+  if (!userId) return null
+  const today = new Date().toISOString().split('T')[0]
+  const manifestId = `${today}-${userId}`
+  const cached = await db.daily_manifest.get(manifestId)
+  if (!cached) return null
+  try {
+    const json = await decrypt(cached.encrypted_blob)
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
 }
 
 const btnPrimary: React.CSSProperties = { padding: '8px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: 13 }

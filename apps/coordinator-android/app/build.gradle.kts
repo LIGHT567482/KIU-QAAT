@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     kotlin("android")
     id("com.google.devtools.ksp") version "2.0.21-1.0.25"
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -11,14 +12,17 @@ android {
         applicationId = "ug.qaat.coordinator"
         minSdk = 26          // LocalOnlyHotspot + java.time
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-phaseA"
-        // The cloud backend the app pulls its daily manifest from + syncs to.
-        // Emulator → host = 10.0.2.2. For a real phone, set your laptop/server LAN IP or domain.
-        buildConfigField("String", "API_BASE", "\"https://10.0.2.2:8443\"")
+        versionCode = 2
+        versionName = "1.0.0"
+        // DEFAULT backend URL the app starts with. The app works for BOTH your local server
+        // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
+        // self-signed cert, and the URL is switchable at runtime (login "server" field /
+        // Net.setBaseUrl). This is only the default; override it per build if you like:
+        //   ./gradlew assembleRelease -Pqaat.apiBase=https://api.yourdomain.com
+        val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://192.168.1.15:8443"
+        buildConfigField("String", "API_BASE", "\"$apiBase\"")
     }
     buildFeatures { compose = true; buildConfig = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -45,8 +49,10 @@ dependencies {
     implementation("io.ktor:ktor-server-cio:2.3.12")
     implementation("io.ktor:ktor-server-content-negotiation:2.3.12")
 
-    // Sync client (pull manifest, upload sealed package).
-    implementation("io.ktor:ktor-client-cio:2.3.12")
+    // Sync client (pull manifest, upload sealed package). OkHttp engine so we can pin
+    // the app-embedded QAAT cert + accept any host — works on any phone at any LAN IP
+    // without the user installing a certificate on the device.
+    implementation("io.ktor:ktor-client-okhttp:2.3.12")
 
     // Room + SQLCipher (encrypted at rest).
     implementation("androidx.room:room-runtime:2.6.1")
@@ -57,4 +63,8 @@ dependencies {
 
     // QR rendering (Wi-Fi join QR + lecturer gate QR).
     implementation("com.google.zxing:core:3.5.3")
+
+    // Encrypted-at-rest persistence of the coordinator's session + cached manifest, so
+    // the app opens straight to work (no re-login) and runs fully offline.
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }

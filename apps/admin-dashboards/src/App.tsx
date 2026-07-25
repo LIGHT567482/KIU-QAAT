@@ -28,9 +28,13 @@ import LecturerDashboard from './pages/lecturer/LecturerDashboard'
 import AdminLecturerAssignments from './pages/admin/AdminLecturerAssignments'
 import AdminLecturerAttendance from './pages/admin/AdminLecturerAttendance'
 import AdminCoordinators from './pages/admin/AdminCoordinators'
+import AdminEmployees from './pages/admin/AdminEmployees'
+import AdminEmployeeAttendance from './pages/admin/AdminEmployeeAttendance'
+import AdminReports from './pages/admin/AdminReports'
 import DashLecturerAttendance from './pages/shared/DashLecturerAttendance'
 import QAStudentAttendance from './pages/qa/QAStudentAttendance'
 import Timetable from './pages/shared/Timetable'
+import LecturerPortal from './pages/LecturerPortal'
 
 export default function App() {
   return (
@@ -40,6 +44,8 @@ export default function App() {
         <Routes>
           <Route path="/login"        element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
+          {/* Public, passwordless, read-only lecturer attendance portal. */}
+          <Route path="/lecturer-portal" element={<LecturerPortal />} />
 
           {/* ── VC ─────────────────────────────────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['VC']} />}>
@@ -85,6 +91,10 @@ export default function App() {
             <Route path="/admin/tenants/:tenantId/lecturers"              element={<AdminLecturers />} />
             <Route path="/admin/tenants/:tenantId/lecturer-assignments"  element={<AdminLecturerAssignments />} />
             <Route path="/admin/tenants/:tenantId/lecturer-attendance"   element={<AdminLecturerAttendance />} />
+            <Route path="/admin/tenants/:tenantId/employees"             element={<AdminEmployees />} />
+            <Route path="/admin/tenants/:tenantId/employee-attendance"   element={<AdminEmployeeAttendance />} />
+            <Route path="/admin/tenants/:tenantId/student-attendance"    element={<QAStudentAttendance />} />
+            <Route path="/admin/reports"                                 element={<AdminReports />} />
           </Route>
 
           {/* ── Lecturer (own assigned units) ──────────────────────────── */}

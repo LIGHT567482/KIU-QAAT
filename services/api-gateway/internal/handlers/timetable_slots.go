@@ -146,8 +146,39 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
 			return
 		}
-		var coordinatorID string
-		_ = conn.QueryRow(r.Context(), `SELECT COALESCE(coordinator_id,'') FROM course_offerings WHERE offering_id=$1::uuid AND tenant_id=$2`, req.OfferingID, tenantID).Scan(&coordinatorID)
+		var coordinatorID, sessionType string
+		_ = conn.QueryRow(r.Context(), `SELECT COALESCE(coordinator_id,''), COALESCE(session_type,'') FROM course_offerings WHERE offering_id=$1::uuid AND tenant_id=$2`, req.OfferingID, tenantID).Scan(&coordinatorID, &sessionType)
+
+		// A WEEKEND cohort may only be scheduled on Sat/Sun; a Day/Evening cohort only on
+		// Mon–Fri. This stops "day units" appearing in a weekend cohort (and vice-versa).
+		if weekend := strings.Contains(strings.ToLower(sessionType), "weekend"); weekend != (req.DayOfWeek == 6 || req.DayOfWeek == 7) {
+			day := "a weekday (Mon–Fri)"
+			if weekend {
+				day = "a weekend day (Sat/Sun)"
+			}
+			writeJSON(w, http.StatusConflict, errBody("DAY_MISMATCH",
+				fmt.Sprintf("A %s cohort can only be timetabled on %s.", sessionType, day)))
+			return
+		}
+
+		// Clash guard: no two units in the SAME cohort may occupy overlapping time on the
+		// same day (two ranges overlap when each starts before the other ends). The exact
+		// slot being upserted is excluded so re-saving it isn't a self-clash.
+		var clashUnit, clashStart string
+		clashErr := conn.QueryRow(r.Context(), `
+			SELECT unit_id, to_char(start_time,'HH24:MI')
+			FROM timetable_slots
+			WHERE tenant_id = $1 AND offering_id = $2::uuid AND day_of_week = $3
+			  AND NOT (unit_id = $4 AND start_time = $5::time)
+			  AND start_time < ($5::time + make_interval(mins => $6))
+			  AND $5::time    < (start_time + make_interval(mins => duration_minutes))
+			LIMIT 1`,
+			tenantID, req.OfferingID, req.DayOfWeek, req.UnitID, req.StartTime, req.Duration).Scan(&clashUnit, &clashStart)
+		if clashErr == nil {
+			writeJSON(w, http.StatusConflict, errBody("SCHEDULE_CLASH",
+				fmt.Sprintf("That time clashes with %s at %s on the same day — a cohort can't have two units at once.", clashUnit, clashStart)))
+			return
+		}
 
 		var slotID string
 		err = conn.QueryRow(r.Context(), `
@@ -276,6 +307,12 @@ func processTimetableCSV(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 		if sessionType == "" {
 			sessionType = "Day"
 		}
+		// Weekend cohorts only Sat/Sun; Day/Evening only Mon–Fri.
+		if weekend := strings.Contains(strings.ToLower(sessionType), "weekend"); weekend != (day == 6 || day == 7) {
+			res.Skipped++
+			res.Errors = append(res.Errors, fmt.Sprintf("line %d: a %s cohort can't be timetabled on that day", ln, sessionType))
+			continue
+		}
 		dur := atoiSafe(get("duration_minutes"))
 		if dur == 0 {
 			if end, okE := parseClock(get("end_time")); okE {
@@ -330,6 +367,20 @@ func processTimetableCSV(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 					res.Errors = append(res.Errors, fmt.Sprintf("line %d: lecturer link: %s", ln, aerr.Error()))
 				}
 			}
+		}
+
+		// Clash guard: skip a row that overlaps another unit in the same cohort/day.
+		var cU, cS string
+		if pool.QueryRow(ctx, `
+			SELECT unit_id, to_char(start_time,'HH24:MI') FROM timetable_slots
+			WHERE tenant_id=$1 AND offering_id=$2::uuid AND day_of_week=$3
+			  AND NOT (unit_id=$4 AND start_time=$5::time)
+			  AND start_time < ($5::time + make_interval(mins => $6))
+			  AND $5::time    < (start_time + make_interval(mins => duration_minutes))
+			LIMIT 1`, tenantID, offeringID, day, unitID, start, dur).Scan(&cU, &cS) == nil {
+			res.Skipped++
+			res.Errors = append(res.Errors, fmt.Sprintf("line %d: %s clashes with %s at %s (same cohort, same time)", ln, unitID, cU, cS))
+			continue
 		}
 
 		_, err = pool.Exec(ctx, `

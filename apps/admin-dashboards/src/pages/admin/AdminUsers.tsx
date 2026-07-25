@@ -195,31 +195,93 @@ function UsersInner() {
   )
 }
 
-// Academic period — view + a single "Advance to next semester" button. Advancing
-// is heavy/irreversible (promotes every student AND cohort one semester), so it is
-// gated behind the admin re-entering their password.
+// IntakeChips — a reusable multi-select for the tenant's configured intakes.
+// A semester can end for one intake (August) while another (May) keeps studying, so
+// both the advance and the clear are scoped by picking intakes here.
+function IntakeChips({ all, selected, onToggle }: { all: string[]; selected: string[]; onToggle: (i: string) => void }) {
+  if (all.length === 0) return <div style={{ fontSize: 12, color: '#b45309' }}>No intakes configured — set them on the Students page first.</div>
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {all.map(i => {
+        const on = selected.includes(i)
+        return (
+          <button key={i} type="button" onClick={() => onToggle(i)}
+            style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              border: on ? '1px solid #1e293b' : '1px solid #cbd5e1', background: on ? '#1e293b' : '#fff', color: on ? '#fff' : '#334155' }}>
+            {on ? '✓ ' : ''}{i}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Academic period — view + advance + end-of-semester clear. Both are heavy/irreversible
+// and gated behind the admin re-entering their password. Because a semester rarely ends
+// for the whole institution at once, both are scoped by intake: the admin advances /
+// clears the August intake while the May intake continues. Every clear first stores a
+// downloadable zip archive of the data under Reports before deleting anything.
 function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
   const { status, data, refetch } = useQuery<{ active_academic_year: string; active_semester: number }>(() => api.get('/api/v1/branding'))
   const info = status === 'ok' ? data : undefined
+
+  // Tenant intakes drive both scoped actions.
+  const [intakes, setIntakes] = useState<string[]>([])
+  useEffect(() => {
+    api.get<{ intakes: string[] }>('/api/v1/admin/settings/intakes').then(r => setIntakes(r.intakes ?? [])).catch(() => {})
+  }, [])
+
+  // Set the institution's active academic YEAR — the one value all intakes share.
+  // There is deliberately no single "active semester": different intakes/cohorts sit in
+  // different semesters at the same time (that lives on each cohort + student).
+  const [setOpenP, setSetOpenP] = useState(false)
+  const [ayInput, setAyInput] = useState('')
+  const [setBusyP, setSetBusyP] = useState(false)
+  const [setErrP, setSetErrP] = useState<string | null>(null)
+  useEffect(() => {
+    if (info?.active_academic_year) setAyInput(info.active_academic_year)
+  }, [info?.active_academic_year])
+  async function savePeriod() {
+    if (!/^\d{4}\/\d{4}$/.test(ayInput.trim())) { setSetErrP('Enter the academic year as YYYY/YYYY, e.g. 2025/2026.'); return }
+    setSetBusyP(true); setSetErrP(null)
+    try {
+      await api.patch(`/api/v1/admin/tenants/${tenantId}/academic-period`, { active_academic_year: ayInput.trim() })
+      setSetOpenP(false); refetch()
+    } catch (e) { setSetErrP(e instanceof Error ? e.message : 'Failed') }
+    finally { setSetBusyP(false) }
+  }
+
   const [open, setOpen] = useState(false)
   const [pw, setPw] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  const [advScope, setAdvScope] = useState<'ALL' | 'INTAKE'>('ALL')
+  const [advIntakes, setAdvIntakes] = useState<string[]>([])
+  const toggleAdv = (i: string) => setAdvIntakes(p => p.includes(i) ? p.filter(x => x !== i) : [...p, i])
 
-  // Separate, also-destructive action: clear last semester's attendance data.
+  // Separate, also-destructive action: clear a semester's attendance data (by intake).
   const [clrOpen, setClrOpen] = useState(false)
   const [clrPw, setClrPw] = useState('')
   const [clrBusy, setClrBusy] = useState(false)
   const [clrErr, setClrErr] = useState<string | null>(null)
   const [clrDone, setClrDone] = useState<string | null>(null)
+  const [clrIntakes, setClrIntakes] = useState<string[]>([])
+  const [clrAY, setClrAY] = useState('')
+  const toggleClr = (i: string) => setClrIntakes(p => p.includes(i) ? p.filter(x => x !== i) : [...p, i])
+
   async function clearData() {
+    if (clrIntakes.length === 0) { setClrErr('Pick at least one intake to clear.'); return }
     setClrBusy(true); setClrErr(null)
     try {
-      const res = await api.post<{ attendance_logs_deleted: number; sessions_deleted: number; lecturer_logs_deleted: number }>(
-        `/api/v1/admin/tenants/${tenantId}/clear-semester-data`, { password: clrPw })
-      setClrDone(`Cleared: ${res.attendance_logs_deleted} attendance record(s), ${res.sessions_deleted} session(s), ${res.lecturer_logs_deleted} lecturer log(s). Students, lecturers, courses, cohorts and the timetable were kept.`)
-      setClrOpen(false); setClrPw('')
+      const res = await api.post<{ status: string; attendance_logs_deleted: number; sessions_deleted: number; lecturer_logs_deleted: number; archive_filename?: string }>(
+        `/api/v1/admin/tenants/${tenantId}/clear-semester-data`, { password: clrPw, intakes: clrIntakes, academic_year: clrAY })
+      if (res.status === 'NO_MATCHING_STUDENTS') {
+        setClrDone(`No students found for intake(s) ${clrIntakes.join(', ')}${clrAY ? ` · ${clrAY}` : ''} — nothing was cleared.`)
+      } else {
+        setClrDone(`Archived → ${res.archive_filename ?? 'zip'} (under Reports → Semester archives), then cleared ${res.attendance_logs_deleted} attendance record(s), ${res.sessions_deleted} emptied session(s), ${res.lecturer_logs_deleted} lecturer log(s) for intake(s) ${clrIntakes.join(', ')}. Students, lecturers, courses, cohorts, timetable and other intakes were kept.`)
+      }
+      setClrOpen(false); setClrPw(''); setClrIntakes([]); setClrAY('')
     } catch (e) { setClrErr(e instanceof Error ? e.message : 'Failed') }
     finally { setClrBusy(false) }
   }
@@ -229,36 +291,75 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
     : `${info?.active_academic_year ?? ''} · Semester 2`
 
   async function advance() {
+    if (advScope === 'INTAKE' && advIntakes.length === 0) { setErr('Pick at least one intake to advance.'); return }
     setBusy(true); setErr(null)
     try {
-      const res = await api.post<{ active_academic_year: string; active_semester: number; students_advanced: number; students_graduated: number; cohorts_advanced: number; cohorts_completed: number }>(
-        `/api/v1/admin/tenants/${tenantId}/academic-period/advance`, { password: pw })
-      setDone(`Now ${res.active_academic_year} · Semester ${res.active_semester}. ${res.students_advanced} student(s) advanced, ${res.students_graduated} graduated; ${res.cohorts_advanced} cohort(s) advanced, ${res.cohorts_completed} completed.`)
-      setOpen(false); setPw(''); refetch()
+      const res = await api.post<{ status: string; scope?: string; active_academic_year?: string; active_semester?: number; students_advanced: number; students_graduated: number; cohorts_advanced: number; cohorts_completed: number }>(
+        `/api/v1/admin/tenants/${tenantId}/academic-period/advance`, { password: pw, intakes: advScope === 'INTAKE' ? advIntakes : [] })
+      if (res.scope === 'INTAKE') {
+        setDone(`Advanced intake(s) ${advIntakes.join(', ')}: ${res.students_advanced} student(s) advanced, ${res.students_graduated} graduated; ${res.cohorts_advanced} cohort(s) advanced, ${res.cohorts_completed} completed. Other intakes and the institution's academic year were left unchanged.`)
+      } else {
+        setDone(`Now ${res.active_academic_year} · Semester ${res.active_semester}. ${res.students_advanced} student(s) advanced, ${res.students_graduated} graduated; ${res.cohorts_advanced} cohort(s) advanced, ${res.cohorts_completed} completed.`)
+      }
+      setOpen(false); setPw(''); setAdvIntakes([]); setAdvScope('ALL'); refetch()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
   }
+
+  const radio: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, color: '#334155', cursor: 'pointer' }
 
   return (
     <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, marginBottom: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div>
-          <strong style={{ fontSize: 14 }}>Active Academic Period</strong>
+          <strong style={{ fontSize: 14 }}>Active Academic Year</strong>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-            {info?.active_academic_year && info.active_semester
-              ? <>{info.active_academic_year} · Semester {info.active_semester}</>
+            {info?.active_academic_year
+              ? <>{info.active_academic_year}</>
               : <span style={{ color: '#b45309' }}>⚠ Not set</span>}
           </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, opacity: .85 }}>
+            Semesters run <strong>per intake/cohort</strong> — within one academic year you'll have cohorts in Sem&nbsp;1 and Sem&nbsp;2 at the same time. Each cohort's year &amp; semester is set on the cohort and moved with “Advance”.
+          </div>
         </div>
-        <button onClick={() => { setOpen(o => !o); setErr(null); setDone(null) }} style={btn}>{open ? 'Cancel' : 'Advance to next semester'}</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => { setSetOpenP(o => !o); setSetErrP(null) }} style={{ ...btn, background: '#0f766e' }}>{setOpenP ? 'Cancel' : (info?.active_academic_year ? 'Change year' : 'Set year')}</button>
+          <button onClick={() => { setOpen(o => !o); setErr(null); setDone(null) }} style={btn}>{open ? 'Cancel' : 'Advance to next semester'}</button>
+        </div>
       </div>
+      {setOpenP && (
+        <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
+          <p style={{ fontSize: 13, color: '#475569', margin: '0 0 10px' }}>
+            Set the institution's <strong>active academic year</strong> (all intakes share it). It's rolled onto every active student. This does <strong>not</strong> set a semester and does <strong>not</strong> promote anyone — semesters live per cohort; use “Advance” to move an intake forward.
+          </p>
+          {setErrP && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{setErrP}</div>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input value={ayInput} onChange={e => setAyInput(e.target.value)} placeholder="Academic year (YYYY/YYYY)" autoFocus
+              style={{ maxWidth: 200, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
+            <button onClick={savePeriod} disabled={setBusyP} style={{ ...btn, background: '#0f766e', opacity: setBusyP ? 0.6 : 1 }}>{setBusyP ? 'Saving…' : 'Save academic year'}</button>
+          </div>
+        </div>
+      )}
       {done && <div style={{ background: '#ecfdf5', color: '#065f46', padding: '8px 12px', borderRadius: 6, marginTop: 12, fontSize: 13 }}>{done}</div>}
       {open && (
         <div style={{ marginTop: 12, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
-          <p style={{ fontSize: 13, color: '#475569', margin: '0 0 10px' }}>
-            This promotes <strong>every student and cohort</strong> one semester → <strong>{next}</strong>
-            {' '}(Sem 2 → next year). Final-year students graduate. Re-enter your password to confirm.
-          </p>
+          <div style={{ display: 'flex', gap: 18, marginBottom: 10, flexWrap: 'wrap' }}>
+            <label style={radio}><input type="radio" checked={advScope === 'ALL'} onChange={() => setAdvScope('ALL')} />Whole institution</label>
+            <label style={radio}><input type="radio" checked={advScope === 'INTAKE'} onChange={() => setAdvScope('INTAKE')} />Specific intake(s)</label>
+          </div>
+          {advScope === 'ALL' ? (
+            <p style={{ fontSize: 13, color: '#475569', margin: '0 0 10px' }}>
+              This promotes <strong>every student and cohort</strong> one semester → <strong>{next}</strong>
+              {' '}(Sem 2 → next year) and moves the institution's active period. Final-year students graduate.
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 13, color: '#475569', margin: '0 0 8px' }}>
+                Advances <strong>only the selected intakes'</strong> students <em>and their cohorts</em> one step, driven by each student's semester (yr1/sem2 → yr2/sem1; final year graduates). Other intakes and the institution's academic year are left unchanged — use this when one intake finishes while others continue.
+              </p>
+              <div style={{ marginBottom: 10 }}><IntakeChips all={intakes} selected={advIntakes} onToggle={toggleAdv} /></div>
+            </>
+          )}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Your admin password" autoFocus
@@ -268,26 +369,31 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
         </div>
       )}
 
-      {/* End-of-semester data clear — attendance + sessions only. */}
+      {/* End-of-semester data clear — intake-scoped, archived first. */}
       <div style={{ marginTop: 14, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div>
-            <strong style={{ fontSize: 14 }}>Clear last semester's attendance</strong>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Wipes attendance + sessions. Keeps students, lecturers, courses, cohorts and the timetable.</div>
+            <strong style={{ fontSize: 14 }}>Clear a semester's attendance</strong>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Zips the data to Reports first, then wipes attendance + emptied sessions for the chosen intake(s). Keeps students, lecturers, courses, cohorts, timetable and other intakes.</div>
           </div>
           <button onClick={() => { setClrOpen(o => !o); setClrErr(null); setClrDone(null) }} style={{ ...btn, background: '#b91c1c' }}>{clrOpen ? 'Cancel' : 'Clear data'}</button>
         </div>
         {clrDone && <div style={{ background: '#ecfdf5', color: '#065f46', padding: '8px 12px', borderRadius: 6, marginTop: 12, fontSize: 13 }}>{clrDone}</div>}
         {clrOpen && (
           <div style={{ marginTop: 12 }}>
-            <p style={{ fontSize: 13, color: '#475569', margin: '0 0 10px' }}>
-              This <strong>permanently deletes</strong> this tenant's attendance records and sessions. It cannot be undone. Re-enter your password to confirm.
+            <p style={{ fontSize: 13, color: '#475569', margin: '0 0 8px' }}>
+              Pick the intake(s) whose semester has ended. Their data is <strong>compressed to a zip and stored under Reports</strong>, then <strong>permanently deleted</strong>. You cannot clear the whole institution in one action.
             </p>
+            <div style={{ marginBottom: 10 }}><IntakeChips all={intakes} selected={clrIntakes} onToggle={toggleClr} /></div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+              <input value={clrAY} onChange={e => setClrAY(e.target.value)} placeholder="Academic year (optional, e.g. 2024/2025)"
+                style={{ flex: 1, maxWidth: 320, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13 }} />
+            </div>
             {clrErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{clrErr}</div>}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="password" value={clrPw} onChange={e => setClrPw(e.target.value)} placeholder="Your admin password" autoFocus
+              <input type="password" value={clrPw} onChange={e => setClrPw(e.target.value)} placeholder="Your admin password"
                 style={{ flex: 1, maxWidth: 260, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
-              <button onClick={clearData} disabled={clrBusy || !clrPw} style={{ ...btn, background: '#b91c1c', opacity: !clrPw ? 0.5 : 1 }}>{clrBusy ? 'Clearing…' : 'Confirm clear'}</button>
+              <button onClick={clearData} disabled={clrBusy || !clrPw || clrIntakes.length === 0} style={{ ...btn, background: '#b91c1c', opacity: (!clrPw || clrIntakes.length === 0) ? 0.5 : 1 }}>{clrBusy ? 'Archiving & clearing…' : 'Archive & clear'}</button>
             </div>
           </div>
         )}

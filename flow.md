@@ -74,11 +74,14 @@ flowchart TD
     CENTRAL --> DASH[QA / DQA / VC / DVC dashboards<br/>eligibility · timetable · lecturer workload · audit]
     REG --> SPORT[Student checks own % any time<br/>passwordless reg-no portal — no login]:::ok
 
-    %% ===== Semester rollover =====
-    AD --> ADV[[Administration → Advance to next semester<br/>password-confirmed]]
-    ADV --> PROMO[Promote EVERY student + cohort one step<br/>Sem1→Sem2 · Sem2→Sem1 next year<br/>final level/year → GRADUATED]
+    %% ===== Semester rollover (per-intake — a semester can end for one intake while others continue) =====
+    AD --> ADV[[Administration → Advance to next semester<br/>password-confirmed · whole-institution OR pick intake s]]
+    ADV --> PROMO[Whole institution: promote EVERY student + cohort one step<br/>Sem1→Sem2 · Sem2→Sem1 next year · final → GRADUATED<br/>Per-intake: only those students advance — cohorts + active period unchanged]
     PROMO --> COOR
     PROMO --> REG
+    AD --> CLR[[Administration → Clear a semester's attendance<br/>password-confirmed · pick intake s ]]
+    CLR --> ARCH[Zip attendance + sessions + lecturer logs → Reports → Semester archives]:::store
+    ARCH --> DEL[Delete only that intake's attendance + emptied sessions<br/>shared sessions of a continuing intake are kept]
 
     classDef owner fill:#0f172a,color:#fff,stroke:#0f172a;
     classDef tenant fill:#ecfeff,stroke:#0891b2;

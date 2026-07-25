@@ -19,6 +19,10 @@ class BrandingClient(private val token: String) {
         val logoUrl: String,        // https URL or a data: base64 image
         val brandColor: String,     // "#RRGGBB"
         val backgroundColor: String,
+        val sidebarColor: String,   // the admin sidebar colour — used for the app nav + header
+        val footerColor: String,
+        val textColorLight: String, // per-theme text colour set by the super-admin
+        val textColorDark: String,
     )
 
     suspend fun fetch(): Branding? {
@@ -31,6 +35,10 @@ class BrandingClient(private val token: String) {
             logoUrl = j.optString("logo_url", ""),
             brandColor = j.optString("brand_color", ""),
             backgroundColor = j.optString("background_color", ""),
+            sidebarColor = j.optString("sidebar_color", ""),
+            footerColor = j.optString("footer_color", ""),
+            textColorLight = j.optString("text_color_light", ""),
+            textColorDark = j.optString("text_color_dark", ""),
         )
     }
 }

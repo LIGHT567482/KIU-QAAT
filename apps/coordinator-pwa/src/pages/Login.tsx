@@ -28,7 +28,7 @@ export default function Login() {
       if (!res.ok) { setError(data.message ?? 'Standby sign-in failed'); setLoading(false); return }
       await login({
         access_token: data.access_token, jti: data.jti, role: data.role,
-        user_id: data.user_id, tenant_id: data.tenant_id, expires_in: data.expires_in,
+        user_id: data.user_id, full_name: data.full_name, tenant_id: data.tenant_id, expires_in: data.expires_in,
       })
     } catch {
       setError('Network error — are you offline?')
@@ -84,6 +84,7 @@ export default function Login() {
         jti:                data.jti,
         role:               data.role,
         user_id:            data.user_id,
+        full_name:          data.full_name,
         tenant_id:          tid,
         expires_in:         data.expires_in,
         device_binding_key: data.device_binding_key,

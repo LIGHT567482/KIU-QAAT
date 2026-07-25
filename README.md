@@ -167,6 +167,7 @@ The following are scaffolded or stubbed and not yet complete:
 - [docs/FLOWCHART.md](docs/FLOWCHART.md) — the offline attendance gate, step by step.
 - [ARCHITECT.md](ARCHITECT.md) — full system architecture.
 - [DEPLOY.md](DEPLOY.md) / [RUN-ANYWHERE.md](RUN-ANYWHERE.md) — deployment + run-on-any-laptop (offline hotspot) guide.
+- [docs/CLOUD_DEPLOY_RENDER.md](docs/CLOUD_DEPLOY_RENDER.md) — **move the DB + services to the cloud (Render)**; how clients connect via the gateway (never the DB); offline roster pull.
 - [USER_GUIDE.md](USER_GUIDE.md) — end-user guide.
 - [docs/API.md](docs/API.md) — API overview.
 - [docs/SECURITY_PRIVACY_REVIEW.md](docs/SECURITY_PRIVACY_REVIEW.md) — security & privacy review.

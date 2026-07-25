@@ -99,8 +99,10 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Proximity proof #1: rotating room code (read live off the coordinator screen).
-		if !checkin.Validate(secret, req.RoomCode, now) {
+		// Proximity proof #1: the session's STATIC student room code (does not rotate).
+		// The hard proximity proof is the mandatory LAN check below; this just selects
+		// the room. (The lecturer gate keeps the rotating code.)
+		if !checkin.ValidateStatic(secret, req.RoomCode) {
 			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "PROXIMITY_FAILED"})
 			return
 		}
@@ -112,6 +114,17 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 		// presence cannot be proven → reject. Blocks a remote proxy texted the live code.
 		if coordinatorIP == "" || !onSameLAN(middleware.ClientIP(r), coordinatorIP) {
 			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "NOT_SAME_NETWORK"})
+			return
+		}
+
+		// Lecturer-started gate: attendance is valid only once the lecturer has scanned
+		// the coordinator's QR to START the lecture. Reject until then.
+		var lecturerStarted bool
+		_ = conn.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM lecturer_attendance_logs WHERE session_id = $1 AND lecturer_scanned_at IS NOT NULL)`,
+			req.SessionID).Scan(&lecturerStarted)
+		if !lecturerStarted {
+			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "LECTURER_NOT_STARTED"})
 			return
 		}
 

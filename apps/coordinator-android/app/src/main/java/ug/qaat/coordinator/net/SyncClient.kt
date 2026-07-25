@@ -1,7 +1,5 @@
 package ug.qaat.coordinator.net
 
-import io.ktor.client.*
-import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -11,9 +9,10 @@ import ug.qaat.crypto.Sealer
  * Seals a closed session and uploads it to the central backend via the SAME chunked
  * protocol the PWA uses (POST /api/v1/sync/{init,chunk,complete}). The sealed package
  * format is the VERIFIED `crypto-core` Sealer — the live sync-receiver already accepts it.
+ * Uses the shared pinned client (Net.client) so TLS to the QAAT backend works everywhere.
  */
 class SyncClient(private val baseUrl: String, private val bearer: String) {
-    private val http = HttpClient(CIO)
+    private val http = Net.client()
     private val chunkSize = Sealer.CHUNK_SIZE
 
     /** @param bindingKey the device binding secret (from login); @param plaintextJson the session package JSON. */

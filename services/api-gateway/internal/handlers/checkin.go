@@ -169,10 +169,12 @@ func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.Signed
 		return reject("SESSION_NOT_STARTED")
 	}
 
-	// Find the session whose room code matches the student's submission.
+	// Find the session whose STATIC student room code matches the submission.
+	// (Students use a non-rotating code; proximity is proven by the mandatory LAN
+	// gate below, not by a live code. The lecturer keeps the rotating code.)
 	var sess *activeSession
 	for i := range candidateSessions {
-		if checkin.Validate(candidateSessions[i].Secret, req.RoomCode, now) {
+		if checkin.ValidateStatic(candidateSessions[i].Secret, req.RoomCode) {
 			sess = &candidateSessions[i]
 			break
 		}
@@ -196,6 +198,19 @@ func validateCheckin(ctx context.Context, conn *pgxpool.Conn, qr *checkin.Signed
 	// the coordinator's network.
 	if sess.CoordinatorIP == "" || !onSameLAN(clientIP, sess.CoordinatorIP) {
 		return reject("NOT_SAME_NETWORK")
+	}
+
+	// ── Lecturer-started gate ─────────────────────────────────────────────────
+	// A student's attendance is valid only for a lecture the LECTURER has started —
+	// i.e. the lecturer has scanned the coordinator's QR (lecturer_scanned_at set).
+	// Until then, check-ins are rejected so no attendance exists for an untaught
+	// lecture. (A session opened without a lecturer can therefore take no attendance.)
+	var lecturerStarted bool
+	_ = conn.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM lecturer_attendance_logs WHERE session_id = $1 AND lecturer_scanned_at IS NOT NULL)`,
+		sess.SessionID).Scan(&lecturerStarted)
+	if !lecturerStarted {
+		return reject("LECTURER_NOT_STARTED")
 	}
 
 	// ── Step 6a: cross-student device lock ────────────────────────────────────

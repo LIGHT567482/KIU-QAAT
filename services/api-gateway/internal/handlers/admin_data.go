@@ -504,19 +504,31 @@ func UpdateTenantAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
+		// The academic YEAR is the institution-wide setting (all intakes share it, and
+		// it can be the same across intakes). The SEMESTER is NOT a single global value —
+		// different cohorts/intakes sit in different semesters at once — so it lives on
+		// each offering/student, not here. `active_semester` is optional and kept only as
+		// the reference point the whole-institution Advance toggles; omit it to leave it
+		// as-is. It is NOT used to gate what coordinators/students see.
 		var req struct {
 			AcademicYear string `json:"active_academic_year"`
-			Semester     int    `json:"active_semester"`
+			Semester     int    `json:"active_semester"` // optional; 0 = leave unchanged
 		}
-		if err := decodeJSON(r, &req); err != nil || req.AcademicYear == "" || (req.Semester != 1 && req.Semester != 2) {
+		if err := decodeJSON(r, &req); err != nil || req.AcademicYear == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
-				"active_academic_year (string) and active_semester (1 or 2) are required"))
+				"active_academic_year (string, e.g. 2025/2026) is required"))
 			return
 		}
 
-		tag, err := adminPool.Exec(r.Context(), `
-			UPDATE tenants SET active_academic_year = $1, active_semester = $2
-			WHERE tenant_id = $3`, req.AcademicYear, req.Semester, tenantID)
+		// Update the academic year always; touch active_semester only if a valid one
+		// was supplied (it is a reference pointer, not an institution-wide truth).
+		q := `UPDATE tenants SET active_academic_year = $1 WHERE tenant_id = $2`
+		args := []interface{}{req.AcademicYear, tenantID}
+		if req.Semester == 1 || req.Semester == 2 {
+			q = `UPDATE tenants SET active_academic_year = $1, active_semester = $3 WHERE tenant_id = $2`
+			args = append(args, req.Semester)
+		}
+		tag, err := adminPool.Exec(r.Context(), q, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -535,7 +547,6 @@ func UpdateTenantAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"tenant_id":            tenantID,
 			"active_academic_year": req.AcademicYear,
-			"active_semester":      req.Semester,
 			"students_updated":     ct.RowsAffected(),
 			"status":               "UPDATED",
 		})
@@ -558,10 +569,14 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
-		// This is a heavy, irreversible institution-wide change → re-authenticate the
-		// admin's own password before proceeding.
+		// This is a heavy, irreversible change → re-authenticate the admin's own
+		// password before proceeding. An optional `intakes` list scopes the advance to
+		// only those intakes' students (e.g. advance the August intake while May keeps
+		// studying); with no intakes it advances the whole institution (moving the
+		// tenant's active-period pointer + every cohort).
 		var body struct {
-			Password string `json:"password"`
+			Password string   `json:"password"`
+			Intakes  []string `json:"intakes"`
 		}
 		_ = decodeJSON(r, &body)
 		var hash string
@@ -572,6 +587,21 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
 			writeJSON(w, http.StatusForbidden, errBody("INVALID_PASSWORD", "your password is incorrect"))
+			return
+		}
+
+		// Intake-scoped advance: move only the selected intakes' students along their
+		// own track. Cohorts (offerings) span intakes and the active-period pointer is
+		// institution-wide, so neither is touched — the admin advances the whole
+		// institution (no intake filter) once every intake has rolled over.
+		intakes := make([]string, 0, len(body.Intakes))
+		for _, s := range body.Intakes {
+			if t := strings.TrimSpace(s); t != "" {
+				intakes = append(intakes, t)
+			}
+		}
+		if len(intakes) > 0 {
+			advanceIntakeStudents(w, r, adminPool, tenantID, intakes)
 			return
 		}
 
@@ -672,6 +702,87 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 			"status": "ADVANCED",
 		})
 	}
+}
+
+// advanceIntakeStudents advances the given intake(s) one step along each student's OWN
+// track — the semester is the source root: Sem1→Sem2 (same year), Sem2→Sem1 of the next
+// year (+1), final year/level → GRADUATED. It advances BOTH the students AND the
+// intake's cohorts (course_offerings, which carry the intake) by the SAME rule, so the
+// coordinator's catalog (driven by the offering's year+semester) stays in lock-step with
+// the students. The tenant's shared academic-year pointer and OTHER intakes are left
+// untouched — those cohorts are still studying.
+func advanceIntakeStudents(w http.ResponseWriter, r *http.Request, adminPool *pgxpool.Pool, tenantID string, intakes []string) {
+	tx, err := adminPool.Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "tx failed"))
+		return
+	}
+	defer tx.Rollback(r.Context()) //nolint:errcheck
+
+	var graduated, advanced int
+	_ = tx.QueryRow(r.Context(), `
+		SELECT
+		  COUNT(*) FILTER (WHERE se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)),
+		  COUNT(*)
+		FROM students_extended se JOIN tenants t ON t.tenant_id = se.tenant_id
+		WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE' AND se.intake_session = ANY($2)`,
+		tenantID, intakes).Scan(&graduated, &advanced) //nolint:errcheck
+
+	// 1. Advance every active student of the intake along their own track (semester root).
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE students_extended se SET
+		  semester = CASE WHEN se.semester = 2 THEN 1 ELSE 2 END,
+		  current_year = CASE WHEN se.semester = 2
+		      THEN LEAST(se.current_year + 1, COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99))
+		      ELSE se.current_year END,
+		  academic_year = CASE
+		      WHEN se.semester = 2 AND se.academic_year ~ '^[0-9]{4}/[0-9]{4}$'
+		      THEN ((left(se.academic_year,4))::int + 1)::text || '/' || ((right(se.academic_year,4))::int + 1)::text
+		      ELSE se.academic_year END,
+		  enrollment_status = CASE
+		      WHEN se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)
+		      THEN 'GRADUATED' ELSE se.enrollment_status END,
+		  updated_at = now()
+		FROM tenants t
+		WHERE se.tenant_id = $1 AND t.tenant_id = $1 AND se.enrollment_status = 'ACTIVE' AND se.intake_session = ANY($2)`,
+		tenantID, intakes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+		return
+	}
+
+	// 2. Complete the intake's cohorts that have just finished (Sem 2, final level year).
+	var cohortsCompleted int
+	_ = tx.QueryRow(r.Context(), `
+		WITH del AS (
+		  DELETE FROM course_offerings o USING tenants t
+		  WHERE o.tenant_id = $1 AND t.tenant_id = $1 AND o.intake = ANY($2) AND o.semester = 2
+		    AND o.study_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(o.level,''))::int FROM courses c WHERE c.course_id = o.course_id AND c.tenant_id = o.tenant_id), (t.level_years ->> NULLIF(o.level,''))::int, 99)
+		  RETURNING 1)
+		SELECT COUNT(*) FROM del`, tenantID, intakes).Scan(&cohortsCompleted) //nolint:errcheck
+
+	// 3. Advance the intake's remaining cohorts by the same rule (deferrable unique
+	//    constraint ux_offerings_cohort absorbs the transient collisions).
+	var cohortsAdvanced int
+	_ = tx.QueryRow(r.Context(), `
+		WITH upd AS (
+		  UPDATE course_offerings SET
+		    semester   = CASE WHEN semester = 2 THEN 1 ELSE 2 END,
+		    study_year = CASE WHEN semester = 2 THEN study_year + 1 ELSE study_year END
+		  WHERE tenant_id = $1 AND intake = ANY($2)
+		  RETURNING 1)
+		SELECT COUNT(*) FROM upd`, tenantID, intakes).Scan(&cohortsAdvanced) //nolint:errcheck
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "commit failed"))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tenant_id": tenantID, "scope": "INTAKE", "intakes": intakes,
+		"students_advanced": advanced, "students_graduated": graduated,
+		"cohorts_advanced": cohortsAdvanced, "cohorts_completed": cohortsCompleted,
+		"status": "ADVANCED",
+	})
 }
 
 // incAcademicYear bumps a "YYYY/YYYY" string by one year ("2025/2026" → "2026/2027");

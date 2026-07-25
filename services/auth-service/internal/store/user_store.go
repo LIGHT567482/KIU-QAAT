@@ -29,6 +29,7 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 func (s *UserStore) GetByEmailAndTenant(ctx context.Context, email string, tenantID string) (*models.User, error) {
 	const q = `
 		SELECT user_id, tenant_id, email, password_hash, role, full_name,
+		       COALESCE(title,''), COALESCE(registration_number,''),
 		       is_active, totp_secret_enc, totp_enabled, totp_backup_codes_enc,
 		       device_binding_key_enc, last_login_at, failed_login_count,
 		       locked_until, created_at, updated_at
@@ -40,6 +41,7 @@ func (s *UserStore) GetByEmailAndTenant(ctx context.Context, email string, tenan
 	var role string
 	err := row.Scan(
 		&u.UserID, &u.TenantID, &u.Email, &u.PasswordHash, &role, &u.FullName,
+		&u.Title, &u.RegistrationNumber,
 		&u.IsActive, &u.TOTPSecretEnc, &u.TOTPEnabled, &u.TOTPBackupCodesEnc,
 		&u.DeviceBindingKeyEnc, &u.LastLoginAt, &u.FailedLoginCount,
 		&u.LockedUntil, &u.CreatedAt, &u.UpdatedAt,

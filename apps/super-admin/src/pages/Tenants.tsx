@@ -6,6 +6,7 @@ const EMPTY_FORM = {
   name: '', domain: '', institution_id: '', attendance_threshold: 75,
   logo_url: '',
   brand_color: '#1a73e8', sidebar_color: '#1e293b', background_color: '#f1f5f9', footer_color: '#0f172a',
+  text_color_light: '#0f172a', text_color_dark: '#e2e8f0',
   motto: '', slogan: '', address: '',
 }
 
@@ -48,6 +49,7 @@ export default function Tenants() {
         institution_id: form.institution_id,
         logo_url: form.logo_url, brand_color: form.brand_color,
         sidebar_color: form.sidebar_color, background_color: form.background_color, footer_color: form.footer_color,
+        text_color_light: form.text_color_light, text_color_dark: form.text_color_dark,
         motto: form.motto, slogan: form.slogan, address: form.address,
       })
       setEditing(null); load()
@@ -76,6 +78,8 @@ export default function Tenants() {
       sidebar_color: t.sidebar_color || '#1e293b',
       background_color: t.background_color || '#f1f5f9',
       footer_color: t.footer_color || '#0f172a',
+      text_color_light: t.text_color_light || '#0f172a',
+      text_color_dark: t.text_color_dark || '#e2e8f0',
       motto: t.motto, slogan: t.slogan, address: t.address,
     })
   }
@@ -119,6 +123,8 @@ export default function Tenants() {
             <ColorPicker label="Sidebar / header" value={form.sidebar_color} onChange={v => setForm(f => ({ ...f, sidebar_color: v }))} />
             <ColorPicker label="Background" value={form.background_color} onChange={v => setForm(f => ({ ...f, background_color: v }))} />
             <ColorPicker label="Footer" value={form.footer_color} onChange={v => setForm(f => ({ ...f, footer_color: v }))} />
+            <ColorPicker label="Text — light mode" value={form.text_color_light} onChange={v => setForm(f => ({ ...f, text_color_light: v }))} />
+            <ColorPicker label="Text — dark mode" value={form.text_color_dark} onChange={v => setForm(f => ({ ...f, text_color_dark: v }))} />
           </div>
 
           <div style={{ ...grid, marginTop: 16 }}>

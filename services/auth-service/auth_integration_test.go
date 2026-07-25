@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -82,7 +83,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *redis.Clie
 	userStore  := store.NewUserStore(pool)
 	tokenStore := store.NewTokenStore(rdb)
 	jwtSvc     := crypto.NewJWTService(jwtCfg)
-	h          := handlers.NewAuthHandler(userStore, tokenStore, jwtSvc, jwtCfg.TTL)
+	h          := handlers.NewAuthHandler(userStore, tokenStore, jwtSvc, jwtCfg.TTL, true, "")
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.Recoverer)
@@ -130,7 +131,9 @@ func TestLogin_ValidCredentials(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(b))
 	}
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result) //nolint:errcheck
