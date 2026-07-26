@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Host theme for MainActivity. This is a Jetpack Compose app, so Compose draws
-         the actual Material3 UI in Kotlin; the activity theme only needs to be a valid
-         no-action-bar theme. (Replaces the missing Material-Components views theme that
-         the manifest referenced, which needed com.google.android.material.) -->
-    <style name="Theme.QAATCoordinator" parent="android:Theme.Material.Light.NoActionBar" />
-</resources>

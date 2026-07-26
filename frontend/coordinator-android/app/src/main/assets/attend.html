@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<!-- Minimal student check-in page served by the embedded server over the hotspot.
+     The camera app opens this URL with the signed QR payload in ?qr=. The student
+     types the room code; we POST {qr, room_code, fingerprint} to /submit.
+     Phase B: replace/merge with the gateway's full branded page (checkin_page.go),
+     which already includes the "Turn your Wi-Fi OFF now" rotation screen. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QAAT — Check in</title>
+<style>body{font-family:system-ui;max-width:380px;margin:auto;padding:24px;text-align:center}
+input{font-size:32px;letter-spacing:8px;text-align:center;width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px}
+button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#2563eb;border:0;border-radius:12px}
+#ok{display:none}.big{background:#fffbeb;border:2px solid #f59e0b;border-radius:14px;padding:16px;margin-top:16px}
+.t{font-size:18px;font-weight:800;color:#b45309}</style></head>
+<body>
+<div id="banner" style="display:none;position:fixed;top:0;left:0;right:0;padding:12px;text-align:center;font-weight:700;color:#fff;background:#2563eb"></div>
+<div id="form">
+  <h2>Enter the room code</h2>
+  <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autofocus>
+  <button onclick="submit()">Confirm attendance</button>
+  <p id="err" style="color:#b91c1c"></p>
+</div>
+<div id="ok">
+  <div style="font-size:56px">✅</div><h2>You're marked present</h2>
+  <div class="big"><div class="t">📴 Turn your Wi-Fi OFF now</div>
+    <p>A classmate needs your spot. Disconnect from the class Wi-Fi so the next student can check in.</p></div>
+</div>
+<script>
+var qs=new URLSearchParams(location.search), qr=qs.get('qr')||'';
+async function fingerprint(){var raw=[navigator.userAgent,navigator.language,screen.width+'x'+screen.height,new Date().getTimezoneOffset()].join('|');
+  var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function submit(){
+  var code=document.getElementById('code').value.trim();
+  if(!/^[0-9]{6}$/.test(code)){document.getElementById('err').textContent='Enter the 6-digit code on the screen.';return;}
+  var fp=await fingerprint();
+  var body=new URLSearchParams({qr:qr,room_code:code,fingerprint:fp});
+  var r=await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+  var d=await r.json();
+  if(d.status==='PRESENT'){document.getElementById('form').style.display='none';document.getElementById('ok').style.display='block';}
+  else{document.getElementById('err').textContent='Rejected: '+(d.reason||'try again');}
+}
+// In-session announcements: subscribe once the page loads; show a coloured banner.
+try {
+  var es = new EventSource('/events');
+  es.onmessage = function(e){
+    try { var a = JSON.parse(e.data); var b = document.getElementById('banner');
+      var colors = { URGENT:'#dc2626', REMINDER:'#d97706', SESSION_END:'#475569', GENERAL:'#2563eb' };
+      b.style.background = colors[a.type] || '#2563eb'; b.textContent = a.message; b.style.display = 'block';
+    } catch(_){}
+  };
+} catch(_){}
+</script></body></html>

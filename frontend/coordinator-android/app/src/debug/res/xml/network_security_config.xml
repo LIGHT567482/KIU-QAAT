@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEBUG ONLY. Lets the app reach a dev backend on the laptop/emulator over a
+     self-signed cert + cleartext, without weakening release builds. -->
+<network-security-config>
+    <!-- Trust user-added CAs (so you can install infra/certs/qaat.crt on the device). -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <!-- The embedded server + dev hosts. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">qaat.local</domain>
+    </domain-config>
+</network-security-config>

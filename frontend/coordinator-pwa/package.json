@@ -1,0 +1,43 @@
+{
+  "name": "coordinator-pwa",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xstate/react": "^5.0.2",
+    "dexie": "^3.2.7",
+    "jsrsasign": "^11.1.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "workbox-background-sync": "^7.1.0",
+    "workbox-core": "^7.1.0",
+    "workbox-precaching": "^7.1.0",
+    "workbox-routing": "^7.1.0",
+    "workbox-strategies": "^7.1.0",
+    "workbox-window": "^7.4.1",
+    "xstate": "^5.11.0",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/jsrsasign": "^10.5.15",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/web-bluetooth": "^0.0.21",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1",
+    "vite-plugin-pwa": "^0.20.0",
+    "vitest": "^1.6.0"
+  }
+}
