@@ -50,8 +50,19 @@ object AppState {
     var roomCode by mutableStateOf("------")      // STATIC student room code (does not rotate)
     var lecturerCode by mutableStateOf("------")  // ROTATING lecturer code (changes every 10s)
     var secondsLeft by mutableStateOf(10)
-    var hotspotSsid by mutableStateOf<String?>(null)
-    var hotspotPass by mutableStateOf<String?>(null)
-    // Base URL of the in-room server on the hotspot (LocalOnlyHotspot gateway is 192.168.49.1).
-    val inRoomBaseUrl: String get() = "http://192.168.49.1:8080"
+    var hotspotSsid by mutableStateOf<String?>(null)   // the ACTIVE name students must join
+    var hotspotPass by mutableStateOf<String?>(null)   // the ACTIVE password
+    // True once the foreground service has built the in-room server. The "Start taking
+    // attendance" button waits on this so open() never touches an uninitialized server.
+    var serverReady by mutableStateOf(false)
+    // Hotspot mode. true = the coordinator runs THEIR OWN phone hotspot, named after the cohort,
+    // so students in a shared multi-coordinator room can pick the right network by name; the app
+    // only serves on it. false = the app starts its own LocalOnlyHotspot (auto/random name).
+    var useSystemHotspot by mutableStateOf(true)
+    // True once the app has found the phone's IP on the active hotspot (system-hotspot mode).
+    var hotspotUp by mutableStateOf(false)
+    // The in-room server's IP on the hotspot interface. LocalOnlyHotspot's gateway is
+    // 192.168.49.1; a system/tethering hotspot is usually 192.168.x.1 — detected at runtime.
+    var inRoomIp by mutableStateOf("192.168.49.1")
+    val inRoomBaseUrl: String get() = "http://$inRoomIp:8080"
 }

@@ -30,7 +30,11 @@ class SessionService : Service() {
         const val CHANNEL = "qaat_session"
         val hotspot = AtomicReference<HotspotManager.Info?>(null)
         val session = AtomicReference<SessionManager?>(null)
-        lateinit var server: InRoomServer; private set
+        // Nullable (NOT lateinit): if onCreate fails before wiring the server, or a session is
+        // opened before the service has finished starting, callers see null and degrade instead
+        // of crashing with UninitializedPropertyAccessException. Readiness is observable via
+        // AppState.serverReady, which gates the "Start taking attendance" button.
+        @Volatile var server: InRoomServer? = null; private set
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -62,19 +66,44 @@ class SessionService : Service() {
 
             val attend = runCatching { assets.open("attend.html").bufferedReader().use { it.readText() } }.getOrDefault("")
             val gate = runCatching { assets.open("gate.html").bufferedReader().use { it.readText() } }.getOrDefault("")
-            server = InRoomServer(validator, attend, gate)
-            ktor = runCatching { server.start(8080) }.getOrNull()
+            val srv = InRoomServer(validator, attend, gate)
+            server = srv
+            ktor = runCatching { srv.start(8080) }.getOrNull()
+            // The server object is now usable for setLive/clear; let the UI enable "open session".
+            ug.qaat.coordinator.ui.AppState.serverReady = true
 
-            hotspotMgr = HotspotManager(this)
-            hotspotMgr.start(
-                onReady = { info ->
-                    hotspot.set(info)
-                    ug.qaat.coordinator.ui.AppState.hotspotSsid = info.ssid
-                    ug.qaat.coordinator.ui.AppState.hotspotPass = info.passphrase
-                    update("Hotspot: ${info.ssid} — tell students to disconnect after ✓")
-                },
-                onError = { update("Wi-Fi hotspot unavailable ($it). Share a Wi-Fi/hotspot manually; check-in still works.") },
-            )
+            if (ug.qaat.coordinator.ui.AppState.useSystemHotspot) {
+                // System-hotspot mode: the coordinator runs their OWN phone hotspot, named after
+                // the cohort, so students in a shared multi-coordinator room pick the right network
+                // by name. We do NOT start a hotspot — we only poll for our IP on it so the
+                // check-in + lecturer-gate URLs point at the right gateway.
+                scope.launch {
+                    repeat(120) {
+                        val ip = HotspotManager.detectApIp()
+                        if (ip != null) {
+                            ug.qaat.coordinator.ui.AppState.inRoomIp = ip
+                            ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                            update("Serving on your hotspot ($ip). Students: join your cohort's Wi-Fi.")
+                            return@launch
+                        }
+                        ug.qaat.coordinator.ui.AppState.hotspotUp = false
+                        update("Turn ON your phone's hotspot (name it after your cohort). Students join it.")
+                        delay(3000)
+                    }
+                }
+            } else {
+                hotspotMgr = HotspotManager(this)
+                hotspotMgr.start(
+                    onReady = { info ->
+                        hotspot.set(info)
+                        ug.qaat.coordinator.ui.AppState.hotspotSsid = info.ssid
+                        ug.qaat.coordinator.ui.AppState.hotspotPass = info.passphrase
+                        ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                        update("Hotspot: ${info.ssid} — tell students to disconnect after ✓")
+                    },
+                    onError = { update("Wi-Fi hotspot unavailable ($it). Turn on your phone hotspot instead; check-in still works.") },
+                )
+            }
         } catch (e: Throwable) {
             update("Session server error: ${e.message}")
         }
@@ -92,8 +121,10 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        ug.qaat.coordinator.ui.AppState.serverReady = false
         runCatching { ktor?.stop(100, 200) }
-        runCatching { server.clear() }              // no-op if startup never got this far
+        runCatching { server?.clear() }             // null if startup never got this far
+        server = null
         runCatching { if (this::hotspotMgr.isInitialized) hotspotMgr.stop() }
         super.onDestroy()
     }

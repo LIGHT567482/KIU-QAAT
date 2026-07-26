@@ -34,9 +34,31 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         if (units.isEmpty()) { Text("No units scheduled for today in the manifest."); return }
 
         Spacer(Modifier.height(12.dp))
-        Text("1. Start the room Wi-Fi + server", style = MaterialTheme.typography.titleSmall)
-        Button(onClick = { ctx.startForegroundService(Intent(ctx, SessionService::class.java)) }) {
-            Text(AppState.hotspotSsid?.let { "Hotspot: $it" } ?: "Start hotspot + server")
+        Text("1. Your cohort's Wi-Fi", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Turn ON your phone's Hotspot and name it after your cohort" +
+                (AppState.cohortLabel?.takeIf { it.isNotBlank() }?.let { " — e.g. \"$it\"" } ?: "") +
+                ". In a shared room, students pick that name to connect to YOUR session.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row {
+            OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) } }) {
+                Text("Open hotspot settings")
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = { AppState.useSystemHotspot = true; ctx.startForegroundService(Intent(ctx, SessionService::class.java)) }) {
+                Text(if (AppState.serverReady) "Server running" else "Start server")
+            }
+        }
+        if (AppState.serverReady) {
+            Text(
+                if (AppState.hotspotUp) "✓ Ready — serving on your hotspot (${AppState.inRoomIp}). Students: join your cohort's Wi-Fi."
+                else "Server on. Now turn ON your phone's hotspot (named after your cohort) so students can join.",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (AppState.hotspotUp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -77,8 +99,15 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
+        // Wait for the foreground service to finish building the in-room server before allowing
+        // open() — otherwise it would touch an uninitialized server and crash.
+        if (!AppState.serverReady) {
+            Text("Tap “Start hotspot + server” above and wait for it to come up first.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+        }
         Button(
-            enabled = selectedUnit != null && effectiveStaffId.isNotBlank(),
+            enabled = AppState.serverReady && selectedUnit != null && effectiveStaffId.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             onClick = { SessionController.open(selectedUnit!!, effectiveStaffId); onOpened() },
         ) { Text("Start taking attendance") }

@@ -13,6 +13,21 @@ import android.os.Build
 class HotspotManager(private val context: Context) {
     data class Info(val ssid: String, val passphrase: String)
 
+    companion object {
+        /** Best-effort: the phone's own IPv4 on its hotspot/AP interface, so the check-in +
+         *  lecturer-gate URLs point at the right gateway when the coordinator uses their OWN
+         *  (cohort-named) system hotspot. The AP gateway is conventionally x.x.x.1. Returns null
+         *  until a hotspot is actually up. */
+        fun detectApIp(): String? = runCatching {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .mapNotNull { it.hostAddress }
+                .firstOrNull { (it.startsWith("192.168.") || it.startsWith("172.") || it.startsWith("10.")) && it.endsWith(".1") }
+        }.getOrNull()
+    }
+
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
 
     fun start(onReady: (Info) -> Unit, onError: (String) -> Unit) {

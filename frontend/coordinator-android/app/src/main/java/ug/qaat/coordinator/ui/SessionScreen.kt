@@ -58,7 +58,7 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 Text("STUDENT ROOM CODE", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp)
                 Text(AppState.roomCode, color = MaterialTheme.colorScheme.inverseOnSurface,
                     fontSize = 48.sp, fontFamily = FontFamily.Monospace)
-                Text("students scan the Wi-Fi QR to join, then type this code · Wi-Fi: ${AppState.hotspotSsid ?: "starting…"}",
+                Text("students join YOUR cohort's Wi-Fi, then type this code",
                     color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 11.sp, textAlign = TextAlign.Center)
             }
         }
