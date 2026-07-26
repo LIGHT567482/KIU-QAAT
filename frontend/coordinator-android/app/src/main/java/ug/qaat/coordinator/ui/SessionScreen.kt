@@ -73,7 +73,11 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             val ssid = AppState.hotspotSsid; val pass = AppState.hotspotPass
-            if (!ssid.isNullOrBlank()) QrCard("1 · Join Wi-Fi", wifiQrPayload(ssid, pass ?: ""), if (pass.isNullOrBlank()) ssid else "$ssid")
+            // In a shared room with several coordinators' hotspots, students pick THEIR cohort's
+            // phone and scan this QR — it carries the exact SSID+password, so they auto-join the
+            // right network no matter its random OS name. The caption names the cohort to guide them.
+            val cohort = AppState.cohortLabel?.takeIf { it.isNotBlank() }
+            if (!ssid.isNullOrBlank()) QrCard("1 · Join Wi-Fi", wifiQrPayload(ssid, pass ?: ""), cohort ?: ssid)
             QrCard("2 · Check-in page", "${AppState.inRoomBaseUrl}/attend", "Scan to open")
             QrCard("Lecturer gate", "${AppState.inRoomBaseUrl}/gate", "Lecturer scans")
         }
