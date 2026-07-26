@@ -45,8 +45,15 @@ object Net {
         val sysTm = sysTmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
 
         val cf = CertificateFactory.getInstance("X.509")
-        val ca = appContext.resources.openRawResource(R.raw.qaat_ca).use { cf.generateCertificate(it) }
-        val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null); setCertificateEntry("qaat", ca) }
+        // Bundle = local self-signed cert + the cloud roots (GTS Root R4 / GlobalSign Root CA)
+        // that anchor the onrender.com chain. Embedding them means the cloud cert validates
+        // even on older phones whose OS CA store predates the Google Trust Services roots
+        // (the "Trust anchor for certification path not found" case).
+        val cas = appContext.resources.openRawResource(R.raw.qaat_ca).use { cf.generateCertificates(it) }
+        val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null, null)
+            cas.forEachIndexed { i, c -> setCertificateEntry("qaat$i", c) }
+        }
         val embTmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
         embTmf.init(ks)
         val embTm = embTmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
