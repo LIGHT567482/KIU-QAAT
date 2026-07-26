@@ -2,6 +2,8 @@ package ug.qaat.coordinator.net
 
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import ug.qaat.coordinator.db.AppDao
 import ug.qaat.coordinator.db.RosterEntity
@@ -32,7 +34,12 @@ class ManifestClient(private val dao: AppDao) {
     suspend fun fetchAndStore(token: String): Parsed {
         val r = http.get("$base/api/v1/manifest/daily") { header("Authorization", "Bearer $token") }
         require(r.status.value in 200..299) { "manifest fetch failed: ${r.status.value}" }
-        val j = JSONObject(r.bodyAsText())
+        val bodyText = r.bodyAsText()
+        // Parse + cache to Room OFF the main thread. This is called from the login coroutine
+        // (Compose Main dispatcher) as well as the IO refresh path; Room throws on a
+        // main-thread write, so pin the whole parse-and-store step to IO.
+        return withContext(Dispatchers.IO) {
+        val j = JSONObject(bodyText)
 
         val publicKey = j.optString("institution_public_key", "")
         val hashKey = j.optString("student_hash_key", "")
@@ -60,6 +67,7 @@ class ManifestClient(private val dao: AppDao) {
             rosterByUnit[unitId] = rows
             dao.upsertRoster(rows)   // cache for offline validation
         }
-        return Parsed(academicYear, publicKey, hashKey, units, rosterByUnit)
+        Parsed(academicYear, publicKey, hashKey, units, rosterByUnit)
+        }
     }
 }

@@ -81,8 +81,10 @@ fun DashboardScreen() {
                 }
             } else emptyList()
         }
-        last = runCatching { client.lastRoster(t) }.getOrNull() ?: run {
-            // Offline fallback: build last-roster from Room attendance.
+        last = runCatching { client.lastRoster(t) }.getOrNull() ?: withContext(Dispatchers.IO) {
+            // Offline fallback: build last-roster from Room attendance. MUST run off the main
+            // thread — Room throws IllegalStateException on a main-thread query (loadOnline is
+            // launched from a Compose LaunchedEffect, which dispatches on the UI thread).
             val dao = Graph.db.dao()
             val recent = if (AppState.currentSessionId != null)
                 listOfNotNull(dao.rosterForSession(AppState.currentSessionId!!).takeIf { it.isNotEmpty() }?.let {
