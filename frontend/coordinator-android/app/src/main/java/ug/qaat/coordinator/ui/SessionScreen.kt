@@ -44,14 +44,22 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         .collectAsStateWithLifecycle(0)
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
+        // Session identity = the COHORT (its natural name). Android assigns the actual Wi-Fi
+        // name itself and an app can't rename it, so students JOIN by scanning the Wi-Fi QR
+        // below rather than by reading a name; this header just tells everyone whose room it is.
+        AppState.cohortLabel?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+        }
         // Student room code — STATIC for the whole session (students on the hotspot type this).
         Surface(color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.medium) {
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("STUDENT ROOM CODE", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp)
                 Text(AppState.roomCode, color = MaterialTheme.colorScheme.inverseOnSurface,
                     fontSize = 48.sp, fontFamily = FontFamily.Monospace)
-                Text("students enter this · stays the same · ${AppState.hotspotSsid ?: "hotspot off"}",
-                    color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 11.sp)
+                Text("students scan the Wi-Fi QR to join, then type this code · Wi-Fi: ${AppState.hotspotSsid ?: "starting…"}",
+                    color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 11.sp, textAlign = TextAlign.Center)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -101,7 +109,7 @@ fun SessionScreen(onOpenSession: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Button(onClick = {
                 val m = msg.trim(); if (m.isNotEmpty()) {
-                    scope.launch { runCatching { SessionService.server.broadcast("GENERAL", m) } }; msg = ""
+                    scope.launch { runCatching { SessionService.server?.broadcast("GENERAL", m) } }; msg = ""
                 }
             }) { Text("Send") }
         }
