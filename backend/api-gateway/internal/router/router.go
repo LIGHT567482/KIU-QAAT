@@ -117,6 +117,13 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(5, 60)).
 		Post("/api/v1/auth/login", authProxy)
 
+	// Lecturer dashboard login is passwordless: lecturers hold no usable password
+	// (they are QR-only), so institution + staff ID resolve the lecturer — the same
+	// trust model as the read-only lecturer portal — and a read-only LECTURER token
+	// is minted. Rate-limited per-IP to slow staff-ID enumeration.
+	r.With(middleware.PublicIPRateLimit(10, 60)).
+		Post("/api/v1/auth/lecturer-login", handlers.LecturerPasswordlessLogin(adminPool))
+
 	// Tenant lookup by student email — used by the check-in page to auto-resolve
 	// tenant_id so students never need to know or type it.
 	r.Get("/api/v1/auth/tenant-lookup", handlers.TenantLookup(adminPool))

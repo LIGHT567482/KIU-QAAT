@@ -1,0 +1,265 @@
+# QAAT — Render Blueprint (Infrastructure as Code)
+# ---------------------------------------------------------------------------
+# Provisions the whole backend: managed Postgres + Redis (Key Value) + 6 services
+# (api-gateway public, the rest private). Launch via Render dashboard →
+# "New → Blueprint" pointed at this repo, or `render blueprint launch`.
+#
+# THREE things this file cannot do for you (Render requires them out-of-band):
+#   1. RSA JWT keys  — upload keys/auth_private.pem + keys/auth_public.pem as
+#      "Secret Files" on each service (mounted at /etc/secrets/…). Paths are set below.
+#   2. DB_URL (qaat_app) — after the DB exists, run infra/render/bootstrap_db.sh to
+#      apply migrations + create the RLS role, then paste the qaat_app URL where DB_URL
+#      is marked `sync: false`.
+#   3. Secrets marked `sync: false` — paste the values from
+#      infra/render/secrets.generated.env (KEY_ENCRYPTION_KEY, INTERNAL_SVC_KEY) once.
+# ---------------------------------------------------------------------------
+
+databases:
+  - name: qaat-postgres
+    databaseName: qaat
+    user: qaat            # owner role; the RLS `qaat_app` role is created by bootstrap
+    plan: free            # bump to `starter`+ for production durability
+    region: oregon
+    postgresMajorVersion: "15"
+
+services:
+  # ─── Redis / Key Value (auth jti blacklist + sync chunk staging) ───────────
+  - type: keyvalue
+    name: qaat-redis
+    plan: free
+    region: oregon
+    ipAllowList: []       # internal-only, no public access
+    maxmemoryPolicy: noeviction
+
+  # ─── Shared secrets (identical across services that must agree) ────────────
+  # Defined once here and referenced with `fromGroup` so KEY_ENCRYPTION_KEY /
+  # INTERNAL_SVC_KEY are the SAME string everywhere (a mismatch breaks sealed
+  # packages + service-to-service token minting).
+
+  # ─── api-gateway (PUBLIC entry point) ──────────────────────────────────────
+  - type: web
+    name: qaat-gateway
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/api-gateway
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter         # keep the public gateway warm (free tier sleeps)
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8443"
+      - key: ENVIRONMENT
+        value: production
+      - key: ADMIN_DB_URL          # privileged owner role (cross-tenant admin handlers)
+        fromDatabase:
+          name: qaat-postgres
+          property: connectionString
+      - key: DB_URL                # RLS role — paste qaat_app URL after bootstrap
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: qaat-redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://admin-dashboards-gamma.vercel.app,https://coordinator-pwa.vercel.app,https://student-portal-xi-ruddy.vercel.app,https://super-admin-seven-gamma.vercel.app
+      - key: AUTH_SERVICE_URL
+        value: http://qaat-auth:8081
+      - key: QR_GENERATOR_URL
+        value: http://qaat-qr:3002
+      - key: SESSION_MANAGER_URL
+        value: http://qaat-session:8082
+      - key: SYNC_RECEIVER_URL
+        value: http://qaat-sync:8083
+      - key: JWT_ISSUER
+        fromGroup: qaat-shared
+      - key: JWT_AUDIENCE
+        fromGroup: qaat-shared
+      - key: INTERNAL_SVC_KEY
+        fromGroup: qaat-shared
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/auth_public.pem
+      - key: WEBAUTHN_RP_ID
+        value: qaat-gateway.onrender.com
+      - key: WEBAUTHN_RP_NAME
+        value: QAAT
+      - key: WEBAUTHN_RP_ORIGINS
+        value: https://qaat-gateway.onrender.com
+      - key: STUDENT_CHECKIN_BASE_URL
+        value: https://qaat-gateway.onrender.com
+      - key: LECTURER_CHECKIN_BASE_URL
+        value: https://qaat-gateway.onrender.com
+
+  # ─── auth-service (private) ────────────────────────────────────────────────
+  - type: pserv
+    name: qaat-auth
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/auth-service
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "8081"
+      - key: ENVIRONMENT
+        value: production
+      - key: DB_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: qaat-redis
+          property: connectionString
+      - key: KEY_ENCRYPTION_KEY
+        fromGroup: qaat-shared
+      - key: INTERNAL_SVC_KEY
+        fromGroup: qaat-shared
+      - key: JWT_ISSUER
+        fromGroup: qaat-shared
+      - key: JWT_AUDIENCE
+        fromGroup: qaat-shared
+      - key: RSA_PRIVATE_KEY_PATH
+        value: /etc/secrets/auth_private.pem
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/auth_public.pem
+      - key: DISABLE_MFA          # set true only if you don't enforce TOTP for VC/DQA
+        value: "false"
+
+  # ─── session-manager (private) ─────────────────────────────────────────────
+  - type: pserv
+    name: qaat-session
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/session-manager
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "8082"
+      - key: JWT_ISSUER
+        fromGroup: qaat-shared
+      - key: JWT_AUDIENCE
+        fromGroup: qaat-shared
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/auth_public.pem
+      - key: WARDEN_BASE_URL
+        value: https://qaat-gateway.onrender.com
+
+  # ─── sync-receiver (private) ───────────────────────────────────────────────
+  - type: pserv
+    name: qaat-sync
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/sync-receiver
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "8083"
+      - key: DB_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: qaat-redis
+          property: connectionString
+      - key: KEY_ENCRYPTION_KEY
+        fromGroup: qaat-shared
+      - key: SYNC_SIGN_KEY
+        sync: false
+      - key: JWT_ISSUER
+        fromGroup: qaat-shared
+      - key: JWT_AUDIENCE
+        fromGroup: qaat-shared
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/auth_public.pem
+
+  # ─── qr-generator (private) ────────────────────────────────────────────────
+  - type: pserv
+    name: qaat-qr
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/qr-generator
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "3002"
+      - key: DB_URL
+        sync: false
+      - key: KEY_ENCRYPTION_KEY
+        fromGroup: qaat-shared
+      - key: JWT_ISSUER
+        fromGroup: qaat-shared
+      - key: JWT_AUDIENCE
+        fromGroup: qaat-shared
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/auth_public.pem
+      - key: STUDENT_CHECKIN_BASE_URL
+        value: https://qaat-gateway.onrender.com
+      - key: STUDENT_PORTAL_URL
+        value: https://student-portal-xi-ruddy.vercel.app
+      # SMTP for QR emails — paste real creds in the dashboard (sync:false)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "true"
+
+  # ─── notification-service (private) ────────────────────────────────────────
+  - type: pserv
+    name: qaat-notify
+    runtime: docker
+    repo: https://github.com/LIGHT567482/QAAT
+    branch: main
+    rootDir: backend/notification-service
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter
+    envVars:
+      - key: PORT
+        value: "3004"
+      - key: PLATFORM_DOMAIN
+        value: qaat-gateway.onrender.com
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "true"
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+
+# ─── Shared env var group ────────────────────────────────────────────────────
+envVarGroups:
+  - name: qaat-shared
+    envVars:
+      - key: JWT_ISSUER
+        value: qaat-auth
+      - key: JWT_AUDIENCE
+        value: qaat-api
+      - key: KEY_ENCRYPTION_KEY   # paste from infra/render/secrets.generated.env
+        sync: false
+      - key: INTERNAL_SVC_KEY     # paste from infra/render/secrets.generated.env
+        sync: false

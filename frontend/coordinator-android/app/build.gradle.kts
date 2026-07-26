@@ -19,7 +19,7 @@ android {
         // self-signed cert, and the URL is switchable at runtime (login "server" field /
         // Net.setBaseUrl). This is only the default; override it per build if you like:
         //   ./gradlew assembleRelease -Pqaat.apiBase=https://api.yourdomain.com
-        val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://192.168.1.18:8443"
+        val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://qaat-gateway.onrender.com"
         buildConfigField("String", "API_BASE", "\"$apiBase\"")
     }
     buildFeatures { compose = true; buildConfig = true }

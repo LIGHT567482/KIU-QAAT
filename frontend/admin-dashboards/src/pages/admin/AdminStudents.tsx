@@ -57,10 +57,13 @@ export default function AdminStudents() {
   )
   // This tenant's student-progress portal link (carries the institution domain so
   // a student only ever sees THIS institution's records).
-  const brandQ = useQuery<{ domain: string }>(() => api.get('/api/v1/branding'))
+  const brandQ = useQuery<{ domain: string; active_academic_year?: string }>(() => api.get('/api/v1/branding'))
   const portalLink = brandQ.data?.domain
     ? `${location.protocol}//${location.hostname}:3003/?org=${brandQ.data.domain}`
     : ''
+  // The institution's active academic year (set once in Settings). Students inherit
+  // it — no need to re-type it per registration, same as the cohort-derived fields.
+  const activeAY = brandQ.data?.active_academic_year ?? ''
 
   // Tenant-defined intakes (#1) — admin-configurable; offered at registration.
   const intakesQ = useQuery<{ intakes: string[] }>(() => api.get('/api/v1/admin/settings/intakes'), [tenantId])
@@ -80,6 +83,10 @@ export default function AdminStudents() {
     offering_id: '', level: '', current_year: 0, semester: 0,
     academic_year: '', intake_session: '',
   })
+  // Inherit the institution's active academic year into the form once it loads.
+  useEffect(() => {
+    if (activeAY) setForm(f => (f.academic_year ? f : { ...f, academic_year: activeAY }))
+  }, [activeAY])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [qrFor, setQrFor] = useState<{ id: string; name: string } | null>(null)
@@ -197,7 +204,7 @@ export default function AdminStudents() {
         academic_year: form.academic_year, intake_session: form.intake_session,
       })
       setCreating(false)
-      setForm({ student_id: '', full_name: '', email: '', offering_id: '', level: '', current_year: 0, semester: 0, academic_year: '', intake_session: '' })
+      setForm({ student_id: '', full_name: '', email: '', offering_id: '', level: '', current_year: 0, semester: 0, academic_year: activeAY, intake_session: '' })
       setPick({ course: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
@@ -342,7 +349,13 @@ export default function AdminStudents() {
             </label>
             <label style={{ display: 'block' }}>
               <div style={labelStyle}>Session</div>
-              <select value={form.offering_id} disabled={!pick.course} onChange={e => setForm(f => ({ ...f, offering_id: e.target.value }))} style={selectStyle}>
+              <select value={form.offering_id} disabled={!pick.course} onChange={e => {
+                // Picking the cohort inherits its year/semester/level/intake — no need
+                // to re-ask (they are properties of the cohort, not the student).
+                const off = (offerings ?? []).find(o => o.offering_id === e.target.value)
+                setForm(f => ({ ...f, offering_id: e.target.value,
+                  ...(off ? { level: off.level, intake_session: off.intake, current_year: off.study_year, semester: off.semester } : {}) }))
+              }} style={selectStyle}>
                 <option value="">— Select session —</option>
                 {(offerings ?? []).filter(o => o.course_name === pick.course).map(o => (
                   <option key={o.offering_id} value={o.offering_id}>{cohortLabel(o)}</option>
@@ -355,39 +368,45 @@ export default function AdminStudents() {
               )}
             </label>
             <label style={{ display: 'block' }}>
-              <div style={labelStyle}>Level of study</div>
-              <select value={form.level} onChange={e => setForm(f => ({ ...f, level: e.target.value }))} style={selectStyle}>
+              <div style={labelStyle}>Level of study{form.offering_id ? ' · from cohort' : ''}</div>
+              <select value={form.level} disabled={!!form.offering_id} onChange={e => setForm(f => ({ ...f, level: e.target.value }))} style={form.offering_id ? greyed : selectStyle}>
                 <option value="">— Select level —</option>
                 {levelOptions.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </label>
 
             <label style={{ display: 'block' }}>
-              <div style={labelStyle}>Intake</div>
-              <select value={form.intake_session} onChange={e => setForm(f => ({ ...f, intake_session: e.target.value }))} style={{ ...selectStyle, color: form.intake_session ? '#1e293b' : 'var(--muted)' }}>
+              <div style={labelStyle}>Intake{form.offering_id ? ' · from cohort' : ''}</div>
+              <select value={form.intake_session} disabled={!!form.offering_id} onChange={e => setForm(f => ({ ...f, intake_session: e.target.value }))} style={form.offering_id ? greyed : { ...selectStyle, color: form.intake_session ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 {intakeOptions.map(s => <option key={s} value={s} style={{ color: '#1e293b' }}>{s}</option>)}
               </select>
             </label>
 
             <label style={{ display: 'block' }}>
-              <div style={labelStyle}>Year of Study</div>
-              <select value={form.current_year || ''} onChange={e => setForm(f => ({ ...f, current_year: Number(e.target.value) }))} style={{ ...selectStyle, color: form.current_year ? '#1e293b' : 'var(--muted)' }}>
+              <div style={labelStyle}>Year of Study{form.offering_id ? ' · from cohort' : ''}</div>
+              <select value={form.current_year || ''} disabled={!!form.offering_id} onChange={e => setForm(f => ({ ...f, current_year: Number(e.target.value) }))} style={form.offering_id ? greyed : { ...selectStyle, color: form.current_year ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 {[1, 2, 3, 4].map(y => <option key={y} value={y} style={{ color: '#1e293b' }}>Year {y}</option>)}
               </select>
             </label>
 
             <label style={{ display: 'block' }}>
-              <div style={labelStyle}>Semester</div>
-              <select value={form.semester || ''} onChange={e => setForm(f => ({ ...f, semester: Number(e.target.value) }))} style={{ ...selectStyle, color: form.semester ? '#1e293b' : 'var(--muted)' }}>
+              <div style={labelStyle}>Semester{form.offering_id ? ' · from cohort' : ''}</div>
+              <select value={form.semester || ''} disabled={!!form.offering_id} onChange={e => setForm(f => ({ ...f, semester: Number(e.target.value) }))} style={form.offering_id ? greyed : { ...selectStyle, color: form.semester ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select —</option>
                 <option value={1} style={{ color: '#1e293b' }}>Semester 1</option>
                 <option value={2} style={{ color: '#1e293b' }}>Semester 2</option>
               </select>
             </label>
 
-            <Input label="Academic Year" value={form.academic_year} onChange={v => setForm(f => ({ ...f, academic_year: v }))} placeholder="e.g. 2024/2025" />
+            <label style={{ display: 'block' }}>
+              <div style={labelStyle}>Academic Year{activeAY ? ' · institution year' : ''}</div>
+              <input value={form.academic_year} disabled={!!activeAY}
+                onChange={e => setForm(f => ({ ...f, academic_year: e.target.value }))}
+                placeholder="e.g. 2024/2025" style={activeAY ? greyed : selectStyle} />
+              {!activeAY && <p style={{ fontSize: 11, color: '#f59e0b', margin: '4px 0 0' }}>Tip: set the institution's active academic year in Settings so this fills in automatically.</p>}
+            </label>
           </div>
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
             The student is identified by their registration number. Their attendance QR is available from the “Show QR” button after registration.
@@ -652,4 +671,6 @@ const btnPrimary: React.CSSProperties = { padding: '8px 16px', background: '#1e2
 const btnGhost: React.CSSProperties = { padding: '8px 12px', background: '#fff', color: '#334155', border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 const labelStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, color: '#475569' }
 const selectStyle: React.CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }
+// Fields inherited from the chosen cohort: shown filled but locked (no need to re-enter).
+const greyed: React.CSSProperties = { ...selectStyle, background: '#eef2f7', color: '#64748b', cursor: 'not-allowed' }
 const errorBox:   React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }

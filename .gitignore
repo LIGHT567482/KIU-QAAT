@@ -43,4 +43,4 @@ coverage/
 *.out
 next.txt
 coordinator'sapp.md
-HowItWorks.md
+HowItWorks.mdinfra/render/secrets.generated.env

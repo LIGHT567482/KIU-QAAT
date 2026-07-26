@@ -18,14 +18,17 @@ const CHECKIN_BASE_URL = (
 const STUDENT_PORTAL_URL = (process.env.STUDENT_PORTAL_URL || '').replace(/\/$/, '')
 
 // Renders a 1024×1024 PNG buffer from a signed QR payload.
-export async function renderQRImage(payload: SignedQRPayload): Promise<Buffer> {
+export async function renderQRImage(payload: SignedQRPayload, org?: string): Promise<Buffer> {
   const token = Buffer.from(JSON.stringify(payload)).toString('base64url')
   // Open the full student portal when configured; otherwise fall back to the
   // single-session captive check-in page on the API origin.
   // Encode only the short, globally-unique serial so the QR stays low-density and
   // scans reliably; the portal resolves it server-side at /student/qr-login.
+  // &org lets the portal resolve the institution for the attendance lookup even when
+  // the QR is scanned off any coordinator hotspot (the public progress call needs it).
+  const orgQS = org ? `&org=${encodeURIComponent(org)}` : ''
   const qrValue = STUDENT_PORTAL_URL
-    ? `${STUDENT_PORTAL_URL}/?qr=${payload.serial_number}`
+    ? `${STUDENT_PORTAL_URL}/?qr=${payload.serial_number}${orgQS}`
     : `${CHECKIN_BASE_URL}/checkin?t=${token}`
   return QRCode.toBuffer(qrValue, {
     width: 1024,

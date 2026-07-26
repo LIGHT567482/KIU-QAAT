@@ -23,9 +23,11 @@ export default function Login() {
   const [resolvedTenantId, setResolvedTenantId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // Lecturers sign in with their staff ID + password instead of an email.
+  // Lecturers sign in passwordless: institution + staff ID (they are QR-only and
+  // hold no password), the same trust model as the read-only lecturer portal.
   const [lecturerMode, setLecturerMode] = useState(false)
   const [staffId, setStaffId] = useState('')
+  const [lecturerOrg, setLecturerOrg] = useState('')
 
   async function handleLecturerSubmit(e: FormEvent) {
     e.preventDefault()
@@ -33,7 +35,7 @@ export default function Login() {
     try {
       const res = await fetch(`${API}/api/v1/auth/lecturer-login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_id: staffId.trim(), password: form.password }),
+        body: JSON.stringify({ staff_id: staffId.trim(), org: lecturerOrg.trim() }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.message ?? 'Login failed'); setLoading(false); return }
@@ -124,10 +126,13 @@ export default function Login() {
 
         {lecturerMode ? (
           <form onSubmit={handleLecturerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="text" placeholder="Staff ID" value={staffId} autoComplete="username" autoFocus
+            <input type="text" placeholder="Institution ID" value={lecturerOrg} autoComplete="organization" autoFocus
+              onChange={e => setLecturerOrg(e.target.value)} required style={inp} />
+            <input type="text" placeholder="Staff ID" value={staffId} autoComplete="username"
               onChange={e => setStaffId(e.target.value)} required style={inp} />
-            <input type="password" placeholder="Password" value={form.password} autoComplete="current-password"
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
+            <div style={{ fontSize: 11, color: 'var(--muted)', margin: '-4px 2px 0' }}>
+              No password needed — sign in with your institution and staff ID. (You can also scan your personal lecturer QR.)
+            </div>
             <button type="submit" disabled={loading} style={btn}>{loading ? 'Signing in…' : 'Sign In'}</button>
           </form>
         ) : (

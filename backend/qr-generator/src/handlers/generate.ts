@@ -96,7 +96,7 @@ export async function generateBatch(req: Request, res: Response): Promise<void> 
           issued_at: new Date().toISOString(),
         }
         const signed = signQRPayload(payload, tenantKeys!.privateKeyPem, tenantKeys!.hmacSecret)
-        const qrBuffer = await renderQRImage(signed)
+        const qrBuffer = await renderQRImage(signed, tenantRow?.domain)
 
         await db.query(
           `UPDATE students_extended SET qr_serial_number = $1, updated_at = now()
@@ -188,17 +188,20 @@ export async function qrToken(req: Request, res: Response): Promise<void> {
     const base = fwdHost
       ? `https://${fwdHost.split(':')[0]}:${process.env.STUDENT_PORTAL_PORT || '3003'}`
       : (process.env.STUDENT_PORTAL_URL || process.env.STUDENT_CHECKIN_BASE_URL || '').replace(/\/$/, '')
+    // Render the QR server-side in the tenant's brand colour (the admin overlays
+    // the tenant logo in the centre via CSS). No client QR lib needed. Also fetch the
+    // domain so we can tag the URL with &org (below).
+    const tenant = (await db.query(
+      'SELECT COALESCE(brand_color,\'\') AS brand_color, COALESCE(logo_url,\'\') AS logo_url, COALESCE(domain,\'\') AS domain FROM tenants WHERE tenant_id = $1',
+      [tenant_id],
+    )).rows[0] || { brand_color: '', logo_url: '', domain: '' }
     // Encode only the globally-unique serial in the QR (not the full signed token)
     // so the QR stays low-density and scans reliably on any phone. The portal posts
     // the serial to /student/qr-login, which resolves + verifies it server-side.
-    const url = base ? `${base}/?qr=${serial}` : `/?qr=${serial}`
-
-    // Render the QR server-side in the tenant's brand colour (the admin overlays
-    // the tenant logo in the centre via CSS). No client QR lib needed.
-    const tenant = (await db.query(
-      'SELECT COALESCE(brand_color,\'\') AS brand_color, COALESCE(logo_url,\'\') AS logo_url FROM tenants WHERE tenant_id = $1',
-      [tenant_id],
-    )).rows[0] || { brand_color: '', logo_url: '' }
+    // &org lets the portal resolve the institution for the attendance lookup even when
+    // the QR is scanned off any coordinator hotspot (the public progress call needs it).
+    const orgQS = tenant.domain ? `&org=${encodeURIComponent(tenant.domain)}` : ''
+    const url = base ? `${base}/?qr=${serial}${orgQS}` : `/?qr=${serial}${orgQS}`
     const dark = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(tenant.brand_color) ? tenant.brand_color : '#0f172a'
     const image = await QRCode.toDataURL(url, {
       width: 320, margin: 2, errorCorrectionLevel: 'H', color: { dark, light: '#ffffff' },
@@ -264,7 +267,7 @@ export async function issueForStudent(req: Request, res: Response): Promise<void
       issued_at: new Date().toISOString(),
     }, tenantKeys!.privateKeyPem, tenantKeys!.hmacSecret)
 
-    const qrBuffer = await renderQRImage(signed)
+    const qrBuffer = await renderQRImage(signed, tenantRow?.domain)
 
     await db.query(
       `UPDATE students_extended SET qr_serial_number = $1, updated_at = now() WHERE student_id = $2 AND tenant_id = $3`,
@@ -357,7 +360,7 @@ export async function reissueQR(req: Request, res: Response): Promise<void> {
       issued_at: new Date().toISOString(),
     }, tenantKeys.privateKeyPem, tenantKeys.hmacSecret)
 
-    const qrBuffer = await renderQRImage(signed)
+    const qrBuffer = await renderQRImage(signed, tenantRow?.domain)
 
     await db.query(
       `UPDATE students_extended SET qr_serial_number = $1, updated_at = now() WHERE student_id = $2 AND tenant_id = $3`,
