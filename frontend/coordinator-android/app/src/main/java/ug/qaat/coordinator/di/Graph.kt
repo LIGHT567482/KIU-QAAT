@@ -11,8 +11,11 @@ object Graph {
         private set
     lateinit var repo: Repository
         private set
+    lateinit var appContext: Context
+        private set
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (::db.isInitialized) return
         // Production: wrap with SQLCipher SupportFactory keyed by an Android-Keystore secret.
         db = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "qaat.db")

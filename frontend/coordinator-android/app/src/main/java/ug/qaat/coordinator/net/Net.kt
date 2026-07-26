@@ -3,6 +3,7 @@ package ug.qaat.coordinator.net
 import android.content.Context
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
+import io.ktor.client.plugins.HttpTimeout
 import ug.qaat.coordinator.BuildConfig
 import ug.qaat.coordinator.R
 import java.security.KeyStore
@@ -71,6 +72,21 @@ object Net {
         ssl to composite
     }
 
+    /** Turn a raw network exception into a calm, human message — no "Socket timeout has
+     *  expired […socket_timeout=unknown] ms" jargon leaking to coordinators. */
+    fun friendly(t: Throwable): String {
+        val m = (t.message ?: "").lowercase()
+        return when {
+            "timeout" in m || "timed out" in m ->
+                "The server is waking up (it sleeps when idle). Please wait a few seconds and tap again."
+            "unable to resolve host" in m || "failed to connect" in m || "unreachable" in m || "connect" in m ->
+                "Can't reach the server — check your internet connection and try again."
+            "trust anchor" in m || "certif" in m || "handshake" in m || "ssl" in m ->
+                "Secure connection failed. Update the app, or check the server address in the login screen."
+            else -> t.message?.takeIf { it.isNotBlank() && it.length < 120 } ?: "Something went wrong. Please try again."
+        }
+    }
+
     private fun isPrivateHost(h: String): Boolean =
         h == "localhost" || h.startsWith("127.") ||
         h.matches(Regex("^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*"))
@@ -83,6 +99,15 @@ object Net {
     fun client(): HttpClient = shared
 
     private fun build(): HttpClient = HttpClient(OkHttp) {
+        // Generous timeouts: the cloud runs on a free tier that SLEEPS after ~15 min, so the
+        // first request has to wait out a 30–50s cold start. Without this, Ktor/OkHttp's short
+        // default timeouts throw "Socket timeout has expired" on login and leave attendance
+        // uploads stuck on PENDING_SYNC. These ceilings let a cold start finish and succeed.
+        install(HttpTimeout) {
+            connectTimeoutMillis = 30_000
+            socketTimeoutMillis = 60_000
+            requestTimeoutMillis = 120_000
+        }
         engine {
             config {
                 val (ssl, tm) = trust

@@ -41,6 +41,6 @@ class SyncClient(private val baseUrl: String, private val bearer: String) {
             header("Authorization", "Bearer $bearer")
         }.status.isSuccess()
     }
-
-    fun close() = http.close()
+    // NOTE: no close() — the HttpClient is shared app-wide (Net.client); closing it here
+    // would tear down every other caller's networking.
 }

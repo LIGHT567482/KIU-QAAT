@@ -1,5 +1,6 @@
 package ug.qaat.coordinator.session
 
+import android.content.Intent
 import kotlinx.coroutines.*
 import ug.qaat.coordinator.db.PresentDisplayEntity
 import ug.qaat.coordinator.db.SessionEntity
@@ -129,7 +130,14 @@ object SessionController {
             Graph.db.dao().upsertSession(s.copy(status = if (ok) "SYNCED" else "PENDING_SYNC"))
         }
         SessionService.server.clear()
+        current = null
         AppState.currentSessionId = null
+        AppState.hotspotSsid = null
+        AppState.hotspotPass = null
+        // Tear the room down: stopping the foreground service runs its onDestroy, which stops
+        // the Wi-Fi hotspot + the Ktor server. The phone is then free for the next session —
+        // the coordinator taps "Start hotspot" again for the next round, and the loop repeats.
+        runCatching { Graph.appContext.stopService(Intent(Graph.appContext, SessionService::class.java)) }
     }
 
     private fun startTicker() {

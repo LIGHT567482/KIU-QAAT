@@ -78,7 +78,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                         AppState.branding = runCatching { ug.qaat.coordinator.net.BrandingClient(res.token).fetch() }.getOrNull()
                         AppState.branding?.let { runCatching { SessionStore.saveBranding(it) } }
                         onLoggedIn()
-                    }.onFailure { error = it.message ?: "Login failed" }
+                    }.onFailure { error = ug.qaat.coordinator.net.Net.friendly(it) }
                     busy = false
                 }
             },
