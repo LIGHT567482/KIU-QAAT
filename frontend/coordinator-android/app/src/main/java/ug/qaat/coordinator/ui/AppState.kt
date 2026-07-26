@@ -30,6 +30,10 @@ object AppState {
     var refreshTick by mutableStateOf(0)
     val loggedIn: Boolean get() = token != null
 
+    // Stack trace of the previous run's uncaught crash (if any), surfaced once on next
+    // launch so a "silent close" can be read/screenshotted instead of vanishing.
+    var lastCrash by mutableStateOf<String?>(null)
+
     /** Best display name: the credential's full name, else the email's local part. */
     val displayName: String get() = coordinatorName?.takeIf { it.isNotBlank() }
         ?: coordinatorEmail?.substringBefore("@")?.takeIf { it.isNotBlank() } ?: "Coordinator"

@@ -40,9 +40,18 @@ class SessionService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        // Must call startForeground within 5s of startForegroundService; wrap so a type/
-        // permission quirk on Android 14 can't crash the process.
-        runCatching { startForeground(1, notification("Starting…")) }
+        // Must call startForeground within 5s of startForegroundService, OR the system kills
+        // the process with ForegroundServiceDidNotStartInTimeException (the classic ~6s crash).
+        // Pass the FGS type explicitly on API 29+ (matches the manifest). If it still fails
+        // (e.g. a background auto-restart on Android 14, which is disallowed for this type),
+        // stop cleanly instead of lingering as a zombie the system will kill.
+        val foregrounded = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                startForeground(1, notification("Starting…"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            else
+                startForeground(1, notification("Starting…"))
+        }.isSuccess
+        if (!foregrounded) { stopSelf(); return }
 
         // The whole in-room startup is guarded — a missing asset, a busy port, or a hotspot
         // permission issue updates the notice instead of closing the app.
@@ -71,7 +80,14 @@ class SessionService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null intent means the OS auto-restarted us after killing the process. We must NOT
+        // resurrect an in-room session from the background — Android 14 forbids starting this
+        // FGS type off a background context, which would crash. The coordinator re-opens the
+        // session from the UI (a foreground start), so return NOT_STICKY and don't linger.
+        if (intent == null) { stopSelf(); return START_NOT_STICKY }
+        return START_NOT_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {

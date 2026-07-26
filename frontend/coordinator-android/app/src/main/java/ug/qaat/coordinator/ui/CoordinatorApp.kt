@@ -66,6 +66,7 @@ private suspend fun refreshAll() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoordinatorApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
+    AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
     if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}) ; return@MaterialTheme }
 
     LaunchedEffect(AppState.token) {
@@ -223,6 +224,28 @@ private fun ChangePasswordDialog(onClose: () -> Unit) {
             }) { Text(if (busy) "Saving…" else "Update") }
         },
         dismissButton = { if (!done) TextButton(onClick = onClose) { Text("Cancel") } },
+    )
+}
+
+/** Shows the previous run's uncaught crash once, so a silent close becomes a readable,
+ *  copyable stack trace the coordinator can send for a fix. */
+@Composable
+private fun CrashReportDialog(trace: String, onClose: () -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("The app closed unexpectedly last time") },
+        text = {
+            Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                Text("Please screenshot or copy this and send it so it can be fixed:", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                Text(trace, fontSize = 11.sp, fontWeight = FontWeight.Normal)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(trace)) }) { Text("Copy") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Dismiss") } },
     )
 }
 

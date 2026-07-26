@@ -75,7 +75,14 @@ object Net {
         h == "localhost" || h.startsWith("127.") ||
         h.matches(Regex("^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*"))
 
-    fun client(): HttpClient = HttpClient(OkHttp) {
+    // ONE shared client. Building a fresh OkHttp engine on every call (5 client classes ×
+    // every screen) leaked sockets/file descriptors and surfaced as intermittent socket
+    // errors; a single reused client is both correct and lighter. The base URL is passed
+    // per-request (full URL), so runtime server switching still works.
+    private val shared: HttpClient by lazy { build() }
+    fun client(): HttpClient = shared
+
+    private fun build(): HttpClient = HttpClient(OkHttp) {
         engine {
             config {
                 val (ssl, tm) = trust

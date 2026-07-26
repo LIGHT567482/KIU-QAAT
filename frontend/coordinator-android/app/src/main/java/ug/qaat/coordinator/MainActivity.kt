@@ -32,6 +32,11 @@ class MainActivity : ComponentActivity() {
         // re-login. The cached manifest (for fully-offline attendance) is hydrated off the
         // main thread by CoordinatorApp.
         runCatching { SessionStore.restore() }
+        // Surface (and clear) a previous run's uncaught crash so it isn't a silent close.
+        runCatching {
+            val f = java.io.File(filesDir, "last_crash.txt")
+            if (f.exists()) { ug.qaat.coordinator.ui.AppState.lastCrash = f.readText(); f.delete() }
+        }
         requestRuntimePermissions()
         setContent { CoordinatorApp() }   // CoordinatorApp owns the branded MaterialTheme
     }
