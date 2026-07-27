@@ -390,6 +390,17 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			CheckinTimestamp     string `json:"checkin_timestamp"`
 			EntryMethod          string `json:"entry_method"`
 		} `json:"attendance_records"`
+		// Phone-hub only: the lecturer's physical-presence proof (they scanned the gate to START,
+		// and optionally to END). We seed lecturer_attendance_logs from this — which both shows the
+		// lecturer's attendance in the dashboards AND makes this session's student attendance
+		// "verified" (see the LECTURER-SCAN GATE below).
+		Lecturer struct {
+			LecturerID         string `json:"lecturer_id"`
+			ScannedAt          string `json:"scanned_at"`
+			FingerprintHash    string `json:"fingerprint_hash"`
+			EndedAt            string `json:"ended_at"`
+			EndFingerprintHash string `json:"end_fingerprint_hash"`
+		} `json:"lecturer"`
 	}
 	if err := json.Unmarshal(payload, &pkg); err != nil {
 		// Do NOT silently report success. If the payload can't be parsed (e.g.
@@ -423,6 +434,34 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate,
 		); err != nil {
 			return 0, 0, 0, fmt.Errorf("create session from package: %w", err)
+		}
+	}
+
+	// Phone-hub: seed lecturer_attendance_logs from the lecturer's offline gate scan, so their
+	// attendance shows in the dashboards and the session counts as "verified" below. Resolve the
+	// staff ID to the internal lecturer_id when possible (so the dashboard name/dept join works);
+	// gate_open_time = the START scan; contact_hours are derived from START→END when END is present.
+	// Idempotent (WHERE NOT EXISTS) so a re-upload doesn't duplicate the row.
+	if pkg.Lecturer.LecturerID != "" && pkg.Lecturer.ScannedAt != "" &&
+		pkg.Session.SessionID != "" && pkg.Session.UnitID != "" {
+		if _, lerr := conn.Exec(ctx, `
+			INSERT INTO lecturer_attendance_logs
+			  (tenant_id, session_id, lecturer_id, gate_open_time, unit_id, session_date,
+			   lecturer_scanned_at, lecturer_fingerprint_hash,
+			   lecturer_ended_at, lecturer_end_fingerprint_hash, gate_close_time, contact_hours)
+			SELECT $1, $2,
+			       COALESCE((SELECT lecturer_id::text FROM lecturers WHERE tenant_id = $1 AND staff_id = $3), $3),
+			       $4::timestamptz, $5, COALESCE(NULLIF($6,'')::date, CURRENT_DATE),
+			       $4::timestamptz, NULLIF($7,''),
+			       NULLIF($8,'')::timestamptz, NULLIF($9,''), NULLIF($8,'')::timestamptz,
+			       CASE WHEN $8 <> '' THEN ROUND(EXTRACT(EPOCH FROM ($8::timestamptz - $4::timestamptz)) / 3600.0, 2) END
+			WHERE NOT EXISTS (
+			   SELECT 1 FROM lecturer_attendance_logs WHERE tenant_id = $1 AND session_id = $2)`,
+			tenantID, pkg.Session.SessionID, pkg.Lecturer.LecturerID, pkg.Lecturer.ScannedAt,
+			pkg.Session.UnitID, pkg.Session.SessionDate, pkg.Lecturer.FingerprintHash,
+			pkg.Lecturer.EndedAt, pkg.Lecturer.EndFingerprintHash,
+		); lerr != nil {
+			return 0, 0, 0, fmt.Errorf("seed lecturer attendance: %w", lerr)
 		}
 	}
 
