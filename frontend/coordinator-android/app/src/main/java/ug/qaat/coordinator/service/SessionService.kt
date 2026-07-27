@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference
 class SessionService : Service() {
     companion object {
         const val CHANNEL = "qaat_session"
+        const val TAG = "QAAT_HUB"
         val hotspot = AtomicReference<HotspotManager.Info?>(null)
         val session = AtomicReference<SessionManager?>(null)
         // Nullable (NOT lateinit): if onCreate fails before wiring the server, or a session is
@@ -35,10 +36,12 @@ class SessionService : Service() {
         // of crashing with UninitializedPropertyAccessException. Readiness is observable via
         // AppState.serverReady, which gates the "Start taking attendance" button.
         @Volatile var server: InRoomServer? = null; private set
+        // Static so a fresh onCreate can stop an engine leaked by a previous instance still holding
+        // :8080 (the "port busy" bind failure) before rebinding.
+        @Volatile private var ktor: ApplicationEngine? = null
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var ktor: ApplicationEngine? = null
     private lateinit var hotspotMgr: HotspotManager
 
     override fun onCreate() {
@@ -49,64 +52,136 @@ class SessionService : Service() {
         // Pass the FGS type explicitly on API 29+ (matches the manifest). If it still fails
         // (e.g. a background auto-restart on Android 14, which is disallowed for this type),
         // stop cleanly instead of lingering as a zombie the system will kill.
-        val foregrounded = runCatching {
+        val fgResult = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 startForeground(1, notification("Starting…"), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
             else
                 startForeground(1, notification("Starting…"))
-        }.isSuccess
-        if (!foregrounded) { stopSelf(); return }
+        }
+        if (fgResult.isFailure) {
+            val e = fgResult.exceptionOrNull()
+            android.util.Log.e(TAG, "startForeground failed", e)
+            ug.qaat.coordinator.ui.AppState.serverError =
+                "Android blocked the foreground service: ${e?.javaClass?.simpleName}: ${e?.message}"
+            stopSelf(); return
+        }
 
-        // The whole in-room startup is guarded — a missing asset, a busy port, or a hotspot
-        // permission issue updates the notice instead of closing the app.
+        // Opening the DB + binding the port can take a few seconds, so run the whole hub startup
+        // OFF the main thread (scope is Dispatchers.IO) to avoid an ANR. startForeground already ran.
+        scope.launch { startHub() }
+    }
+
+    /** Build the DB/validator/pages and bind the HTTP server (with retry), then bring up/observe the
+     *  hotspot. Each stage is labelled so a failure names the exact step on screen + in logcat. */
+    private suspend fun startHub() {
+        var stage = "start"
         try {
+            ug.qaat.coordinator.ui.AppState.serverError = null
+            stage = "init-database"
             ug.qaat.coordinator.di.Graph.init(this)
+            stage = "build-validator"
             val store = RoomStore(ug.qaat.coordinator.di.Graph.db.dao())
             val validator = CheckinValidator(store)
 
+            stage = "read-assets"
             val attend = runCatching { assets.open("attend.html").bufferedReader().use { it.readText() } }.getOrDefault("")
             val gate = runCatching { assets.open("gate.html").bufferedReader().use { it.readText() } }.getOrDefault("")
-            val srv = InRoomServer(validator, attend, gate)
+
+            stage = "start-http-server"
+            // A previous service instance (rapid restart / leaked engine) can still hold :8080. Stop
+            // any lingering engine first, then bind — retrying because CIO binds asynchronously and a
+            // just-released socket can briefly linger in TIME_WAIT.
+            runCatching { ktor?.stop(0, 0) }; ktor = null
+            // onClientReached ticks the reachability self-test each time a phone fetches the page.
+            val srv = InRoomServer(validator, attend, gate,
+                onClientReached = { ug.qaat.coordinator.ui.AppState.clientsReached++ })
             server = srv
-            ktor = runCatching { srv.start(8080) }.getOrNull()
-            // The server object is now usable for setLive/clear; let the UI enable "open session".
+            stage = "verify-listening"
+            var listening = false
+            for (attempt in 1..6) {
+                val eng = runCatching { srv.start(8080) }.getOrNull()
+                listening = awaitListening(8080, 1500)
+                if (listening) { ktor = eng; break }
+                runCatching { eng?.stop(0, 0) }              // this attempt didn't bind — clean it up
+                android.util.Log.w(TAG, "port 8080 not up yet (attempt $attempt of 6); retrying")
+                delay(700)                                    // let a lingering socket free
+            }
+            if (!listening) throw IllegalStateException("HTTP server did not bind on port 8080 after 6 tries (port busy or blocked). Reopen the app or reboot the phone.")
+            android.util.Log.i(TAG, "hub listening on :8080")
             ug.qaat.coordinator.ui.AppState.serverReady = true
 
             if (ug.qaat.coordinator.ui.AppState.useSystemHotspot) {
-                // System-hotspot mode: the coordinator runs their OWN phone hotspot, named after
-                // the cohort, so students in a shared multi-coordinator room pick the right network
-                // by name. We do NOT start a hotspot — we only poll for our IP on it so the
-                // check-in + lecturer-gate URLs point at the right gateway.
-                scope.launch {
-                    repeat(120) {
-                        val ip = HotspotManager.detectApIp()
-                        if (ip != null) {
-                            ug.qaat.coordinator.ui.AppState.inRoomIp = ip
-                            ug.qaat.coordinator.ui.AppState.hotspotUp = true
-                            update("Serving on your hotspot ($ip). Students: join your cohort's Wi-Fi.")
-                            return@launch
-                        }
-                        ug.qaat.coordinator.ui.AppState.hotspotUp = false
-                        update("Turn ON your phone's hotspot (name it after your cohort). Students join it.")
-                        delay(3000)
+                // System-hotspot mode: the coordinator runs their OWN phone hotspot; we just poll for
+                // our IP on it so the check-in + lecturer-gate URLs point at the right gateway.
+                // A manual gateway IP (set by the coordinator, read off a joined phone) wins over
+                // auto-detect — essential on phones that hide the hotspot interface from apps.
+                val manual = ug.qaat.coordinator.ui.AppState.manualHotspotIp?.takeIf { it.isNotBlank() }
+                if (manual != null) {
+                    ug.qaat.coordinator.ui.AppState.inRoomIp = manual
+                    ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                    update("Serving on your hotspot ($manual). Students: join your cohort's Wi-Fi.")
+                    return
+                }
+                repeat(120) {
+                    val ip = HotspotManager.detectApIp()
+                    if (ip != null) {
+                        ug.qaat.coordinator.ui.AppState.inRoomIp = ip
+                        ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                        ug.qaat.coordinator.ui.AppState.hotspotDiag = null
+                        update("Serving on your hotspot ($ip). Students: join your cohort's Wi-Fi.")
+                        return
                     }
+                    ug.qaat.coordinator.ui.AppState.hotspotUp = false
+                    val diag = HotspotManager.listPrivateV4()
+                    ug.qaat.coordinator.ui.AppState.hotspotDiag =
+                        if (diag.isEmpty()) "no hotspot address yet — is the hotspot ON?"
+                        else diag.joinToString(", ") { "${it.first}=${it.second}" }
+                    update("Turn ON your phone's hotspot (name it after your cohort). Students join it.")
+                    delay(3000)
                 }
             } else {
-                hotspotMgr = HotspotManager(this)
-                hotspotMgr.start(
-                    onReady = { info ->
-                        hotspot.set(info)
-                        ug.qaat.coordinator.ui.AppState.hotspotSsid = info.ssid
-                        ug.qaat.coordinator.ui.AppState.hotspotPass = info.passphrase
-                        ug.qaat.coordinator.ui.AppState.hotspotUp = true
-                        update("Hotspot: ${info.ssid} — tell students to disconnect after ✓")
-                    },
-                    onError = { update("Wi-Fi hotspot unavailable ($it). Turn on your phone hotspot instead; check-in still works.") },
-                )
+                // LocalOnlyHotspot mode (the shipping model): the app OWNS the hotspot, so its gateway
+                // is the fixed, known 192.168.49.1 (same on every coordinator). We set that as the
+                // serving IP (a manual override or a successful detect wins if present). The callback
+                // needs a Looper, so register it on the main thread.
+                withContext(Dispatchers.Main) {
+                    hotspotMgr = HotspotManager(this@SessionService)
+                    hotspotMgr.start(
+                        onReady = { info ->
+                            hotspot.set(info)
+                            ug.qaat.coordinator.ui.AppState.hotspotSsid = info.ssid
+                            ug.qaat.coordinator.ui.AppState.hotspotPass = info.passphrase
+                            ug.qaat.coordinator.ui.AppState.inRoomIp =
+                                ug.qaat.coordinator.ui.AppState.manualHotspotIp?.takeIf { it.isNotBlank() }
+                                    ?: HotspotManager.detectApIp()
+                                    ?: ug.qaat.coordinator.ui.AppState.LOCAL_HOTSPOT_IP
+                            ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                            update("Room Wi-Fi up: ${info.ssid}. Students scan the Connect QR to join.")
+                        },
+                        onError = { update("Couldn't start the room Wi-Fi ($it). Grant location/nearby-devices, or set the Hotspot IP manually.") },
+                    )
+                }
             }
         } catch (e: Throwable) {
-            update("Session server error: ${e.message}")
+            android.util.Log.e(TAG, "hub startup failed at stage=$stage", e)
+            ug.qaat.coordinator.ui.AppState.serverReady = false
+            ug.qaat.coordinator.ui.AppState.serverError =
+                "Failed at [$stage]: ${e.javaClass.simpleName}: ${e.message}"
+            update("Session server error at [$stage]: ${e.message}")
         }
+    }
+
+    /** Poll a localhost port until something is listening, or the timeout elapses. */
+    private suspend fun awaitListening(port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val up = runCatching {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 400) }; true
+            }.getOrDefault(false)
+            if (up) return true
+            delay(200)
+        }
+        return false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -123,6 +198,7 @@ class SessionService : Service() {
         scope.cancel()
         ug.qaat.coordinator.ui.AppState.serverReady = false
         runCatching { ktor?.stop(100, 200) }
+        ktor = null
         runCatching { server?.clear() }             // null if startup never got this far
         server = null
         runCatching { if (this::hotspotMgr.isInitialized) hotspotMgr.stop() }

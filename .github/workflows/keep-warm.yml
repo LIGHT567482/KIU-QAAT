@@ -1,0 +1,27 @@
+name: keep-warm
+
+# Keeps the free-tier Render services awake so sign-in is instant instead of waiting out a
+# 15–60s cold start. Render free services sleep after ~15 min idle; we ping every 5 min.
+# (GitHub scheduled runs are best-effort and can be delayed under load — if you need rock-solid
+#  uptime, also add an UptimeRobot monitor on the two URLs below. Free, 5-min interval.)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes
+  workflow_dispatch: {}       # allow manual "Run workflow"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake all backend services
+        run: |
+          for url in \
+            "https://qaat-gateway.onrender.com/health" \
+            "https://qaat-auth.onrender.com/health" \
+            "https://qaat-qr.onrender.com/health" \
+            "https://qaat-session.onrender.com/health" \
+            "https://qaat-sync.onrender.com/health"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 60 "$url" || echo "000")
+            echo "$url -> $code"
+          done

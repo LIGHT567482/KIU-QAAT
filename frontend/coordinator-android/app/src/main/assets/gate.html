@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!-- Lecturer gate page served by the embedded hub over the hotspot. The lecturer scans the
+     coordinator's ROTATING gate QR, which opens /gate?rc=<code>. The rotating code is taken
+     straight from the URL (the lecturer never types it) — scanning the LIVE on-screen QR while
+     on the hotspot is the presence proof. First valid scan = START, second = END (needs a
+     student quorum). We POST {staff_id, room_code, fingerprint, biometric_verified} to /gate. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QAAT — Lecturer gate</title>
+<style>body{font-family:system-ui;max-width:380px;margin:auto;padding:24px;text-align:center}
+input{font-size:22px;text-align:center;width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px;box-sizing:border-box}
+button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#7c3aed;border:0;border-radius:12px}
+#done{display:none}.big{background:#f5f3ff;border:2px solid #7c3aed;border-radius:14px;padding:16px;margin-top:16px}
+.t{font-size:18px;font-weight:800;color:#5b21b6}.muted{color:#64748b;font-size:13px}</style></head>
+<body>
+<div id="form">
+  <h2>Lecturer gate</h2>
+  <p class="muted" id="rcnote"></p>
+  <input id="staff" inputmode="text" placeholder="Your staff ID (e.g. KIU/STAFF/001)" autofocus>
+  <button onclick="submit()">Confirm — Start / End</button>
+  <p id="err" style="color:#b91c1c"></p>
+</div>
+<div id="done">
+  <div style="font-size:56px">🎓</div><h2 id="doneTitle">Recorded</h2>
+  <div class="big"><div class="t" id="doneMsg"></div></div>
+</div>
+<script>
+var qs=new URLSearchParams(location.search);
+var rc=qs.get('rc')||'';               // rotating code, carried by the scanned QR
+document.getElementById('rcnote').textContent = rc
+  ? 'Live code detected from the QR — just enter your staff ID.'
+  : 'No live code — re-scan the rotating gate QR on the coordinator screen.';
+async function fingerprint(){var raw=[navigator.userAgent,navigator.language,screen.width+'x'+screen.height,new Date().getTimezoneOffset()].join('|');
+  var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function submit(){
+  var staff=document.getElementById('staff').value.trim();
+  if(!staff){document.getElementById('err').textContent='Enter your staff ID.';return;}
+  if(!rc){document.getElementById('err').textContent='No live code — re-scan the rotating gate QR.';return;}
+  var fp=await fingerprint();
+  var body=new URLSearchParams({staff_id:staff,room_code:rc,fingerprint:fp,biometric_verified:'false'});
+  var r=await fetch('/gate',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+  var d=await r.json();
+  if(d.status==='STARTED'||d.status==='ENDED'){
+    document.getElementById('form').style.display='none';
+    var done=document.getElementById('done');done.style.display='block';
+    document.getElementById('doneTitle').textContent = d.status==='STARTED' ? 'Session started' : 'Session ended';
+    document.getElementById('doneMsg').textContent = d.status==='STARTED'
+      ? 'Students can now check in.' : 'Attendance is sealed for this session.';
+  } else {
+    var reason=(d.reason||'try again').replace(/_/g,' ').toLowerCase();
+    document.getElementById('err').textContent='Rejected: '+reason+'. The code rotates — re-scan the QR and retry.';
+  }
+}
+</script></body></html>

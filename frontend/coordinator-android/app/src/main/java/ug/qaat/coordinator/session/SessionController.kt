@@ -31,6 +31,12 @@ object SessionController {
     private var secret: ByteArray = ByteArray(0)
     private var gateState: GateState = GateState.NOT_STARTED
     private var lecturerStaffId: String = ""
+    // The lecturer's physical-presence proof: when they scanned the gate to START/END + the device
+    // fingerprint. Uploaded in the session package so the central dashboards show their attendance.
+    private var lecturerStartAt: String = ""
+    private var lecturerStartFp: String = ""
+    private var lecturerEndAt: String = ""
+    private var lecturerEndFp: String = ""
     private var enrolled: Int = 0
     private var current: SessionEntity? = null
     private val sm get() = SessionService.session.get()
@@ -40,6 +46,10 @@ object SessionController {
         val token = AppState.token ?: return@launch
         val tenantId = AppState.tenantId ?: return@launch
         val m = AppState.manifest ?: return@launch
+        // The foreground service must have built the in-room server first. If it hasn't (service
+        // still starting, or onCreate failed), bail instead of crashing on an unset server — the
+        // UI keeps the button disabled via AppState.serverReady, so this is the last-ditch guard.
+        val server = SessionService.server ?: return@launch
         val roster = m.rosterByUnit[unitId].orEmpty()
 
         val session = ActiveSession(
@@ -53,6 +63,7 @@ object SessionController {
         )
         secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
         gateState = GateState.NOT_STARTED
+        lecturerStartAt = ""; lecturerStartFp = ""; lecturerEndAt = ""; lecturerEndFp = ""
         this@SessionController.lecturerStaffId = lecturerStaffId
         enrolled = roster.size
 
@@ -64,7 +75,7 @@ object SessionController {
         SessionService.session.set(SessionManager(session.sessionId).apply { open() })
 
         val dao = Graph.db.dao()
-        SessionService.server.setLive(
+        server.setLive(
             InRoomServer.Live(
                 session = session,
                 roomCodeSecret = secret,
@@ -79,10 +90,11 @@ object SessionController {
                         requireBiometric = false,
                     )
                 },
-                onGate = { action ->
+                onGate = { action, fingerprint ->
+                    val at = Instant.now().toString()
                     when (action) {
-                        GateAction.START -> { gateState = GateState.STARTED; runCatching { sm?.lecturerStarted() } }
-                        GateAction.END -> gateState = GateState.ENDED
+                        GateAction.START -> { gateState = GateState.STARTED; lecturerStartAt = at; lecturerStartFp = fingerprint; runCatching { sm?.lecturerStarted() } }
+                        GateAction.END -> { gateState = GateState.ENDED; lecturerEndAt = at; lecturerEndFp = fingerprint }
                     }
                 },
                 // Students may only check in once the lecturer has passed the START gate.
@@ -108,14 +120,43 @@ object SessionController {
         startTicker()
     }
 
-    /** Close the session and (when online) seal + upload it to the central backend. */
+    /** Close the session: tear the room down IMMEDIATELY (stop the server + hotspot), then seal +
+     *  upload in the background. Teardown must NOT wait on the (possibly slow) network upload. */
     fun close() = scope.launch {
         ticker?.cancel()
         val s = current ?: return@launch
         val userId = AppState.userId ?: return@launch
         val bindingKey = AppState.deviceBindingKey
-        Graph.db.dao().upsertSession(s.copy(status = "CLOSED"))
+        // Snapshot the lecturer's presence proof before teardown. START is what makes the session's
+        // student attendance "verified" server-side; END adds their contact hours.
+        val lecturerScan = lecturerStartAt.takeIf { it.isNotBlank() }?.let {
+            SessionPackage.LecturerScan(
+                lecturerId = lecturerStaffId, scannedAt = it, fingerprintHash = lecturerStartFp,
+                endedAt = lecturerEndAt, endFingerprintHash = lecturerEndFp,
+            )
+        }
 
+        // 1) TEAR DOWN NOW — before any network. Stopping the service runs onDestroy, which stops the
+        //    Ktor server and (in app-hotspot mode) closes the LocalOnlyHotspot immediately.
+        runCatching { SessionService.server?.clear() }
+        current = null
+        AppState.currentSessionId = null
+        AppState.currentUnitId = null
+        AppState.hotspotSsid = null
+        AppState.hotspotPass = null
+        AppState.hotspotUp = false
+        AppState.serverReady = false
+        runCatching { Graph.appContext.stopService(Intent(Graph.appContext, SessionService::class.java)) }
+        // A phone's OWN system hotspot cannot be switched off by an app (Android restriction), so
+        // send the coordinator straight to the hotspot toggle to turn it off there and then.
+        if (AppState.useSystemHotspot) runCatching {
+            Graph.appContext.startActivity(
+                Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+
+        // 2) Seal + upload in the background. The room is already closed regardless of the result.
+        Graph.db.dao().upsertSession(s.copy(status = "CLOSED"))
         val records = Graph.db.dao().rosterForSession(s.sessionId).map {
             AttendanceRecord(it.logId, it.sessionId, it.studentIdHash, it.deviceFingerprintHash,
                 it.sequenceNumber, it.checkinTimestamp, it.entryMethod)
@@ -123,27 +164,19 @@ object SessionController {
         if (bindingKey != null) {
             val pkg = SessionPackage.build(
                 s.sessionId, userId, records, sealedAt = Instant.now().toString(),
-                unitId = s.unitId, sessionDate = s.sessionDate,
+                unitId = s.unitId, sessionDate = s.sessionDate, lecturer = lecturerScan,
             )
             val ok = runCatching { SyncClient(Net_base(), AppState.token ?: "").upload(userId, s.sessionId, bindingKey, pkg) }
                 .getOrDefault(false)
             Graph.db.dao().upsertSession(s.copy(status = if (ok) "SYNCED" else "PENDING_SYNC"))
         }
-        SessionService.server.clear()
-        current = null
-        AppState.currentSessionId = null
-        AppState.hotspotSsid = null
-        AppState.hotspotPass = null
-        // Tear the room down: stopping the foreground service runs its onDestroy, which stops
-        // the Wi-Fi hotspot + the Ktor server. The phone is then free for the next session —
-        // the coordinator taps "Start hotspot" again for the next round, and the loop repeats.
-        runCatching { Graph.appContext.stopService(Intent(Graph.appContext, SessionService::class.java)) }
     }
 
     private fun startTicker() {
         ticker?.cancel()
         ticker = scope.launch {
-            AppState.roomCode = RoomCode.staticCode(secret) // static student code (does not rotate)
+            // No student room code any more — students prove presence by being on the hotspot.
+            // Only the lecturer code rotates (read off-screen for the START/END gate).
             while (isActive) {
                 val now = System.currentTimeMillis() / 1000
                 AppState.lecturerCode = RoomCode.derive(secret, now) // rotating — lecturer

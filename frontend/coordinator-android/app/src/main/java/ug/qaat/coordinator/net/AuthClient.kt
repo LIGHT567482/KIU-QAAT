@@ -18,6 +18,17 @@ class AuthClient {
     private val http = Net.client()
     private val base = Net.baseUrl
 
+    private companion object {
+        const val NON_JSON = "The server returned a web page instead of data — it's likely waking up (it sleeps when idle). Wait ~30s and tap Sign in again."
+        fun String.looksJson() = trimStart().let { it.startsWith("{") || it.startsWith("[") }
+        fun httpErr(code: Int): String = when (code) {
+            in 500..599 -> "The server is waking up or busy (HTTP $code). Wait ~30s and try again."
+            401, 403 -> "Incorrect email or password."
+            404 -> "No account found for that email."
+            else -> "Sign in failed (HTTP $code)."
+        }
+    }
+
     data class Result(
         val token: String, val jti: String?, val role: String,
         val userId: String, val tenantId: String, val deviceBindingKey: String?,
@@ -37,8 +48,11 @@ class AuthClient {
 
     suspend fun tenantLookup(email: String): String {
         val r = http.get("$base/api/v1/auth/tenant-lookup") { url { parameters.append("email", email) } }
-        require(r.status.isSuccess()) { "No account found for that email." }
-        return JSONObject(r.bodyAsText()).getString("tenant_id")
+        val text = r.bodyAsText()
+        if (!r.status.isSuccess())
+            throw IllegalStateException(if (text.looksJson()) JSONObject(text).optString("message").ifBlank { httpErr(r.status.value) } else httpErr(r.status.value))
+        if (!text.looksJson()) throw IllegalStateException(NON_JSON)
+        return JSONObject(text).getString("tenant_id")
     }
 
     /** @return Result on success; null with [mfaRequired]=true if the server wants a TOTP code. */
@@ -47,12 +61,24 @@ class AuthClient {
         val body = JSONObject()
             .put("email", email).put("password", password)
             .put("totp_code", totp ?: "").put("tenant_id", tenantId)
-        val r = http.post("$base/api/v1/auth/login") {
-            contentType(ContentType.Application.Json); setBody(body.toString())
+        // Cold-start resilience: a sleeping free-tier auth-service answers with a 502/HTML page while
+        // it wakes (~15–60s). Auto-retry through the wake so a FRESH login (e.g. on a phone with no
+        // saved session) just completes after a short wait, instead of showing "waking up" over and
+        // over. A JSON body — even a 401 — means the service actually answered, so we stop retrying.
+        var text = ""; var status = 0
+        for (attempt in 1..6) {
+            val r = http.post("$base/api/v1/auth/login") {
+                contentType(ContentType.Application.Json); setBody(body.toString())
+            }
+            text = r.bodyAsText(); status = r.status.value
+            if (text.looksJson() || status < 500) break   // service answered
+            if (attempt < 6) kotlinx.coroutines.delay(6000) // still waking — wait, then retry
         }
-        val j = JSONObject(r.bodyAsText())
-        if (r.status.value == 403 && j.optString("error") == "MFA_REQUIRED") { onMfaRequired(); return null }
-        require(r.status.isSuccess()) { j.optString("message", "Login failed") }
+        if (!text.looksJson())
+            throw IllegalStateException(if (status in 200..299) NON_JSON else httpErr(status))
+        val j = JSONObject(text)
+        if (status == 403 && j.optString("error") == "MFA_REQUIRED") { onMfaRequired(); return null }
+        require(status in 200..299) { j.optString("message").ifBlank { httpErr(status) } }
         return Result(
             token = j.getString("access_token"),
             jti = j.optString("jti").takeIf { it.isNotEmpty() },

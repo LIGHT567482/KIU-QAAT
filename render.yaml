@@ -65,14 +65,21 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: https://admin-dashboards-gamma.vercel.app,https://coordinator-pwa.vercel.app,https://student-portal-xi-ruddy.vercel.app,https://super-admin-seven-gamma.vercel.app
+      # qaat-auth is currently deployed as a PUBLIC web service (has an onrender.com URL), so the
+      # gateway reaches it over the public edge — the internal `http://qaat-auth:8081` address
+      # black-holes when the service is asleep, which surfaces as an edge 502 on /auth/login.
+      # (If you later redeploy qaat-auth as a private service on a non-sleeping plan, switch this
+      # back to http://qaat-auth:8081 for private-network, no-egress routing.)
       - key: AUTH_SERVICE_URL
-        value: http://qaat-auth:8081
+        value: https://qaat-auth.onrender.com
+      # Same as auth: these are deployed as PUBLIC web services, so reach them over the public edge.
+      # The internal http://qaat-*:port addresses black-hole (→ 502) unless they're private services.
       - key: QR_GENERATOR_URL
-        value: http://qaat-qr:3002
+        value: https://qaat-qr.onrender.com
       - key: SESSION_MANAGER_URL
-        value: http://qaat-session:8082
+        value: https://qaat-session.onrender.com
       - key: SYNC_RECEIVER_URL
-        value: http://qaat-sync:8083
+        value: https://qaat-sync.onrender.com
       - key: JWT_ISSUER
         fromGroup: qaat-shared
       - key: JWT_AUDIENCE

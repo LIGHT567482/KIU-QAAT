@@ -8,6 +8,20 @@ package ug.qaat.engine
  * The other wrapper fields mirror apps/coordinator-pwa/src/sync/sealer.ts.
  */
 object SessionPackage {
+    /**
+     * The lecturer's physical-presence proof for this session (they scanned the gate to START, and
+     * optionally to END). The sync-receiver seeds `lecturer_attendance_logs` from this — which both
+     * shows the lecturer's attendance in the dashboards AND is what makes the session's student
+     * attendance "verified" (the receiver rejects attendance for sessions with no lecturer scan).
+     */
+    data class LecturerScan(
+        val lecturerId: String,          // the assigned staff ID (resolved to lecturer_id centrally)
+        val scannedAt: String,           // START scan time (also gate_open_time)
+        val fingerprintHash: String,
+        val endedAt: String = "",        // END scan time (blank if the lecturer didn't scan to END)
+        val endFingerprintHash: String = "",
+    )
+
     fun build(
         sessionId: String,
         coordinatorId: String,
@@ -15,6 +29,7 @@ object SessionPackage {
         sealedAt: String,
         unitId: String = "",        // lets the central sync-receiver create the session (phone-hub)
         sessionDate: String = "",
+        lecturer: LecturerScan? = null,
         packageVersion: String = "1.0",
     ): String {
         val recsJson = records.joinToString(",", "[", "]") { r ->
@@ -28,10 +43,20 @@ object SessionPackage {
                 "\"entry_method\":\"${esc(r.entryMethod)}\"" +
                 "}"
         }
+        val lecturerJson = lecturer?.let { l ->
+            ",\"lecturer\":{" +
+                "\"lecturer_id\":\"${esc(l.lecturerId)}\"," +
+                "\"scanned_at\":\"${esc(l.scannedAt)}\"," +
+                "\"fingerprint_hash\":\"${esc(l.fingerprintHash)}\"," +
+                "\"ended_at\":\"${esc(l.endedAt)}\"," +
+                "\"end_fingerprint_hash\":\"${esc(l.endFingerprintHash)}\"" +
+                "}"
+        } ?: ""
         return "{" +
             "\"session\":{\"session_id\":\"${esc(sessionId)}\",\"unit_id\":\"${esc(unitId)}\",\"session_date\":\"${esc(sessionDate)}\"}," +
-            "\"attendance_records\":$recsJson," +
-            "\"sealed_at\":\"${esc(sealedAt)}\"," +
+            "\"attendance_records\":$recsJson" +
+            lecturerJson +                                   // ",\"lecturer\":{…}" or "" — no dangling comma
+            ",\"sealed_at\":\"${esc(sealedAt)}\"," +
             "\"coordinator_id\":\"${esc(coordinatorId)}\"," +
             "\"package_version\":\"${esc(packageVersion)}\"" +
             "}"

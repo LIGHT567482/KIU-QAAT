@@ -22,13 +22,19 @@ class InRoomServer(
     private val attendPageHtml: String,
     private val lecturerPageHtml: String,
     private val lecturerGate: LecturerGate = LecturerGate(),
+    // Called whenever a client actually fetches the check-in page — i.e. a phone on the hotspot
+    // reached this server. Drives the coordinator's live "N devices reached this server" self-test,
+    // which is the objective proof that client→host works on the current hardware.
+    private val onClientReached: () -> Unit = {},
 ) {
     /** Live session state, set when the coordinator opens a session; cleared on close. */
     class Live(
         val session: ActiveSession,
         val roomCodeSecret: ByteArray,
         val gateContext: () -> LecturerGateContext,
-        val onGate: (GateAction) -> Unit,
+        // (action, lecturerFingerprintHash) — the fingerprint lets us record the lecturer's
+        // START/END presence proof into the uploaded package (lecturer_attendance_logs).
+        val onGate: (GateAction, String) -> Unit,
         // Whether the lecturer has scanned to START — students may only check in after.
         val lecturerStarted: () -> Boolean = { true },
         // Called after each student submission with the QR's display fields + the result,
@@ -49,19 +55,40 @@ class InRoomServer(
 
     fun start(port: Int = 8080) = embeddedServer(CIO, port = port) {
         routing {
-            get("/attend") { call.respondText(attendPageHtml, ContentType.Text.Html) }
+            // The student check-in page. Fetching it means a phone on the hotspot reached us, so it
+            // ticks the reachability self-test. Served at /attend (the projected "Check in here" QR
+            // points here) and /checkin (legacy card path; attend.html also handles ?qr= / ?t=).
+            get("/attend") { onClientReached(); call.respondText(attendPageHtml, ContentType.Text.Html) }
+            get("/checkin") { onClientReached(); call.respondText(attendPageHtml, ContentType.Text.Html) }
             get("/gate") { call.respondText(lecturerPageHtml, ContentType.Text.Html) }
 
-            // Student check-in: form qr, room_code, fingerprint.
+            // Student check-in by REG-NUMBER (no QR): identity is the typed reg matched to the roster;
+            // presence is being on the hotspot LAN. onCheckin fires only on PRESENT (so revisits/typos
+            // don't spam the feed). The browser stores the reg in localStorage and auto-resubmits on
+            // return — the server's DUPLICATE_SCAN guard makes that a harmless "already present".
+            post("/checkin") {
+                val cur = live.get() ?: return@post call.json(mapOf("status" to "REJECTED", "reason" to "SESSION_NOT_ACTIVE"))
+                if (!cur.lecturerStarted())
+                    return@post call.json(mapOf("status" to "REJECTED", "reason" to "LECTURER_NOT_STARTED"))
+                val p = call.receiveParameters()
+                val reg = p["reg_number"] ?: ""
+                val r = validator.validateReg(reg, cur.session, DeviceContext(p["fingerprint"] ?: ""))
+                if (r.status == ValidationStatus.PRESENT)
+                    cur.onCheckin(QrFields(reg, "", "", "", "", "", "", ""), r)   // reg as the display id; no name offline
+                call.json(buildMap { put("status", r.status.name); r.reason?.let { put("reason", it.name) } })
+            }
+
+            // Student check-in: form qr, fingerprint.
             post("/submit") {
                 val cur = live.get() ?: return@post call.json(mapOf("status" to "REJECTED", "reason" to "SESSION_NOT_ACTIVE"))
                 // Lecturer-started gate: no student attendance until the lecturer has scanned to START.
                 if (!cur.lecturerStarted())
                     return@post call.json(mapOf("status" to "REJECTED", "reason" to "LECTURER_NOT_STARTED"))
                 val p = call.receiveParameters()
-                // Students use the STATIC room code (does not rotate); proximity is the mandatory hotspot LAN.
-                if (!RoomCode.validateStatic(cur.roomCodeSecret, p["room_code"] ?: ""))
-                    return@post call.json(mapOf("status" to "REJECTED", "reason" to "PROXIMITY_FAILED"))
+                // No student room code: proximity IS being on the hotspot LAN. This server is only
+                // reachable over the coordinator's hotspot, so a successful POST already proves the
+                // student is physically in the room. One-device-one-person is enforced downstream by
+                // the device fingerprint (DEVICE_ALREADY_USED / DUPLICATE_SCAN in the validator).
                 val qr = p["qr"] ?: ""
                 val r = validator.validate(qr, cur.session, DeviceContext(p["fingerprint"] ?: ""))
                 // Record the live-roster display row (name/reg-no come from the scanned QR).
@@ -80,7 +107,7 @@ class InRoomServer(
                     ctx = cur.gateContext(),
                 )
                 val gateAction = res.action  // local capture: res.action is a cross-module property, not smart-castable
-                if (res.ok && gateAction != null) cur.onGate(gateAction)
+                if (res.ok && gateAction != null) cur.onGate(gateAction, p["fingerprint"] ?: "")
                 call.json(buildMap {
                     put("status", if (res.ok) (if (gateAction == GateAction.START) "STARTED" else "ENDED") else "REJECTED")
                     res.rejection?.let { put("reason", it.name) }
@@ -105,11 +132,9 @@ class InRoomServer(
             get("/status") {
                 val cur = live.get()
                 val lecturerCode = cur?.let { RoomCode.derive(it.roomCodeSecret, System.currentTimeMillis() / 1000) } ?: ""
-                val studentCode = cur?.let { RoomCode.staticCode(it.roomCodeSecret) } ?: ""
                 call.json(mapOf(
                     "active" to (cur != null).toString(),
-                    "room_code" to lecturerCode,       // rotating — lecturer
-                    "student_code" to studentCode,      // static — students
+                    "room_code" to lecturerCode,       // rotating — lecturer gate only
                 ))
             }
         }

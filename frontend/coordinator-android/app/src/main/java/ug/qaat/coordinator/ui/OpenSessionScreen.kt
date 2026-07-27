@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ug.qaat.coordinator.service.SessionService
 import ug.qaat.coordinator.session.SessionController
+import ug.qaat.coordinator.store.SessionStore
 
 /**
  * Pick today's unit, start the hotspot/server, and open the session. The LECTURER is
@@ -34,32 +35,52 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         if (units.isEmpty()) { Text("No units scheduled for today in the manifest."); return }
 
         Spacer(Modifier.height(12.dp))
-        Text("1. Your cohort's Wi-Fi", style = MaterialTheme.typography.titleSmall)
+        Text("1. Start the room Wi-Fi + server", style = MaterialTheme.typography.titleSmall)
         Text(
-            "Turn ON your phone's Hotspot and name it after your cohort" +
-                (AppState.cohortLabel?.takeIf { it.isNotBlank() }?.let { " — e.g. \"$it\"" } ?: "") +
-                ". In a shared room, students pick that name to connect to YOUR session.",
+            "The app creates the room's Wi-Fi and the check-in server at a fixed address " +
+                "(${AppState.LOCAL_HOTSPOT_IP}) — the same on every coordinator phone, so nothing to " +
+                "configure. Students join by scanning the “Connect to Wi-Fi” QR shown on the next screen.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(6.dp))
-        Row {
-            OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) } }) {
-                Text("Open hotspot settings")
-            }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { AppState.useSystemHotspot = true; ctx.startForegroundService(Intent(ctx, SessionService::class.java)) }) {
-                Text(if (AppState.serverReady) "Server running" else "Start server")
+        Button(onClick = { AppState.useSystemHotspot = false; ctx.startForegroundService(Intent(ctx, SessionService::class.java)) }) {
+            Text(if (AppState.serverReady) "Server running" else "Start room Wi-Fi + server")
+        }
+        AppState.serverError?.let { err ->
+            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("⚠ Server didn't start\n$err",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(10.dp))
             }
         }
         if (AppState.serverReady) {
             Text(
-                if (AppState.hotspotUp) "✓ Ready — serving on your hotspot (${AppState.inRoomIp}). Students: join your cohort's Wi-Fi."
-                else "Server on. Now turn ON your phone's hotspot (named after your cohort) so students can join.",
+                if (AppState.hotspotUp) "✓ Ready — room Wi-Fi up, serving at ${AppState.inRoomIp}. Show students the “Connect to Wi-Fi” QR."
+                else "Server on, bringing up the room Wi-Fi… (grant location/nearby-devices if asked).",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (AppState.hotspotUp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                color = if (AppState.hotspotUp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
+
+        // Manual IP override (rare fallback): only needed if the LocalOnlyHotspot gateway on this
+        // device is NOT 192.168.49.1. Read it off any joined student phone (Wi-Fi → Gateway) and set.
+        Spacer(Modifier.height(8.dp))
+        var manualIp by remember { mutableStateOf(AppState.manualHotspotIp ?: "") }
+        OutlinedTextField(
+            manualIp, { manualIp = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text("Hotspot IP (advanced — only if not ${AppState.LOCAL_HOTSPOT_IP})") },
+            placeholder = { Text(AppState.LOCAL_HOTSPOT_IP) },
+            trailingIcon = {
+                TextButton(onClick = {
+                    val v = manualIp.trim().ifBlank { null }
+                    AppState.manualHotspotIp = v
+                    v?.let { AppState.inRoomIp = it; AppState.hotspotUp = true }
+                    SessionStore.saveHotspotIp(v)
+                }) { Text("Set") }
+            },
+        )
 
         Spacer(Modifier.height(16.dp))
         Text("2. Unit", style = MaterialTheme.typography.titleSmall)

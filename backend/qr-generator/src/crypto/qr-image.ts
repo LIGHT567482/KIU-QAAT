@@ -1,14 +1,18 @@
 import QRCode from 'qrcode'
 import type { SignedQRPayload } from './rsa-keys.js'
 
-// Base URL of the student check-in portal. The QR encodes a full URL so that
-// scanning with the phone camera opens the page directly (captive portal pattern).
-// STUDENT_CHECKIN_BASE_URL is the dedicated student origin, kept independent from
-// the coordinator/admin console (e.g. http://attend.uni.edu). CHECKIN_BASE_URL is
-// honoured as a legacy fallback; if neither is set a relative path is used (works
-// only when scanning from the same origin).
+// Base URL of the student check-in page. The QR encodes a FULL URL (host + /checkin?t=<token>)
+// so scanning with the phone camera opens the page directly (captive-portal pattern).
+//
+// OFFLINE IN-ROOM MODEL: the hub is the coordinator's app SERVING on the coordinator's own phone
+// hotspot (named after the cohort in Settings), with NO internet. The card must bake that LAN host —
+// an internet host is unreachable on the offline hotspot ("site can't be reached"). The Android
+// phone-hotspot gateway is 192.168.43.1 by default, so cards default to it and work offline out of
+// the box. Override with STUDENT_CHECKIN_BASE_URL / CHECKIN_BASE_URL if your phones use a different
+// tethering subnet (check the app's "serving at <ip>" line) or you serve from another origin.
+const INROOM_HUB_BASE_URL = 'http://192.168.43.1:8080'
 const CHECKIN_BASE_URL = (
-  process.env.STUDENT_CHECKIN_BASE_URL || process.env.CHECKIN_BASE_URL || ''
+  process.env.STUDENT_CHECKIN_BASE_URL || process.env.CHECKIN_BASE_URL || INROOM_HUB_BASE_URL
 ).replace(/\/$/, '')
 
 // Preferred destination: the student portal. Scanning the QR with the phone's
@@ -17,20 +21,24 @@ const CHECKIN_BASE_URL = (
 // both attend live sessions and track their attendance — no app to install.
 const STUDENT_PORTAL_URL = (process.env.STUDENT_PORTAL_URL || '').replace(/\/$/, '')
 
+// The base64url token carrying the whole signed payload (what the offline hub decodes at /checkin).
+export function qrToken(payload: SignedQRPayload): string {
+  return Buffer.from(JSON.stringify(payload)).toString('base64url')
+}
+
+// The exact string encoded into a student's QR — the single source of truth for both the rendered
+// image and any verification/preview. Offline in-room default: the LAN hub /checkin?t=<token>.
+// Only when STUDENT_PORTAL_URL is explicitly set does it switch to the online serial-only portal URL.
+export function checkinUrl(payload: SignedQRPayload, org?: string): string {
+  const orgQS = org ? `&org=${encodeURIComponent(org)}` : ''
+  return STUDENT_PORTAL_URL
+    ? `${STUDENT_PORTAL_URL}/?qr=${payload.serial_number}${orgQS}`
+    : `${CHECKIN_BASE_URL}/checkin?t=${qrToken(payload)}`
+}
+
 // Renders a 1024×1024 PNG buffer from a signed QR payload.
 export async function renderQRImage(payload: SignedQRPayload, org?: string): Promise<Buffer> {
-  const token = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  // Open the full student portal when configured; otherwise fall back to the
-  // single-session captive check-in page on the API origin.
-  // Encode only the short, globally-unique serial so the QR stays low-density and
-  // scans reliably; the portal resolves it server-side at /student/qr-login.
-  // &org lets the portal resolve the institution for the attendance lookup even when
-  // the QR is scanned off any coordinator hotspot (the public progress call needs it).
-  const orgQS = org ? `&org=${encodeURIComponent(org)}` : ''
-  const qrValue = STUDENT_PORTAL_URL
-    ? `${STUDENT_PORTAL_URL}/?qr=${payload.serial_number}${orgQS}`
-    : `${CHECKIN_BASE_URL}/checkin?t=${token}`
-  return QRCode.toBuffer(qrValue, {
+  return QRCode.toBuffer(checkinUrl(payload, org), {
     width: 1024,
     errorCorrectionLevel: 'H',
     margin: 2,

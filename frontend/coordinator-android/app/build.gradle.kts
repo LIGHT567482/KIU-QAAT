@@ -21,6 +21,11 @@ android {
         //   ./gradlew assembleRelease -Pqaat.apiBase=https://api.yourdomain.com
         val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://qaat-gateway.onrender.com"
         buildConfigField("String", "API_BASE", "\"$apiBase\"")
+        // The auth-service's own health URL — pinged on the login screen to wake the sleeping
+        // free-tier service BEFORE the user submits (the gateway proxies login to it). Best-effort;
+        // a wrong/unreachable value just means no pre-warm, login still works via the gateway.
+        val authWarm = (project.findProperty("qaat.authWarmUrl") as String?) ?: "https://qaat-auth.onrender.com/health"
+        buildConfigField("String", "AUTH_WARM_URL", "\"$authWarm\"")
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {
@@ -39,6 +44,7 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
@@ -67,4 +73,8 @@ dependencies {
     // Encrypted-at-rest persistence of the coordinator's session + cached manifest, so
     // the app opens straight to work (no re-login) and runs fully offline.
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // JVM unit tests (run headlessly): exercise the in-room check-in HTTP path end-to-end.
+    testImplementation(kotlin("test"))
+    testImplementation("junit:junit:4.13.2")
 }

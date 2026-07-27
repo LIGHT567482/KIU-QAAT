@@ -26,8 +26,22 @@ object SessionStore {
 
     fun init(context: Context) {
         if (::prefs.isInitialized) return
+        prefs = runCatching { create(context) }.getOrElse {
+            // The encrypted keyset can end up unreadable (e.g. after a reinstall or a keystore
+            // change), which would otherwise SILENTLY break auto-login + offline caching. Wipe the
+            // corrupt store and recreate it so persistence keeps working.
+            android.util.Log.w("QAAT_STORE", "encrypted prefs unreadable — recreating", it)
+            runCatching {
+                context.getSharedPreferences("qaat_session", Context.MODE_PRIVATE).edit().clear().commit()
+                context.deleteSharedPreferences("qaat_session")
+            }
+            create(context)
+        }
+    }
+
+    private fun create(context: Context): SharedPreferences {
         val key = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        prefs = EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             context, "qaat_session", key,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
@@ -65,6 +79,10 @@ object SessionStore {
     // for testing or the cloud domain for production, without rebuilding).
     fun saveServerUrl(url: String?) { if (::prefs.isInitialized) prefs.edit().putString("server_url", url?.trim()).apply() }
     fun serverUrl(): String? = if (::prefs.isInitialized) prefs.getString("server_url", null) else null
+
+    // Manual hotspot gateway IP (for phones that hide the hotspot interface from apps).
+    fun saveHotspotIp(ip: String?) { if (::prefs.isInitialized) prefs.edit().putString("hotspot_ip", ip?.trim()?.takeIf { it.isNotBlank() }).apply() }
+    fun hotspotIp(): String? = if (::prefs.isInitialized) prefs.getString("hotspot_ip", null) else null
 
     /** Restore the session SCALARS into AppState (safe on the main thread — no DB). The
      *  cached manifest is hydrated separately (loadManifest) off the main thread.

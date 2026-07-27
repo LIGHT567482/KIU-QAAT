@@ -40,22 +40,43 @@ class CheckinValidator(
 
         val studentIdHash = VaultCrypto.hmacHex(session.studentHashKey, f.studentId)
 
-        // ── Step 6a: cross-student device lock ───────────────────────────────────
-        store.bindingByFingerprint(device.fingerprintHash)?.let {
-            if (it.studentIdHash != studentIdHash)
-                return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT)
-        }
-
-        // ── Step 4: roster lookup ────────────────────────────────────────────────
-        if (studentIdHash !in session.rosterHashes)
-            return ValidationResult(ValidationStatus.REJECTED, RejectionReason.NOT_ON_ROSTER)
+        // ── Steps 6a + 4: cross-student device lock + roster ─────────────────────
+        rosterAndDeviceLock(studentIdHash, session, device)?.let { return ValidationResult(ValidationStatus.REJECTED, it) }
 
         // ── Step 4b: serial must match the current issued serial ─────────────────
         val currentSerial = session.rosterSerials[studentIdHash]
         if (currentSerial == null || f.serialNumber != currentSerial)
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.SERIAL_REVOKED)
 
-        // ── Step 5: hardware fingerprint (bind on first scan) ────────────────────
+        // ── Steps 5–7 + record ───────────────────────────────────────────────────
+        return bindAndRecord(studentIdHash, session, device)
+    }
+
+    /**
+     * Reg-number check-in (no student QR): presence is proven by the hotspot LAN, identity is the
+     * typed registration number matched against the cached roster. Skips the QR-only steps
+     * (signature/expiry/tenant/serial) but keeps the SAME anti-cheat as [validate] — device binding,
+     * one-attendance-per-student, and one-device-per-session — all enforced on the coordinator phone.
+     */
+    fun validateReg(regNumber: String, session: ActiveSession, device: DeviceContext): ValidationResult {
+        val reg = regNumber.trim()
+        if (reg.isEmpty()) return ValidationResult(ValidationStatus.REJECTED, RejectionReason.NOT_ON_ROSTER)
+        val studentIdHash = VaultCrypto.hmacHex(session.studentHashKey, reg)
+        rosterAndDeviceLock(studentIdHash, session, device)?.let { return ValidationResult(ValidationStatus.REJECTED, it) }
+        return bindAndRecord(studentIdHash, session, device)
+    }
+
+    /** Step 6a (a device is bound to a DIFFERENT student) + Step 4 (on the roster). Null = OK. */
+    private fun rosterAndDeviceLock(studentIdHash: String, session: ActiveSession, device: DeviceContext): RejectionReason? {
+        store.bindingByFingerprint(device.fingerprintHash)?.let {
+            if (it.studentIdHash != studentIdHash) return RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT
+        }
+        if (studentIdHash !in session.rosterHashes) return RejectionReason.NOT_ON_ROSTER
+        return null
+    }
+
+    /** Steps 5 (bind device on first check-in), 6 (duplicate), 7 (one device), then append PRESENT. */
+    private fun bindAndRecord(studentIdHash: String, session: ActiveSession, device: DeviceContext): ValidationResult {
         val stored = store.bindingByStudent(studentIdHash)
         if (stored != null) {
             if (stored.fingerprintHash != device.fingerprintHash)
@@ -63,16 +84,10 @@ class CheckinValidator(
         } else {
             store.putBinding(DeviceBinding(studentIdHash, device.fingerprintHash, session.academicYear, nowIso()))
         }
-
-        // ── Step 6: duplicate scan ───────────────────────────────────────────────
         if (store.hasAttendance(session.sessionId, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DUPLICATE_SCAN)
-
-        // ── Step 7: one device per session ───────────────────────────────────────
         if (store.deviceUsedByOther(session.sessionId, device.fingerprintHash, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_ALREADY_USED)
-
-        // ── PRESENT: append-only record ──────────────────────────────────────────
         store.addAttendance(
             AttendanceRecord(
                 logId = newUuid(),

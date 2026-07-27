@@ -28,6 +28,10 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // Wake the free-tier backend the moment this screen shows, so its cold start (up to ~1 min)
+    // overlaps with the coordinator typing — turning a stalled sign-in into an instant one.
+    LaunchedEffect(Unit) { Net.warmUp() }
+
     Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
@@ -36,11 +40,11 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     ) {
         Image(
             painter = painterResource(R.drawable.qaat_logo),
-            contentDescription = "QAAT",
+            contentDescription = "KIU - QAAT",
             modifier = Modifier.size(112.dp),
         )
         Spacer(Modifier.height(14.dp))
-        Text("QAAT", style = MaterialTheme.typography.headlineMedium)
+        Text("KIU - QAAT", style = MaterialTheme.typography.headlineMedium)
         Text("Coordinator sign-in", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(24.dp))
         OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -67,22 +71,38 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                         AppState.tenantId = res.tenantId; AppState.deviceBindingKey = res.deviceBindingKey
                         AppState.coordinatorName = res.fullName; AppState.coordinatorEmail = email.trim(); AppState.role = res.role
                         AppState.coordinatorTitle = res.title; AppState.coordinatorRegNo = res.registrationNo
-                        val m = ManifestClient(Graph.db.dao()).fetchAndStore(res.token)
-                        AppState.manifest = m
-                        // Persist for auto-login next time + fully-offline attendance.
+                        // Persist the session IMMEDIATELY — before any further network — so auto-login
+                        // survives closing the app even if the manifest/branding fetch below is slow
+                        // or fails. (Previously saveSession ran AFTER the manifest fetch, so a slow/
+                        // failed fetch meant the login was never persisted → re-login on next open.)
                         SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName, email.trim(), res.role, res.title, res.registrationNo)
                         SessionStore.saveCredentials(email.trim(), password)
-                        SessionStore.saveManifest(m)
-                        // Adopt the tenant's logo + colours app-wide (best-effort) + cache
-                        // them so the same branding shows on auto-login / offline.
-                        AppState.branding = runCatching { ug.qaat.coordinator.net.BrandingClient(res.token).fetch() }.getOrNull()
-                        AppState.branding?.let { runCatching { SessionStore.saveBranding(it) } }
                         onLoggedIn()
+                        // Best-effort: pull + cache the manifest + branding for offline use. Failures
+                        // here must NOT undo the already-saved login; CoordinatorApp retries on launch.
+                        runCatching {
+                            val m = ManifestClient(Graph.db.dao()).fetchAndStore(res.token)
+                            AppState.manifest = m; SessionStore.saveManifest(m)
+                        }
+                        runCatching {
+                            ug.qaat.coordinator.net.BrandingClient(res.token).fetch()?.let {
+                                AppState.branding = it; SessionStore.saveBranding(it)
+                            }
+                        }
                     }.onFailure { error = ug.qaat.coordinator.net.Net.friendly(it) }
                     busy = false
                 }
             },
         ) { Text(if (busy) "Signing in…" else "Sign in") }
+        if (busy) {
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Contacting the server… the first sign-in can take up to a minute while it wakes up. Please keep waiting.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     // Footer statement — same as the web apps.
     Text(

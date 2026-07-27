@@ -4,6 +4,7 @@ import android.content.Context
 import io.ktor.client.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.*
 import ug.qaat.coordinator.BuildConfig
 import ug.qaat.coordinator.R
 import java.security.KeyStore
@@ -37,6 +38,14 @@ object Net {
     /** Effective backend URL: a runtime override if set, else the build default. */
     val baseUrl: String get() = override?.takeIf { it.isNotBlank() } ?: BuildConfig.API_BASE
     fun setBaseUrl(url: String?) { override = url?.trim()?.removeSuffix("/")?.takeIf { it.isNotBlank() } }
+
+    /** Best-effort pings to wake the sleeping free-tier backend BEFORE the user submits, so the
+     *  cold start overlaps with typing instead of stalling sign-in. Hits BOTH the gateway and the
+     *  auth-service (the actual sleeper that login is proxied to). Failures are ignored. */
+    suspend fun warmUp() {
+        runCatching { client().get(BuildConfig.AUTH_WARM_URL) }   // the real sleeper (login upstream)
+        runCatching { client().get("$baseUrl/health") }
+    }
 
     // Composite trust: try the system CAs first (real cloud cert), then the embedded cert
     // (local self-signed). A server is trusted if EITHER accepts it.

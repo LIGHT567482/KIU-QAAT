@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
         SessionStore.init(applicationContext)
         SessionStore.restoreTheme()
         Net.setBaseUrl(SessionStore.serverUrl())   // runtime server override (local ⇄ cloud)
+        SessionStore.hotspotIp()?.let { ug.qaat.coordinator.ui.AppState.manualHotspotIp = it; ug.qaat.coordinator.ui.AppState.inRoomIp = it }
         // Auto-login: restore the cached session so the app opens straight to work — no
         // re-login. The cached manifest (for fully-offline attendance) is hydrated off the
         // main thread by CoordinatorApp.

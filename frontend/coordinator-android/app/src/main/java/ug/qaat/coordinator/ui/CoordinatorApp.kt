@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -101,7 +103,7 @@ fun CoordinatorApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.b
                     }
                     Box {
                         IconButton(onClick = { showProfile = !showProfile }) {
-                            Text("👤", fontSize = 18.sp)
+                            Icon(Icons.Filled.AccountCircle, contentDescription = "Profile", tint = Color.White)
                         }
                         if (showProfile) ProfilePopup(
                             onClose = { showProfile = false },

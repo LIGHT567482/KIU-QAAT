@@ -1,44 +1,81 @@
 <!DOCTYPE html>
-<!-- Minimal student check-in page served by the embedded server over the hotspot.
-     The camera app opens this URL with the signed QR payload in ?qr=. The student
-     types the room code; we POST {qr, room_code, fingerprint} to /submit.
-     Phase B: replace/merge with the gateway's full branded page (checkin_page.go),
-     which already includes the "Turn your Wi-Fi OFF now" rotation screen. -->
+<!-- Student check-in page served by the embedded server over the coordinator's hotspot.
+     PRIMARY flow (no QR): the student types their REGISTRATION NUMBER once; we POST
+     {reg_number, fingerprint} to /checkin. Reaching this server already proves the student is on
+     the coordinator's hotspot (physical presence); one-per-student + one-per-device are enforced
+     on the coordinator's phone. The reg is remembered in localStorage so a rejoin auto-confirms.
+     LEGACY flow: if a ?qr= / ?t= is present (old cards), we POST {qr} to /submit instead. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QAAT — Check in</title>
 <style>body{font-family:system-ui;max-width:380px;margin:auto;padding:24px;text-align:center}
-input{font-size:32px;letter-spacing:8px;text-align:center;width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px}
+input{font-size:20px;text-align:center;width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px;box-sizing:border-box;text-transform:uppercase}
 button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#2563eb;border:0;border-radius:12px}
-#ok{display:none}.big{background:#fffbeb;border:2px solid #f59e0b;border-radius:14px;padding:16px;margin-top:16px}
-.t{font-size:18px;font-weight:800;color:#b45309}</style></head>
+#ok,#form{display:none}.big{background:#fffbeb;border:2px solid #f59e0b;border-radius:14px;padding:16px;margin-top:16px}
+.t{font-size:18px;font-weight:800;color:#b45309}.muted{color:#475569}</style></head>
 <body>
 <div id="banner" style="display:none;position:fixed;top:0;left:0;right:0;padding:12px;text-align:center;font-weight:700;color:#fff;background:#2563eb"></div>
+<div id="busy">
+  <div style="font-size:56px">⏳</div><h2>Checking you in…</h2>
+  <p class="muted">You're on the class Wi-Fi — hold on a second.</p>
+</div>
 <div id="form">
-  <h2>Enter the room code</h2>
-  <input id="code" inputmode="numeric" maxlength="6" placeholder="000000" autofocus>
-  <button onclick="submit()">Confirm attendance</button>
+  <h2>Enter your registration number</h2>
+  <p class="muted">You're on the class Wi-Fi. Type your reg-number to be marked present.</p>
+  <input id="reg" autocapitalize="characters" autocomplete="off" placeholder="e.g. KIU/2021/1234">
+  <button onclick="submitReg()">Confirm attendance</button>
   <p id="err" style="color:#b91c1c"></p>
 </div>
 <div id="ok">
-  <div style="font-size:56px">✅</div><h2>You're marked present</h2>
+  <div style="font-size:56px">✅</div><h2 id="okTitle">You're marked present</h2>
   <div class="big"><div class="t">📴 Turn your Wi-Fi OFF now</div>
     <p>A classmate needs your spot. Disconnect from the class Wi-Fi so the next student can check in.</p></div>
 </div>
 <script>
 var qs=new URLSearchParams(location.search), qr=qs.get('qr')||'';
+if(!qr){ var t=qs.get('t'); if(t){ try{ qr=b64urlToStr(t); }catch(_){ } } }   // legacy card token
+function b64urlToStr(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4)s+='='; var bin=atob(s);
+  var bytes=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes); }
+function show(id){['busy','form','ok'].forEach(function(x){document.getElementById(x).style.display = x===id?'block':'none';});}
 async function fingerprint(){var raw=[navigator.userAgent,navigator.language,screen.width+'x'+screen.height,new Date().getTimezoneOffset()].join('|');
   var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
-async function submit(){
-  var code=document.getElementById('code').value.trim();
-  if(!/^[0-9]{6}$/.test(code)){document.getElementById('err').textContent='Enter the 6-digit code on the screen.';return;}
-  var fp=await fingerprint();
-  var body=new URLSearchParams({qr:qr,room_code:code,fingerprint:fp});
-  var r=await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
-  var d=await r.json();
-  if(d.status==='PRESENT'){document.getElementById('form').style.display='none';document.getElementById('ok').style.display='block';}
-  else{document.getElementById('err').textContent='Rejected: '+(d.reason||'try again');}
+var REASONS={LECTURER_NOT_STARTED:'Please wait for the lecturer to start the session, then try again.',
+  DEVICE_ALREADY_USED:'This phone already checked in another student this session.',
+  DEVICE_BELONGS_TO_ANOTHER_STUDENT:'This phone is registered to another student.',
+  DEVICE_MISMATCH:'Use the same phone you first checked in with.',
+  NOT_ON_ROSTER:"That reg-number isn't on this unit's roster — check it and try again.",
+  SESSION_NOT_ACTIVE:'No active session on this hotspot yet.',
+  INVALID_SIGNATURE:'QR not recognised.',TENANT_MISMATCH:'QR is for a different institution.',
+  SERIAL_REVOKED:'That QR was replaced.',QR_EXPIRED:'That QR has expired.'};
+function done(msg){ document.getElementById('okTitle').textContent = msg||"You're marked present"; show('ok'); }
+async function post(url, params){
+  var r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params)});
+  return r.json();
 }
-// In-session announcements: subscribe once the page loads; show a coloured banner.
+// ── Reg-number flow (primary) ──────────────────────────────────────────────
+async function submitReg(auto){
+  var reg=(auto || document.getElementById('reg').value).trim();
+  if(!reg){ show('form'); document.getElementById('err').textContent='Enter your registration number.'; return; }
+  show('busy');
+  try{
+    var d=await post('/checkin', {reg_number:reg, fingerprint:await fingerprint()});
+    if(d.status==='PRESENT'){ localStorage.setItem('qaat_reg', reg); done(); }
+    else if(d.reason==='DUPLICATE_SCAN'){ localStorage.setItem('qaat_reg', reg); done("You're already marked present"); }
+    else { show('form'); document.getElementById('err').textContent=REASONS[d.reason]||('Rejected: '+(d.reason||'try again')); }
+  }catch(e){ show('form'); document.getElementById('err').textContent='Could not reach the class server — make sure Mobile Data is OFF and you are on the class Wi-Fi, then try again.'; }
+}
+// ── Legacy QR/token flow ───────────────────────────────────────────────────
+async function submitQr(){
+  show('busy');
+  try{
+    var d=await post('/submit', {qr:qr, fingerprint:await fingerprint()});
+    if(d.status==='PRESENT'){ done(); } else { show('form'); document.getElementById('err').textContent=REASONS[d.reason]||('Rejected: '+(d.reason||'try again')); }
+  }catch(e){ show('form'); document.getElementById('err').textContent='Could not reach the class server — Mobile Data OFF, on the class Wi-Fi, then re-scan.'; }
+}
+// Route on load: legacy card QR → /submit; else a remembered reg auto-confirms; else ask for reg.
+if(qr){ submitQr(); }
+else { var saved=localStorage.getItem('qaat_reg'); if(saved){ submitReg(saved); } else { show('form'); } }
+// In-session announcements: coloured banner.
 try {
   var es = new EventSource('/events');
   es.onmessage = function(e){

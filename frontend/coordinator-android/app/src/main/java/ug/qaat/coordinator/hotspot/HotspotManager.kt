@@ -14,17 +14,37 @@ class HotspotManager(private val context: Context) {
     data class Info(val ssid: String, val passphrase: String)
 
     companion object {
-        /** Best-effort: the phone's own IPv4 on its hotspot/AP interface, so the check-in +
-         *  lecturer-gate URLs point at the right gateway when the coordinator uses their OWN
-         *  (cohort-named) system hotspot. The AP gateway is conventionally x.x.x.1. Returns null
-         *  until a hotspot is actually up. */
-        fun detectApIp(): String? = runCatching {
+        private fun isPrivateV4(ip: String) =
+            ip.startsWith("192.168.") || ip.startsWith("10.") ||
+            Regex("^172\\.(1[6-9]|2[0-9]|3[01])\\.").containsMatchIn(ip)
+
+        /** Every non-loopback private IPv4 this phone currently has, as "iface -> ip" — logged and
+         *  surfaced so we can SEE what the hotspot gateway actually is when auto-detect struggles. */
+        fun listPrivateV4(): List<Pair<String, String>> = runCatching {
             java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .flatMap { nif ->
+                    nif.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>()
+                        .mapNotNull { it.hostAddress }.filter { isPrivateV4(it) }.map { nif.name to it }
+                }
+        }.getOrDefault(emptyList())
+
+        /** Best-effort: the phone's own IPv4 on its hotspot/AP interface — the gateway CLIENTS hit.
+         *  Robust to devices whose hotspot subnet isn't 192.168.43.x: prefers a tether/AP-named
+         *  interface, then any address ending in .1 (the conventional gateway), then any private v4.
+         *  Returns null until a hotspot address actually exists. */
+        fun detectApIp(): String? = runCatching {
+            val candidates = java.net.NetworkInterface.getNetworkInterfaces().toList()
                 .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<java.net.Inet4Address>()
-                .mapNotNull { it.hostAddress }
-                .firstOrNull { (it.startsWith("192.168.") || it.startsWith("172.") || it.startsWith("10.")) && it.endsWith(".1") }
+                .flatMap { nif ->
+                    nif.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>()
+                        .mapNotNull { it.hostAddress }.filter { isPrivateV4(it) }.map { nif.name.lowercase() to it }
+                }
+            android.util.Log.i("QAAT_HUB", "network interfaces (private v4): $candidates")
+            val apName = listOf("ap", "softap", "swlan", "wlan1", "rndis", "tether", "usb")
+            // A hotspot HOST is always the .1 of its subnet. Only accept a .1 — never a client
+            // address (e.g. the phone's own IP on a Wi-Fi it JOINED, like a home router's 192.168.1.8).
+            candidates.firstOrNull { (name, ip) -> ip.endsWith(".1") && apName.any { name.contains(it) } }?.second
+                ?: candidates.firstOrNull { (_, ip) -> ip.endsWith(".1") }?.second
         }.getOrNull()
     }
 
