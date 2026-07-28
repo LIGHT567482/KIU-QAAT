@@ -33,9 +33,12 @@ class CheckinClient(private val baseUrl: String) {
         }.getOrNull()
     }
 
-    suspend fun attend(credential: String, fingerprint: String): CheckinResult = withContext(Dispatchers.IO) {
-        val r = http.submitForm("$baseUrl/submit", parameters {
-            append("qr", credential); append("fingerprint", fingerprint)
+    // Check-in by REGISTRATION NUMBER (no QR): the coordinator HMACs the reg against its cohort
+    // roster and enforces the per-lecture device lock via the fingerprint. Identity is the app's
+    // stored reg; presence is being on the coordinator's hotspot LAN.
+    suspend fun attend(regNumber: String, fingerprint: String): CheckinResult = withContext(Dispatchers.IO) {
+        val r = http.submitForm("$baseUrl/checkin", parameters {
+            append("reg_number", regNumber); append("fingerprint", fingerprint)
         })
         val j = JSONObject(r.bodyAsText())
         val status = j.optString("status", "REJECTED")

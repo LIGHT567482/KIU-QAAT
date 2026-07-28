@@ -85,7 +85,7 @@ fun AttendScreen(onReonboard: () -> Unit) {
                         busy = true; status = null
                         scope.launch {
                             val fp = Fingerprint.get(ctx)
-                            runCatching { CheckinClient(baseUrl!!).attend(StudentStore.credential!!, fp) }
+                            runCatching { CheckinClient(baseUrl!!).attend(StudentStore.reg!!, fp) }
                                 .onSuccess { r ->
                                     if (r.present || r.alreadyPresent) success = true
                                     else status = REASONS[r.reason] ?: "Not marked: ${r.reason ?: "try again"}"

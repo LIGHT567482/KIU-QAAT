@@ -6,9 +6,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 /**
- * Encrypted-at-rest storage of the student's onboarding result: the signed QR credential (what we
- * submit to the coordinator's /submit), the reg-number, and the display name. Once set, the app
- * works fully offline and never asks the student to log in again.
+ * Encrypted-at-rest storage of the student's onboarding result: the registration number (the
+ * identity we submit to the coordinator's /checkin) and the display name. Set once at onboarding
+ * (which also binds this device to the reg server-side), then the app works fully offline.
  */
 object StudentStore {
     private lateinit var prefs: SharedPreferences
@@ -29,13 +29,12 @@ object StudentStore {
         }
     }
 
-    val onboarded: Boolean get() = !credential.isNullOrBlank()
-    val credential: String? get() = prefs.getString("qr", null)
+    val onboarded: Boolean get() = !reg.isNullOrBlank()
     val reg: String? get() = prefs.getString("reg", null)
     val fullName: String? get() = prefs.getString("name", null)
 
-    fun save(credential: String, reg: String, fullName: String) {
-        prefs.edit().putString("qr", credential).putString("reg", reg).putString("name", fullName).apply()
+    fun save(reg: String, fullName: String) {
+        prefs.edit().putString("reg", reg).putString("name", fullName).apply()
     }
 
     fun clear() { prefs.edit().clear().apply() }

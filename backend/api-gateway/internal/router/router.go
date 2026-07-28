@@ -70,6 +70,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(10, 40)).
 		Get("/api/v1/student/progress", handlers.StudentProgressByReg(adminPool))
 
+	// Native student app: bind this device to the student's reg number (one-device-one-student,
+	// global) at one-time onboarding. Public; reg + org → tenant, self-scoped on adminPool.
+	r.With(middleware.PublicIPRateLimit(5, 20)).
+		Post("/api/v1/student/register-device", handlers.RegisterDevice(adminPool))
+
 	// Lecturer gate scan is public — authenticated by HMAC-signed QR token issued
 	// by the coordinator. A per-IP limiter blunts brute-force / replay attempts.
 	r.With(middleware.PublicIPRateLimit(5, 60)).

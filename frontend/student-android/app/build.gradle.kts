@@ -41,13 +41,7 @@ dependencies {
     implementation("io.ktor:ktor-client-core:2.3.12")
     implementation("io.ktor:ktor-client-okhttp:2.3.12")
 
-    // CameraX + ML Kit barcode scanning for the one-time "scan your QR card" onboarding.
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-
-    // Encrypted-at-rest storage of the student's credential (so they never log in again).
+    // Encrypted-at-rest storage of the student's registration (so they never re-onboard).
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     testImplementation(kotlin("test"))

@@ -8,38 +8,35 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * One-time online onboarding. The student scans their personal QR card; we (1) qr-login to prove
- * it's a real, active QR and mint a student token, then (2) fetch the canonical signed credential
- * from my-qr and hand it back to store. After this the app never needs the internet again.
+ * One-time online onboarding — NO QR. The student enters their registration number + institution;
+ * we bind this device to that reg (POST /api/v1/student/register-device), enforcing one-device-one-
+ * student globally. After this the app works fully offline: check-in is by reg-number over the
+ * coordinator's hotspot LAN.
  *
- * Mirrors backend handlers: POST /api/v1/student/qr-login {qr} -> {access_token},
- * GET /api/v1/student/my-qr (Bearer) -> {student_id, serial_number, token, ...}.
+ * Mirrors handlers.RegisterDevice: {reg_number, org, device_fingerprint} -> {student_id, full_name}.
  */
 class OnboardClient {
     private val http = Net.client()
     private val base = Net.baseUrl
 
-    data class Result(val credential: String, val studentId: String)
+    data class Result(val reg: String, val fullName: String)
 
-    suspend fun onboard(scannedQr: String): Result = withContext(Dispatchers.IO) {
-        val loginResp = http.post("$base/api/v1/student/qr-login") {
+    suspend fun register(reg: String, org: String, fingerprint: String): Result = withContext(Dispatchers.IO) {
+        val resp = http.post("$base/api/v1/student/register-device") {
             contentType(ContentType.Application.Json)
-            setBody(JSONObject().put("qr", scannedQr).toString())
+            setBody(
+                JSONObject()
+                    .put("reg_number", reg)
+                    .put("org", org)
+                    .put("device_fingerprint", fingerprint)
+                    .toString()
+            )
         }
-        require(loginResp.status.value in 200..299) {
-            friendly(loginResp.bodyAsText(), "Sign-in failed (${loginResp.status.value}). Is this your QR card?")
+        require(resp.status.value in 200..299) {
+            friendly(resp.bodyAsText(), "Registration failed (${resp.status.value}).")
         }
-        val token = JSONObject(loginResp.bodyAsText()).optString("access_token", "")
-        require(token.isNotBlank()) { "Sign-in did not return a token." }
-
-        val meResp = http.get("$base/api/v1/student/my-qr") { header("Authorization", "Bearer $token") }
-        require(meResp.status.value in 200..299) {
-            friendly(meResp.bodyAsText(), "Could not load your credential (${meResp.status.value}).")
-        }
-        val me = JSONObject(meResp.bodyAsText())
-        // Prefer the canonical fresh token; fall back to the scanned card if the generator is down.
-        val credential = me.optString("token", "").ifBlank { scannedQr }
-        Result(credential, me.optString("student_id", ""))
+        val j = JSONObject(resp.bodyAsText())
+        Result(j.optString("student_id", reg), j.optString("full_name", ""))
     }
 
     private fun friendly(body: String, fallback: String): String =
