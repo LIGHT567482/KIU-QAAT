@@ -122,21 +122,28 @@ class SessionService : Service() {
                     update("Serving on your hotspot ($manual). Students: join your cohort's Wi-Fi.")
                     return
                 }
+                // Seed the check-in address with the CONVENTIONAL phone-hotspot gateway (192.168.43.1)
+                // immediately — a coordinator's own hotspot is on this subnet, NOT the LocalOnlyHotspot
+                // .49.1, so serving on .49.1 gives students "can't be reached". Show it right away
+                // (don't wait for detection), then refine to the real gateway if we can read it.
+                ug.qaat.coordinator.ui.AppState.inRoomIp = ug.qaat.coordinator.ui.AppState.SYSTEM_HOTSPOT_IP
+                ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                update("Serving at ${ug.qaat.coordinator.ui.AppState.SYSTEM_HOTSPOT_IP}. Students: join your cohort's Wi-Fi, then open the Check-in address.")
                 repeat(120) {
                     val ip = HotspotManager.detectApIp()
-                    if (ip != null) {
+                    if (ip != null && ip != ug.qaat.coordinator.ui.AppState.inRoomIp) {
                         ug.qaat.coordinator.ui.AppState.inRoomIp = ip
-                        ug.qaat.coordinator.ui.AppState.hotspotUp = true
                         ug.qaat.coordinator.ui.AppState.hotspotDiag = null
                         update("Serving on your hotspot ($ip). Students: join your cohort's Wi-Fi.")
-                        return
                     }
-                    ug.qaat.coordinator.ui.AppState.hotspotUp = false
-                    val diag = HotspotManager.listPrivateV4()
-                    ug.qaat.coordinator.ui.AppState.hotspotDiag =
-                        if (diag.isEmpty()) "no hotspot address yet — is the hotspot ON?"
-                        else diag.joinToString(", ") { "${it.first}=${it.second}" }
-                    update("Turn ON your phone's hotspot (name it after your cohort). Students join it.")
+                    if (ip == null) {
+                        // Keep the seeded .43.1 address live; just record what interfaces we DO see so a
+                        // coordinator whose gateway differs can read it and set the IP manually.
+                        val diag = HotspotManager.listPrivateV4()
+                        ug.qaat.coordinator.ui.AppState.hotspotDiag =
+                            if (diag.isEmpty()) null
+                            else diag.joinToString(", ") { "${it.first}=${it.second}" }
+                    }
                     delay(3000)
                 }
             } else {

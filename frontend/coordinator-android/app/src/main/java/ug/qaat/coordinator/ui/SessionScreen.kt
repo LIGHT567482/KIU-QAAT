@@ -52,14 +52,22 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
         }
-        // No student QR cards: students (1) scan "Connect to Wi-Fi" to join, (2) scan "Check in here"
-        // (or type the address) to open the page, (3) type their reg-number. The self-test line shows
-        // the instant a phone actually reaches this server — the objective proof it's working.
+        // Students JOIN the Wi-Fi by reading the name + password below (no connect QR), then OPEN the
+        // check-in address (scan or type), then type their reg-number. The self-test line shows the
+        // instant a phone actually reaches this server — the objective proof it's working.
         Surface(color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.medium) {
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("STUDENTS: JOIN, OPEN, ENTER REG-NUMBER", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp)
-                Text("Scan “Connect to Wi-Fi”, then “Check in here” (or type the address), then type your reg-number.",
-                    color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text("STUDENTS: JOIN THE WI-FI, OPEN CHECK-IN, TYPE REG-NUMBER", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp, textAlign = TextAlign.Center)
+                // The Wi-Fi credentials to read out / project (replaces the Connect-to-Wi-Fi QR).
+                val ssid = AppState.hotspotSsid; val pass = AppState.hotspotPass
+                if (!ssid.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Wi-Fi name:  $ssid", color = MaterialTheme.colorScheme.inverseOnSurface,
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                    if (!pass.isNullOrBlank())
+                        Text("Password:  $pass", color = MaterialTheme.colorScheme.inverseOnSurface,
+                            fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     if (AppState.hotspotUp) "Check-in address: http://${AppState.inRoomIp}:8080"
@@ -76,22 +84,44 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                     textAlign = TextAlign.Center)
             }
         }
+
+        // "Can't be reached" rescue: if a device has joined but none has reached the server, the served
+        // gateway IP is probably wrong for this phone's hotspot. Let the coordinator read the real
+        // Gateway off a joined phone (Wi-Fi → the network → Gateway) and set it live.
+        if (AppState.hotspotUp && AppState.clientsReached == 0) {
+            var ip by remember { mutableStateOf(AppState.manualHotspotIp ?: "") }
+            Spacer(Modifier.height(8.dp))
+            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text("Students see “can't be reached”? On a JOINED phone open Wi-Fi → this network → Gateway, and type that IP here.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                    AppState.hotspotDiag?.let { Text("This phone's addresses: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(ip, { ip = it }, Modifier.weight(1f), singleLine = true,
+                            placeholder = { Text(AppState.SYSTEM_HOTSPOT_IP) }, label = { Text("Gateway IP") })
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            val v = ip.trim().ifBlank { null }
+                            AppState.manualHotspotIp = v
+                            v?.let { AppState.inRoomIp = it; AppState.hotspotUp = true }
+                            ug.qaat.coordinator.store.SessionStore.saveHotspotIp(v)
+                        }) { Text("Set") }
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
             Text("📴 Tell students to turn Wi-Fi OFF the moment they see ✓ — only ~10 fit at once.",
                 Modifier.padding(12.dp), textAlign = TextAlign.Center)
         }
 
-        // Projected QRs: (1) Connect-to-Wi-Fi (join the app's LocalOnlyHotspot by scan — its name is
-        // OS-generated), (2) Check-in page (opens http://<ip>:8080/attend — always the current IP, so
-        // it always resolves to THIS coordinator), (3) rotating lecturer gate. Rendered locally (ZXing).
+        // Projected QRs: (1) Check-in page (opens http://<ip>:8080/attend — always the current IP, so
+        // it always resolves to THIS coordinator), (2) rotating lecturer gate. Rendered locally (ZXing).
+        // No Connect-to-Wi-Fi QR: students join by reading the Wi-Fi name + password shown above.
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            val ssid = AppState.hotspotSsid; val pass = AppState.hotspotPass
-            val cohort = AppState.cohortLabel?.takeIf { it.isNotBlank() }
-            if (!ssid.isNullOrBlank())
-                QrCard("1 · Connect to Wi-Fi", wifiQrPayload(ssid, pass ?: ""), cohort ?: ssid)
-            QrCard("2 · Check in here", "${AppState.inRoomBaseUrl}/attend", "scan or type the address")
+            QrCard("Check in here", "${AppState.inRoomBaseUrl}/attend", "scan or type the address")
             QrCard("Lecturer gate", "${AppState.inRoomBaseUrl}/gate?rc=${AppState.lecturerCode}",
                 "Lecturer scans · rotates ${AppState.secondsLeft}s")
         }

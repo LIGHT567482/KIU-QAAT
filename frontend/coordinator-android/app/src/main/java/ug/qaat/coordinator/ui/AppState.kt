@@ -12,6 +12,11 @@ object AppState {
     // The app's LocalOnlyHotspot gateway — fixed and known, the same on every coordinator phone,
     // so the projected check-in link always resolves to the coordinator's server with no detection.
     const val LOCAL_HOTSPOT_IP = "192.168.49.1"
+    // The conventional gateway of a phone's OWN portable hotspot (Android's stock tether subnet).
+    // Used as the serving IP in system-hotspot mode — a coordinator's own hotspot is NOT on the
+    // LocalOnlyHotspot 192.168.49.x subnet, so serving on .49.1 there is unreachable ("can't be
+    // reached"). detectApIp() refines it; a manual override still wins.
+    const val SYSTEM_HOTSPOT_IP = "192.168.43.1"
     // Auth (set after login; binding key feeds the Sealer — never logged).
     var token by mutableStateOf<String?>(null)
     var userId by mutableStateOf<String?>(null)
