@@ -75,6 +75,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(5, 20)).
 		Post("/api/v1/student/register-device", handlers.RegisterDevice(adminPool))
 
+	// Unified KIU QAAT app sign-in: identifier (email / reg-no / staff-id) + password + org →
+	// resolves to the account, reuses auth-service /auth/login, augments with student_id/staff_id.
+	r.With(middleware.PublicIPRateLimit(5, 60)).
+		Post("/api/v1/auth/app-login", handlers.AppLogin(adminPool))
+
 	// Lecturer gate scan is public — authenticated by HMAC-signed QR token issued
 	// by the coordinator. A per-IP limiter blunts brute-force / replay attempts.
 	r.With(middleware.PublicIPRateLimit(5, 60)).

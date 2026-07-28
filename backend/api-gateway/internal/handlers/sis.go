@@ -147,7 +147,9 @@ func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.R
 	var domain string
 	_ = conn.QueryRow(ctx, `SELECT domain FROM tenants WHERE tenant_id = $1`, tenantID).Scan(&domain)
 	domain = strings.ToLower(strings.TrimSpace(domain))
-	sharedHash, _ := bcrypt.GenerateFromPassword([]byte(randPassword()), 10)
+	// Default sign-in password for the unified app; students change it later. (Was a random
+	// throwaway when students were QR/passwordless — see migration 052 for existing rows.)
+	sharedHash, _ := bcrypt.GenerateFromPassword([]byte("Student"), 10)
 
 	res := &importResult{Errors: []string{}}
 

@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -99,9 +98,9 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 		}
 		email = fmt.Sprintf("lecturer.%s@%s", short, domain)
 	}
-	pw := make([]byte, 24)
-	_, _ = rand.Read(pw)
-	hash, _ := bcrypt.GenerateFromPassword(pw, 12) // unusable random password (QR-only login)
+	// Default sign-in password for the unified app; the lecturer changes it later. (Was a random
+	// unusable password when lecturers were QR-only — see migration 052 for existing rows.)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("Lecturer"), 12)
 
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO users (tenant_id, email, password_hash, role, full_name)
