@@ -59,7 +59,7 @@ private suspend fun refreshTokenSilently(): String? {
         AppState.token = res.token; AppState.userId = res.userId; AppState.tenantId = res.tenantId
         AppState.deviceBindingKey = res.deviceBindingKey
         SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName,
-            identifier, res.role, res.title, res.registrationNo, res.studentId, res.staffId, res.org.ifBlank { org })
+            identifier, res.role, res.title, res.registrationNo, res.studentId, res.staffId, res.org.ifBlank { AppState.org.orEmpty() })
         res.token
     }.getOrNull()
 }
