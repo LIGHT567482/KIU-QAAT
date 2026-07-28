@@ -128,44 +128,28 @@ func GetBranding(pool *pgxpool.Pool) http.HandlerFunc {
 			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.TextColorLight, &b.TextColorDark, &b.Address,
 			&b.ActiveAcademicYear, &b.ActiveSemester)
 		if err != nil {
+			// No tenant row (or DB hiccup): still serve the institution's brand.json identity.
+			if bf := brandFile(); bf != nil {
+				writeJSON(w, http.StatusOK, *bf)
+				return
+			}
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
 			return
 		}
+		applyBrandFile(&b) // brand.json is the source of visual identity
 		writeJSON(w, http.StatusOK, b)
 	}
 }
 
-// GET /api/v1/branding/public?tenant_id=... — unauthenticated branding lookup for
-// the student/lecturer captive portals. Uses the privileged pool (no RLS) because
-// the caller has no JWT/tenant context; only display-safe fields are returned.
+// GET /api/v1/branding/public — unauthenticated branding for the login pages / captive portals.
+// Single-institution: it just returns the embedded brand.json (no tenant_id / org needed).
 func GetPublicBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := r.URL.Query().Get("tenant_id")
-		// The student portal link carries the tenant by its domain (or institution
-		// id) rather than the raw UUID — resolve it so the portal can show the logo
-		// + name and scope itself to that institution.
-		if org := strings.TrimSpace(r.URL.Query().Get("org")); org != "" && tenantID == "" {
-			_ = adminPool.QueryRow(r.Context(),
-				`SELECT tenant_id::text FROM tenants WHERE lower(domain) = lower($1) OR lower(institution_id) = lower($1) LIMIT 1`,
-				org).Scan(&tenantID)
-		}
-		if !middleware.ValidTenantID(tenantID) {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_TENANT", "valid tenant_id or org query param required"))
+		if bf := brandFile(); bf != nil {
+			writeJSON(w, http.StatusOK, *bf)
 			return
 		}
-		var b branding
-		err := adminPool.QueryRow(r.Context(), brandingSelect, tenantID).Scan(
-			&b.TenantID, &b.Name, &b.Domain, &b.LogoURL,
-			&b.Motto, &b.Slogan, &b.BrandColor,
-			&b.SidebarColor, &b.BackgroundColor, &b.BackgroundImage,
-			&b.BackgroundBlur, &b.BackgroundBright, &b.BackgroundContrast,
-			&b.BackgroundOverlay, &b.BackgroundOverlayO, &b.FooterColor, &b.TextColorLight, &b.TextColorDark, &b.Address,
-			&b.ActiveAcademicYear, &b.ActiveSemester)
-		if err != nil {
-			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "tenant not found"))
-			return
-		}
-		writeJSON(w, http.StatusOK, b)
+		writeJSON(w, http.StatusInternalServerError, errBody("NO_BRANDING", "branding unavailable"))
 	}
 }
 

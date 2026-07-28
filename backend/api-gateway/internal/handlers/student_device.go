@@ -32,20 +32,17 @@ func RegisterDevice(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		reg := strings.TrimSpace(req.RegNumber)
-		org := strings.TrimSpace(req.Org)
 		fp := strings.TrimSpace(req.DeviceFingerprint)
-		if reg == "" || org == "" || fp == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "reg_number, org and device_fingerprint are required"))
+		if reg == "" || fp == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "reg_number and device_fingerprint are required"))
 			return
 		}
 		ctx := r.Context()
 
-		// Resolve the tenant from the institution slug (domain or institution_id).
-		var tenantID string
-		if err := adminPool.QueryRow(ctx,
-			`SELECT tenant_id::text FROM tenants WHERE lower(domain) = lower($1) OR lower(institution_id) = lower($1) LIMIT 1`,
-			org).Scan(&tenantID); err != nil || tenantID == "" {
-			writeJSON(w, http.StatusNotFound, errBody("TENANT_NOT_FOUND", "we couldn't find that institution — check the institution ID"))
+		// Single institution — the one tenant, no org needed.
+		tenantID := singleTenantID(ctx, adminPool)
+		if tenantID == "" {
+			writeJSON(w, http.StatusInternalServerError, errBody("NO_TENANT", "institution not configured"))
 			return
 		}
 

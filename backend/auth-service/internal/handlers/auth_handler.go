@@ -359,17 +359,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Institution-ID gate: a tenant ADMIN must supply the institution_id assigned
 	// by the platform owner at tenant registration. Other roles are not asked.
-	if user.Role == models.RoleAdmin {
-		instID, err := h.users.TenantInstitutionID(r.Context(), user.TenantID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify institution")
-			return
-		}
-		if instID == "" || strings.TrimSpace(req.InstitutionID) != instID {
-			writeError(w, http.StatusUnauthorized, "INVALID_INSTITUTION_ID", "a valid Institution ID is required for administrators")
-			return
-		}
-	}
+	// Single-institution build: the ADMIN institution-ID gate is retired (one institution only).
+	_ = req.InstitutionID
 
 	tokenStr, jti, expiresAt, err := h.jwt.Issue(
 		user.UserID,

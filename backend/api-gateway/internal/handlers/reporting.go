@@ -662,22 +662,14 @@ func GetEligibility(pool *pgxpool.Pool) http.HandlerFunc {
 func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reg := strings.TrimSpace(r.URL.Query().Get("reg"))
-		org := strings.TrimSpace(r.URL.Query().Get("org")) // tenant domain (or institution id) from the link
 		if reg == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "reg (registration number) is required"))
 			return
 		}
-		if org == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("ORG_REQUIRED", "open your institution's portal link to view your attendance"))
-			return
-		}
-		// Resolve the institution from the link; the reg-no is then looked up ONLY
-		// inside this tenant (cross-tenant isolation).
-		var scopeTenant string
-		if e := adminPool.QueryRow(r.Context(),
-			`SELECT tenant_id::text FROM tenants WHERE lower(domain) = lower($1) OR lower(institution_id) = lower($1) LIMIT 1`,
-			org).Scan(&scopeTenant); e != nil {
-			writeJSON(w, http.StatusNotFound, errBody("UNKNOWN_INSTITUTION", "unknown institution link"))
+		// Single institution — the one tenant, no org needed.
+		scopeTenant := singleTenantID(r.Context(), adminPool)
+		if scopeTenant == "" {
+			writeJSON(w, http.StatusInternalServerError, errBody("NO_TENANT", "institution not configured"))
 			return
 		}
 

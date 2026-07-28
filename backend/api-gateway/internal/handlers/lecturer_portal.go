@@ -18,18 +18,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// portalResolveTenant maps an ?org= (the institution's domain OR its institution_id)
-// to a tenant_id. Everything the portal returns is then scoped to that tenant.
+// portalResolveTenant returns THE single institution's tenant (the `org` arg is ignored now —
+// single-institution deployment). Kept as a function so callers are unchanged.
 func portalResolveTenant(ctx context.Context, pool *pgxpool.Pool, org string) (string, bool) {
-	org = strings.TrimSpace(org)
-	if org == "" {
-		return "", false
-	}
-	var tid string
-	err := pool.QueryRow(ctx,
-		`SELECT tenant_id::text FROM tenants WHERE lower(domain) = lower($1) OR lower(institution_id) = lower($1) LIMIT 1`,
-		org).Scan(&tid)
-	return tid, err == nil && tid != ""
+	tid := singleTenantID(ctx, pool)
+	return tid, tid != ""
 }
 
 // portalResolveLecturer resolves (tenant, staff_id) → lecturer.

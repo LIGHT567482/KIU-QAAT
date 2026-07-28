@@ -35,19 +35,16 @@ func AppLogin(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		id := strings.TrimSpace(req.Identifier)
-		org := strings.TrimSpace(req.Org)
-		if id == "" || req.Password == "" || org == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "identifier, password and institution are required"))
+		if id == "" || req.Password == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "identifier and password are required"))
 			return
 		}
 		ctx := r.Context()
 
-		// Institution → tenant.
-		var tenantID string
-		if err := adminPool.QueryRow(ctx,
-			`SELECT tenant_id::text FROM tenants WHERE lower(domain) = lower($1) OR lower(institution_id) = lower($1) LIMIT 1`,
-			org).Scan(&tenantID); err != nil || tenantID == "" {
-			writeJSON(w, http.StatusNotFound, errBody("TENANT_NOT_FOUND", "we couldn't find that institution — check the institution ID"))
+		// Single institution — the one tenant, no org needed.
+		tenantID := singleTenantID(ctx, adminPool)
+		if tenantID == "" {
+			writeJSON(w, http.StatusInternalServerError, errBody("NO_TENANT", "institution not configured"))
 			return
 		}
 
@@ -110,7 +107,6 @@ func AppLogin(adminPool *pgxpool.Pool) http.HandlerFunc {
 			}
 			obj["staff_id"] = staffID
 		}
-		obj["org"] = org
 		writeJSON(w, http.StatusOK, obj)
 	}
 }

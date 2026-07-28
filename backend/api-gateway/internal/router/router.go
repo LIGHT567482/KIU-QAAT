@@ -207,20 +207,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Feeds the top-left header on every dashboard.
 		r.Get("/api/v1/branding", handlers.GetBranding(pool))
 
-		// ── Platform owner: tenant lifecycle + branding (SUPER_ADMIN only) ───
-		// Cross-tenant operations on the privileged adminPool (see router.New / C1).
-		// Tenant REGISTRATION and identity/branding belong to the SaaS owner, not
-		// to a per-tenant ADMIN.
-		r.With(middleware.RequireRole(middleware.RoleSuperAdmin)).
-			Get("/api/v1/admin/tenants", handlers.ListTenants(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleSuperAdmin)).
-			Post("/api/v1/admin/tenants", handlers.CreateTenant(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleSuperAdmin)).
-			Patch("/api/v1/admin/tenants/{tenant_id}/status", handlers.SetTenantStatus(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleSuperAdmin)).
-			Patch("/api/v1/admin/tenants/{tenant_id}/branding", handlers.UpdateTenantBranding(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleSuperAdmin)).
-			Delete("/api/v1/admin/tenants/{tenant_id}", handlers.DeleteTenant(adminPool))
+		// ── Super-admin ELIMINATED (single-institution build) ────────────────
+		// Tenant lifecycle + branding routes are gone: there is ONE institution, and
+		// branding now comes from brand.json (served by GetBranding/GetPublicBranding),
+		// not a runtime editor. The SUPER_ADMIN role + its handlers are left dormant.
 
 		// ── Tenant ADMIN: own-tenant settings ────────────────────────────────
 		// Attendance threshold stays editable inside the tenant — by the tenant

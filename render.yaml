@@ -64,7 +64,7 @@ services:
           name: qaat-redis
           property: connectionString
       - key: CORS_ORIGINS
-        value: https://admin-dashboards-gamma.vercel.app,https://coordinator-pwa.vercel.app,https://student-portal-xi-ruddy.vercel.app,https://super-admin-seven-gamma.vercel.app
+        value: https://admin-dashboards-gamma.vercel.app,https://coordinator-pwa.vercel.app,https://student-portal-xi-ruddy.vercel.app
       # qaat-auth is currently deployed as a PUBLIC web service (has an onrender.com URL), so the
       # gateway reaches it over the public edge — the internal `http://qaat-auth:8081` address
       # black-holes when the service is asleep, which surfaces as an edge 502 on /auth/login.
