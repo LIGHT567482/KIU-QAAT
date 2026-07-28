@@ -44,3 +44,9 @@ coverage/
 next.txt
 coordinator'sapp.md
 HowItWorks.mdinfra/render/secrets.generated.env
+
+# Gradle build cache (was wrongly tracked) + local Playwright artifacts
+.gradle/
+frontend/*/.gradle/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
