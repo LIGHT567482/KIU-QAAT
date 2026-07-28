@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Compose draws the Material3 UI in Kotlin; the activity theme only needs to be a valid
-         no-action-bar theme (same approach as the coordinator app). -->
-    <style name="Theme.QAATStudent" parent="android:Theme.Material.Light.NoActionBar" />
-</resources>
