@@ -16,9 +16,9 @@ class ProgressClient {
                        val pct: Double, val threshold: Int, val status: String, val deficit: Int?)
     data class Progress(val fullName: String, val institution: String, val units: List<UnitRow>)
 
-    suspend fun fetch(reg: String, org: String): Progress = withContext(Dispatchers.IO) {
+    suspend fun fetch(reg: String): Progress = withContext(Dispatchers.IO) {
         val r = http.get("$base/api/v1/student/progress") {
-            url { parameters.append("reg", reg); parameters.append("org", org) }
+            url { parameters.append("reg", reg) }
         }
         require(r.status.value in 200..299) {
             runCatching { JSONObject(r.bodyAsText()).optString("message", "") }.getOrNull()

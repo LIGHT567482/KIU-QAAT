@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { RoleLayout } from './layouts/RoleLayout'
 import Login from './pages/Login'
 import Unauthorized from './pages/Unauthorized'
+import WelcomeToast from './components/WelcomeToast'
 
 import VCOverview from './pages/vc/VCOverview'
 import VCLecturerWorkload from './pages/vc/VCLecturerWorkload'
@@ -40,6 +41,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <WelcomeToast />
         <CoordinatorQRBoot />
         <LecturerQRBoot />
         <Routes>

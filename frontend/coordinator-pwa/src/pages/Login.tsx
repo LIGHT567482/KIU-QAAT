@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useAuthStore } from '../store/auth'
 import PasswordInput from '../components/PasswordInput'
 import { useTheme, ThemeToggle } from '../theme'
+import brand from '../brand.json'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
@@ -27,6 +28,7 @@ export default function Login() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.message ?? 'Standby sign-in failed'); setLoading(false); return }
+      sessionStorage.setItem('qaat_welcome', data.full_name || 'coordinator')
       await login({
         access_token: data.access_token, jti: data.jti, role: data.role,
         user_id: data.user_id, full_name: data.full_name, tenant_id: data.tenant_id, expires_in: data.expires_in,
@@ -80,6 +82,7 @@ export default function Login() {
         return
       }
 
+      sessionStorage.setItem('qaat_welcome', data.full_name || form.email)
       await login({
         access_token:       data.access_token,
         jti:                data.jti,
@@ -99,6 +102,10 @@ export default function Login() {
 
   return (
     <div style={{ maxWidth: 400, margin: '80px auto', padding: 24, fontFamily: 'system-ui', color: 'var(--text)' }}>
+      <img src={brand.logo_url} alt="" aria-hidden style={{
+        position: 'fixed', width: 460, maxWidth: '80vw', opacity: 0.05,
+        left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: -1,
+      }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <h1 style={{ margin: 0 }}>QAAT Coordinator</h1>
         <ThemeToggle theme={theme} toggle={toggle} />

@@ -16,10 +16,10 @@ class RegisterDeviceClient {
 
     data class Result(val attendBlockUntilMs: Long)
 
-    suspend fun register(reg: String, org: String, fingerprint: String): Result = withContext(Dispatchers.IO) {
+    suspend fun register(reg: String, fingerprint: String): Result = withContext(Dispatchers.IO) {
         val resp = http.post("$base/api/v1/student/register-device") {
             contentType(ContentType.Application.Json)
-            setBody(JSONObject().put("reg_number", reg).put("org", org).put("device_fingerprint", fingerprint).toString())
+            setBody(JSONObject().put("reg_number", reg).put("device_fingerprint", fingerprint).toString())
         }
         require(resp.status.value in 200..299) {
             runCatching { JSONObject(resp.bodyAsText()).optString("message", "") }.getOrNull()

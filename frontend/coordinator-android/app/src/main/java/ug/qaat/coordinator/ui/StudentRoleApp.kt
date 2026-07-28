@@ -37,9 +37,9 @@ fun StudentRoleApp() {
     val ctx = LocalContext.current
     // Bind this phone to the student (one-device-one-student) once after login; capture any cooldown.
     LaunchedEffect(AppState.studentId) {
-        val reg = AppState.studentId; val org = AppState.org
-        if (!reg.isNullOrBlank() && !org.isNullOrBlank()) {
-            runCatching { RegisterDeviceClient().register(reg, org, Fingerprint.get(ctx)) }
+        val reg = AppState.studentId
+        if (!reg.isNullOrBlank()) {
+            runCatching { RegisterDeviceClient().register(reg, Fingerprint.get(ctx)) }
                 .onSuccess { AppState.attendBlockUntil = it.attendBlockUntilMs; SessionStore.saveAttendBlockUntil(it.attendBlockUntilMs) }
         }
         if (AppState.attendBlockUntil == 0L) AppState.attendBlockUntil = SessionStore.attendBlockUntil()
@@ -157,9 +157,9 @@ private fun StudentProgress() {
     fun load() {
         loading = true; error = null
         scope.launch {
-            val reg = AppState.studentId; val org = AppState.org
-            if (reg.isNullOrBlank() || org.isNullOrBlank()) { error = "Sign in again to view your progress."; loading = false; return@launch }
-            runCatching { ProgressClient().fetch(reg, org) }
+            val reg = AppState.studentId
+            if (reg.isNullOrBlank()) { error = "Sign in again to view your progress."; loading = false; return@launch }
+            runCatching { ProgressClient().fetch(reg) }
                 .onSuccess { data = it; loading = false }
                 .onFailure { error = it.message ?: "Couldn't load progress"; loading = false }
         }

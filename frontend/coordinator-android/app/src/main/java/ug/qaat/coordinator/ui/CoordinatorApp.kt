@@ -53,9 +53,9 @@ private val tabs = listOf(
  * can't (no saved creds, MFA required, or offline). @see SessionStore.credentials.
  */
 private suspend fun refreshTokenSilently(): String? {
-    val (identifier, pw, org) = SessionStore.appCredentials() ?: return null
+    val (identifier, pw, _) = SessionStore.appCredentials() ?: return null
     return runCatching {
-        val res = AuthClient().appLogin(identifier, pw, org, null) { } ?: return@runCatching null   // MFA → can't do silently
+        val res = AuthClient().appLogin(identifier, pw, null) { } ?: return@runCatching null   // MFA → can't do silently
         AppState.token = res.token; AppState.userId = res.userId; AppState.tenantId = res.tenantId
         AppState.deviceBindingKey = res.deviceBindingKey
         SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName,

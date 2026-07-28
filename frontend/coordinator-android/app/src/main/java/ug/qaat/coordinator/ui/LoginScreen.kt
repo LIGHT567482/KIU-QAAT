@@ -1,11 +1,15 @@
 package ug.qaat.coordinator.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -21,8 +25,8 @@ import ug.qaat.coordinator.store.SessionStore
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var identifier by remember { mutableStateOf("") }
-    var institution by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var totp by remember { mutableStateOf("") }
     var needsMfa by remember { mutableStateOf(false) }
@@ -34,6 +38,13 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     LaunchedEffect(Unit) { Net.warmUp() }
 
     Box(Modifier.fillMaxSize()) {
+    // Faint institution logo watermark behind everything.
+    Image(
+        painter = painterResource(R.drawable.qaat_logo),
+        contentDescription = null,
+        contentScale = ContentScale.Fit,
+        modifier = Modifier.align(Alignment.Center).size(340.dp).alpha(0.05f),
+    )
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -50,9 +61,6 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp))
         Spacer(Modifier.height(24.dp))
-        OutlinedTextField(institution, { institution = it.trim() }, label = { Text("Institution ID") },
-            placeholder = { Text("e.g. kiu") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
         OutlinedTextField(identifier, { identifier = it.trim() }, label = { Text("Email / Reg. no / Staff ID") },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
@@ -65,13 +73,13 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
         Button(
-            enabled = !busy && identifier.isNotBlank() && password.isNotBlank() && institution.isNotBlank(),
+            enabled = !busy && identifier.isNotBlank() && password.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 busy = true; error = null
                 scope.launch {
                     runCatching {
-                        val res = AuthClient().appLogin(identifier.trim(), password, institution.trim(), totp.ifBlank { null }) { needsMfa = true }
+                        val res = AuthClient().appLogin(identifier.trim(), password, totp.ifBlank { null }) { needsMfa = true }
                             ?: return@runCatching   // MFA prompt shown
                         AppState.token = res.token; AppState.userId = res.userId
                         AppState.tenantId = res.tenantId; AppState.deviceBindingKey = res.deviceBindingKey
@@ -79,13 +87,14 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                         AppState.coordinatorTitle = res.title; AppState.coordinatorRegNo = res.registrationNo
                         AppState.studentId = res.studentId.ifBlank { null }
                         AppState.staffId = res.staffId.ifBlank { null }
-                        AppState.org = res.org.ifBlank { institution.trim() }
                         AppState.forcePasswordChange = res.forcePasswordChange
                         // Persist the session IMMEDIATELY so auto-login survives a close.
                         SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey,
                             res.fullName, identifier.trim(), res.role, res.title, res.registrationNo,
-                            res.studentId, res.staffId, res.org.ifBlank { institution.trim() })
-                        SessionStore.saveAppCredentials(identifier.trim(), password, institution.trim())
+                            res.studentId, res.staffId, "")
+                        SessionStore.saveAppCredentials(identifier.trim(), password, "")
+                        val greet = res.fullName.ifBlank { "back" }
+                        Toast.makeText(ctx, "Welcome, $greet 👋", Toast.LENGTH_LONG).show()
                         onLoggedIn()
                         // Institution branding applies to every role.
                         runCatching {

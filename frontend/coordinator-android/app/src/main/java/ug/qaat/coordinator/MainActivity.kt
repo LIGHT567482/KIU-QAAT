@@ -33,6 +33,10 @@ class MainActivity : ComponentActivity() {
         // re-login. The cached manifest (for fully-offline attendance) is hydrated off the
         // main thread by CoordinatorApp.
         runCatching { SessionStore.restore() }
+        // Instant, offline institution branding from the bundled brand.json (backend overrides when
+        // online). Applied even on the login screen (before any session/fetch).
+        if (ug.qaat.coordinator.ui.AppState.branding == null)
+            runCatching { ug.qaat.coordinator.net.BrandDefault.load(applicationContext)?.let { ug.qaat.coordinator.ui.AppState.branding = it } }
         // Surface (and clear) a previous run's uncaught crash so it isn't a silent close.
         runCatching {
             val f = java.io.File(filesDir, "last_crash.txt")

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import PasswordInput from '../components/PasswordInput'
 import { useAuth, type Role } from '../contexts/AuthContext'
 import { useTheme, ThemeToggle } from '../theme'
+import brand from '../brand.json'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
@@ -19,16 +20,14 @@ export default function Login() {
   const { login } = useAuth()
   const { theme, toggle } = useTheme()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ email: '', password: '', totp_code: '', institution_id: '' })
+  const [form, setForm] = useState({ email: '', password: '', totp_code: '' })
   const [needsMFA, setNeedsMFA] = useState(false)
   const [resolvedTenantId, setResolvedTenantId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // Lecturers sign in passwordless: institution + staff ID (they are QR-only and
-  // hold no password), the same trust model as the read-only lecturer portal.
+  // Lecturers sign in passwordless with their staff ID (single institution — no org).
   const [lecturerMode, setLecturerMode] = useState(false)
   const [staffId, setStaffId] = useState('')
-  const [lecturerOrg, setLecturerOrg] = useState('')
 
   async function handleLecturerSubmit(e: FormEvent) {
     e.preventDefault()
@@ -36,12 +35,13 @@ export default function Login() {
     try {
       const res = await fetch(`${API}/api/v1/auth/lecturer-login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_id: staffId.trim(), org: lecturerOrg.trim() }),
+        body: JSON.stringify({ staff_id: staffId.trim() }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.message ?? 'Login failed'); setLoading(false); return }
       // The JWT carries sub (user_id), tenant_id, role and exp.
       const p = JSON.parse(atob(data.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+      sessionStorage.setItem('qaat_welcome', data.full_name || staffId.trim())
       login(data.access_token, { userId: p.sub, tenantId: p.tenant_id, role: p.role as Role, expiresAt: p.exp })
       navigate(ROLE_REDIRECT[p.role as Role] ?? '/lecturer')
     } catch {
@@ -93,6 +93,7 @@ export default function Login() {
         return
       }
 
+      sessionStorage.setItem('qaat_welcome', data.full_name || form.email)
       login(data.access_token, {
         userId:    data.user_id,
         tenantId:  tid,
@@ -110,8 +111,12 @@ export default function Login() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: 'var(--bg)', fontFamily: 'system-ui', position: 'relative',
+      justifyContent: 'center', background: 'var(--bg)', fontFamily: 'system-ui', position: 'relative', overflow: 'hidden',
     }}>
+      <img src={brand.logo_url} alt="" aria-hidden style={{
+        position: 'absolute', width: 460, maxWidth: '80vw', opacity: 0.05,
+        left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none',
+      }} />
       <div style={{ position: 'absolute', top: 16, right: 16 }}>
         <ThemeToggle theme={theme} toggle={toggle} />
       </div>
@@ -127,12 +132,10 @@ export default function Login() {
 
         {lecturerMode ? (
           <form onSubmit={handleLecturerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="text" placeholder="Institution ID" value={lecturerOrg} autoComplete="organization" autoFocus
-              onChange={e => setLecturerOrg(e.target.value)} required style={inp} />
-            <input type="text" placeholder="Staff ID" value={staffId} autoComplete="username"
+            <input type="text" placeholder="Staff ID" value={staffId} autoComplete="username" autoFocus
               onChange={e => setStaffId(e.target.value)} required style={inp} />
             <div style={{ fontSize: 11, color: 'var(--muted)', margin: '-4px 2px 0' }}>
-              No password needed — sign in with your institution and staff ID. (You can also scan your personal lecturer QR.)
+              No password needed — sign in with your staff ID. (You can also scan your personal lecturer QR.)
             </div>
             <button type="submit" disabled={loading} style={btn}>{loading ? 'Signing in…' : 'Sign In'}</button>
           </form>
@@ -143,13 +146,6 @@ export default function Login() {
               required style={inp} />
             <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
-            <div>
-              <input type="text" placeholder="Institution ID" value={form.institution_id} autoComplete="off"
-                onChange={e => setForm(f => ({ ...f, institution_id: e.target.value }))} style={inp} />
-              <div style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 2px 0' }}>
-                Required for institution administrators (provided by your platform owner).
-              </div>
-            </div>
             {needsMFA && (
               <input type="text" inputMode="numeric" pattern="\d{6}" placeholder="Authenticator code"
                 value={form.totp_code} onChange={e => setForm(f => ({ ...f, totp_code: e.target.value }))}

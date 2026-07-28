@@ -4,6 +4,7 @@ import { useTheme, applyPalette } from './theme'
 import Login from './pages/Login'
 import SessionPage from './pages/SessionPage'
 import Dashboard from './pages/Dashboard'
+import WelcomeToast from './components/WelcomeToast'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
@@ -51,6 +52,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--app-bg)' }}>
+      <WelcomeToast />
       {/* Offline banner */}
       {!online && isAuthenticated && (
         <div style={{ background: '#fef3c7', color: '#92400e', padding: '8px 16px', fontSize: 13, textAlign: 'center', borderBottom: '1px solid #fde68a' }}>

@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef, type FormEvent } from 'react'
 import { useTheme, ThemeToggle, applyPalette } from './theme'
+import brandDefault from './brand.json'
+import WelcomeToast from './components/WelcomeToast'
 
 const API = (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
-const URL_ORG = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('org') ?? '').trim() : ''
 const URL_QR  = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('qr') ?? '').trim() : ''
 
 interface Brand { name: string; logo_url: string; motto: string; brand_color: string; sidebar_color: string; background_color: string; footer_color: string }
@@ -41,7 +42,6 @@ type View = 'login' | 'progress' | 'qr' | 'scan'
 export default function App() {
   const { theme, toggle } = useTheme()
   const [reg, setReg]         = useState('')
-  const [org, setOrg]         = useState(URL_ORG)
   const [brand, setBrand]     = useState<Brand | null>(null)
   const [data, setData]       = useState<Progress | null>(null)
   const [loading, setLoading] = useState(false)
@@ -54,8 +54,8 @@ export default function App() {
   const [view, setView]       = useState<View>(URL_QR ? 'scan' : 'login')
 
   useEffect(() => {
-    if (!URL_ORG) return
-    fetch(`${API}/api/v1/branding/public?org=${encodeURIComponent(URL_ORG)}`)
+    // Single institution — no org needed; the backend serves brand.json.
+    fetch(`${API}/api/v1/branding/public`)
       .then(r => (r.ok ? r.json() : null))
       .then((b: Brand | null) => { if (b) { setBrand(b); applyPalette(b) } })
       .catch(() => {})
@@ -98,7 +98,7 @@ export default function App() {
       })
       if (!meRes.ok) throw new Error('Could not load student profile')
       const me = await meRes.json()
-      const pRes = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(me.student_id)}&org=${encodeURIComponent(org || URL_ORG)}`)
+      const pRes = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(me.student_id)}`)
       if (!pRes.ok) {
         const d = await pRes.json().catch(() => ({}))
         throw new Error(d.message || 'No attendance records found.')
@@ -132,16 +132,18 @@ export default function App() {
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    const r = reg.trim(), o = org.trim()
-    if (!r || !o) return
+    const r = reg.trim()
+    if (!r) return
     setLoading(true); setError(null); setData(null)
     try {
-      const res = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(r)}&org=${encodeURIComponent(o)}`)
+      const res = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(r)}`)
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.message || 'No record found for that registration number.')
       }
-      setData(await res.json())
+      const prog = await res.json()
+      setData(prog)
+      sessionStorage.setItem('qaat_welcome', prog.full_name || r)
       setView('progress')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load your attendance.')
@@ -160,7 +162,12 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--app-bg)' }}>
-      <header style={{ background: 'var(--sidebar, var(--brand))', color: '#fff', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <WelcomeToast key={view} />
+      <img src={brandDefault.logo_url} alt="" aria-hidden style={{
+        position: 'fixed', width: 440, maxWidth: '80vw', opacity: 0.05,
+        left: '50%', top: '55%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: 0,
+      }} />
+      <header style={{ background: 'var(--sidebar, var(--brand))', color: '#fff', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, position: 'relative', zIndex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           {brand?.logo_url
             ? <img src={brand.logo_url} alt="" style={{ height: 44, width: 44, objectFit: 'contain', background: '#fff', borderRadius: 6, padding: 2, flexShrink: 0 }} />
@@ -190,14 +197,10 @@ export default function App() {
       <div style={{ flex: 1, maxWidth: 600, margin: '0 auto', width: '100%', padding: '24px 16px', boxSizing: 'border-box', fontFamily: 'system-ui', color: 'var(--text)' }}>
         {view === 'login' && !jwt && (
           <form onSubmit={submit} style={{ marginBottom: 20 }}>
-            {!URL_ORG && (
-              <input value={org} onChange={e => setOrg(e.target.value)}
-                placeholder="Institution (e.g. kiu.ac.ug)" style={{ ...inp, width: '100%', marginBottom: 8 }} />
-            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={reg} onChange={e => setReg(e.target.value)} autoFocus
                 placeholder="Enter your registration number" style={{ ...inp, flex: 1 }} />
-              <button type="submit" disabled={loading || !reg.trim() || !org.trim()} style={{ ...btn, marginTop: 0, whiteSpace: 'nowrap' }}>
+              <button type="submit" disabled={loading || !reg.trim()} style={{ ...btn, marginTop: 0, whiteSpace: 'nowrap' }}>
                 {loading ? 'Checking\u2026' : 'View progress'}
               </button>
             </div>
@@ -253,8 +256,7 @@ export default function App() {
 
         {view === 'login' && !jwt && !data && !error && !loading && (
           <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>
-            {org ? 'Type your registration number above and submit to see your attendance and exam eligibility.'
-                 : 'Open your institution\u2019s portal link, then enter your registration number to see your attendance.'}
+            Type your registration number above and submit to see your attendance and exam eligibility.
           </p>
         )}
 

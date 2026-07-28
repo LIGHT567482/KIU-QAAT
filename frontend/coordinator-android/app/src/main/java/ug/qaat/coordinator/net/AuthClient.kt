@@ -46,10 +46,11 @@ class AuthClient {
      * which resolves the account, reuses the real /auth/login, and augments with student_id/staff_id.
      * @return Result on success; null with [onMfaRequired] if the server wants a TOTP code.
      */
-    suspend fun appLogin(identifier: String, password: String, org: String, totp: String?, onMfaRequired: () -> Unit): Result? {
+    suspend fun appLogin(identifier: String, password: String, totp: String?, onMfaRequired: () -> Unit): Result? {
+        // Single institution — no org/institution field; the server resolves the one tenant.
         val body = JSONObject()
             .put("identifier", identifier).put("password", password)
-            .put("org", org).put("totp_code", totp ?: "")
+            .put("totp_code", totp ?: "")
         var text = ""; var status = 0
         for (attempt in 1..6) {
             val r = http.post("$base/api/v1/auth/app-login") {
@@ -76,7 +77,7 @@ class AuthClient {
             registrationNo = j.optString("registration_number", ""),
             studentId = j.optString("student_id", ""),
             staffId = j.optString("staff_id", ""),
-            org = j.optString("org", org),
+            org = "",
             forcePasswordChange = j.optBoolean("force_password_change", false),
         )
     }
