@@ -80,22 +80,27 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Set up your phone's hotspot with EXACTLY these, then turn it on:",
+                    Text("⚠ The app can't change your phone's hotspot — Android doesn't allow it. YOU set the " +
+                        "name & password in Settings; the boxes below just tell the app what you chose, so it can " +
+                        "show students what to join.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Spacer(Modifier.height(10.dp))
+                    Text("① In Android hotspot settings, set the name & a password (suggested name: ${AppState.suggestedSsid()}), then turn the hotspot ON.",
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(sysSsid, { sysSsid = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Wi-Fi name (SSID) — cohort") })
                     Spacer(Modifier.height(6.dp))
-                    PasswordField(sysPass, { sysPass = it }, "Wi-Fi password (min 8)", modifier = Modifier.fillMaxWidth())
-                    if (sysPass.isNotEmpty() && sysPass.length < 8)
-                        Text("Password must be at least 8 characters.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Android can't set these for the app, so type them into your phone's Hotspot settings yourself. We use the same values for the students' “Connect to Wi-Fi” QR.",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = {
                         runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) }
                     }) { Text("Open hotspot settings") }
+                    Spacer(Modifier.height(12.dp))
+                    Text("② Type the SAME name & password you just set, so the app can show them to students:",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(sysSsid, { sysSsid = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Wi-Fi name you set (SSID)") })
+                    Spacer(Modifier.height(6.dp))
+                    PasswordField(sysPass, { sysPass = it }, "Wi-Fi password you set", modifier = Modifier.fillMaxWidth())
+                    if (sysPass.isNotEmpty() && sysPass.length < 8)
+                        Text("Most phones require at least 8 characters.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -108,7 +113,7 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
                 AppState.useSystemHotspot = systemMode
                 if (systemMode) {
                     AppState.systemHotspotSsid = sysSsid.trim(); AppState.systemHotspotPass = sysPass
-                    // Feed the projected join-QR so students can scan to join the cohort hotspot.
+                    // These are shown to students as readable text on the live screen (no join QR).
                     AppState.hotspotSsid = sysSsid.trim(); AppState.hotspotPass = sysPass
                 }
                 SessionStore.saveSystemHotspot(systemMode, sysSsid, sysPass)
@@ -131,31 +136,16 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         }
         if (AppState.serverReady) {
             Text(
-                if (AppState.hotspotUp) "✓ Ready — room Wi-Fi up, serving at ${AppState.inRoomIp}. Show students the “Connect to Wi-Fi” QR."
+                if (AppState.hotspotUp) "✓ Ready — serving at ${AppState.inRoomIp}. Open “Take attendance” and read students the Wi-Fi name/password + check-in address shown there."
                 else "Server on, bringing up the room Wi-Fi… (grant location/nearby-devices if asked).",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (AppState.hotspotUp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
-
-        // Manual IP override (rare fallback): only needed if the LocalOnlyHotspot gateway on this
-        // device is NOT 192.168.49.1. Read it off any joined student phone (Wi-Fi → Gateway) and set.
-        Spacer(Modifier.height(8.dp))
-        var manualIp by remember { mutableStateOf(AppState.manualHotspotIp ?: "") }
-        OutlinedTextField(
-            manualIp, { manualIp = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            label = { Text("Hotspot IP (advanced — only if not ${AppState.LOCAL_HOTSPOT_IP})") },
-            placeholder = { Text(AppState.LOCAL_HOTSPOT_IP) },
-            trailingIcon = {
-                TextButton(onClick = {
-                    val v = manualIp.trim().ifBlank { null }
-                    AppState.manualHotspotIp = v
-                    v?.let { AppState.inRoomIp = it; AppState.hotspotUp = true }
-                    SessionStore.saveHotspotIp(v)
-                }) { Text("Set") }
-            },
-        )
+        // NOTE: the manual gateway-IP override lives on the live attendance screen (it appears there
+        // only when a phone has joined but can't reach the server) — kept in ONE place to avoid
+        // duplicating the same control here.
 
         Spacer(Modifier.height(16.dp))
         Text("2. Unit", style = MaterialTheme.typography.titleSmall)
