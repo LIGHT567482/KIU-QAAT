@@ -33,7 +33,50 @@ class AuthClient {
         val token: String, val jti: String?, val role: String,
         val userId: String, val tenantId: String, val deviceBindingKey: String?,
         val fullName: String, val title: String, val registrationNo: String,
+        // Unified app-login extras: the student's reg-number / the lecturer's staff-id, and the
+        // institution slug the user signed in with (kept for later reg-scoped online calls).
+        val studentId: String = "", val staffId: String = "", val org: String = "",
     )
+
+    /**
+     * Unified KIU QAAT sign-in for EVERY role. identifier = email (staff/coordinator) OR reg-number
+     * (student) OR staff-id (lecturer); org = institution id/domain. Hits the gateway's app-login,
+     * which resolves the account, reuses the real /auth/login, and augments with student_id/staff_id.
+     * @return Result on success; null with [onMfaRequired] if the server wants a TOTP code.
+     */
+    suspend fun appLogin(identifier: String, password: String, org: String, totp: String?, onMfaRequired: () -> Unit): Result? {
+        val body = JSONObject()
+            .put("identifier", identifier).put("password", password)
+            .put("org", org).put("totp_code", totp ?: "")
+        var text = ""; var status = 0
+        for (attempt in 1..6) {
+            val r = http.post("$base/api/v1/auth/app-login") {
+                contentType(ContentType.Application.Json); setBody(body.toString())
+            }
+            text = r.bodyAsText(); status = r.status.value
+            if (text.looksJson() || status < 500) break
+            if (attempt < 6) kotlinx.coroutines.delay(6000)
+        }
+        if (!text.looksJson())
+            throw IllegalStateException(if (status in 200..299) NON_JSON else httpErr(status))
+        val j = JSONObject(text)
+        if (status == 403 && j.optString("error") == "MFA_REQUIRED") { onMfaRequired(); return null }
+        require(status in 200..299) { j.optString("message").ifBlank { httpErr(status) } }
+        return Result(
+            token = j.getString("access_token"),
+            jti = j.optString("jti").takeIf { it.isNotEmpty() },
+            role = j.optString("role", ""),
+            userId = j.getString("user_id"),
+            tenantId = j.optString("tenant_id", ""),
+            deviceBindingKey = j.optString("device_binding_key").takeIf { it.isNotEmpty() },
+            fullName = j.optString("full_name", ""),
+            title = j.optString("title", ""),
+            registrationNo = j.optString("registration_number", ""),
+            studentId = j.optString("student_id", ""),
+            staffId = j.optString("staff_id", ""),
+            org = j.optString("org", org),
+        )
+    }
 
     /** Change the signed-in coordinator's password. @return error message, or null on success. */
     suspend fun changePassword(token: String, current: String, newPassword: String): String? {

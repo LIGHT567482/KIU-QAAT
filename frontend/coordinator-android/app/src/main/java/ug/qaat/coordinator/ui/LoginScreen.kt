@@ -16,11 +16,13 @@ import ug.qaat.coordinator.net.ManifestClient
 import ug.qaat.coordinator.net.Net
 import ug.qaat.coordinator.store.SessionStore
 
-/** Coordinator login → stores token + device binding key, then pulls the daily manifest. */
+/** Unified KIU QAAT sign-in for every role (coordinator / student / lecturer). Identifier =
+ *  email, registration number, or staff ID; the app routes by the returned role. */
 @Composable
 fun LoginScreen(onLoggedIn: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var email by remember { mutableStateOf("") }
+    var identifier by remember { mutableStateOf("") }
+    var institution by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var totp by remember { mutableStateOf("") }
     var needsMfa by remember { mutableStateOf(false) }
@@ -28,7 +30,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     // Wake the free-tier backend the moment this screen shows, so its cold start (up to ~1 min)
-    // overlaps with the coordinator typing — turning a stalled sign-in into an instant one.
+    // overlaps with the user typing — turning a stalled sign-in into an instant one.
     LaunchedEffect(Unit) { Net.warmUp() }
 
     Box(Modifier.fillMaxSize()) {
@@ -39,14 +41,20 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
     ) {
         Image(
             painter = painterResource(R.drawable.qaat_logo),
-            contentDescription = "KIU - QAAT",
+            contentDescription = "KIU QAAT",
             modifier = Modifier.size(112.dp),
         )
         Spacer(Modifier.height(14.dp))
-        Text("KIU - QAAT", style = MaterialTheme.typography.headlineMedium)
-        Text("Coordinator sign-in", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("KIU QAAT", style = MaterialTheme.typography.headlineMedium)
+        Text("Sign in — staff email, registration number, or staff ID",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp))
         Spacer(Modifier.height(24.dp))
-        OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(institution, { institution = it.trim() }, label = { Text("Institution ID") },
+            placeholder = { Text("e.g. kiu") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(identifier, { identifier = it.trim() }, label = { Text("Email / Reg. no / Staff ID") },
+            singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         PasswordField(password, { password = it }, "Password", modifier = Modifier.fillMaxWidth())
         if (needsMfa) {
@@ -57,35 +65,37 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
         Button(
-            enabled = !busy && email.isNotBlank() && password.isNotBlank(),
+            enabled = !busy && identifier.isNotBlank() && password.isNotBlank() && institution.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 busy = true; error = null
                 scope.launch {
                     runCatching {
-                        val res = AuthClient().login(email.trim(), password, totp.ifBlank { null }) { needsMfa = true }
+                        val res = AuthClient().appLogin(identifier.trim(), password, institution.trim(), totp.ifBlank { null }) { needsMfa = true }
                             ?: return@runCatching   // MFA prompt shown
                         AppState.token = res.token; AppState.userId = res.userId
                         AppState.tenantId = res.tenantId; AppState.deviceBindingKey = res.deviceBindingKey
-                        AppState.coordinatorName = res.fullName; AppState.coordinatorEmail = email.trim(); AppState.role = res.role
+                        AppState.coordinatorName = res.fullName; AppState.coordinatorEmail = identifier.trim(); AppState.role = res.role
                         AppState.coordinatorTitle = res.title; AppState.coordinatorRegNo = res.registrationNo
-                        // Persist the session IMMEDIATELY — before any further network — so auto-login
-                        // survives closing the app even if the manifest/branding fetch below is slow
-                        // or fails. (Previously saveSession ran AFTER the manifest fetch, so a slow/
-                        // failed fetch meant the login was never persisted → re-login on next open.)
-                        SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName, email.trim(), res.role, res.title, res.registrationNo)
-                        SessionStore.saveCredentials(email.trim(), password)
+                        AppState.studentId = res.studentId.ifBlank { null }
+                        AppState.staffId = res.staffId.ifBlank { null }
+                        AppState.org = res.org.ifBlank { institution.trim() }
+                        // Persist the session IMMEDIATELY so auto-login survives a close.
+                        SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey,
+                            res.fullName, identifier.trim(), res.role, res.title, res.registrationNo,
+                            res.studentId, res.staffId, res.org.ifBlank { institution.trim() })
+                        SessionStore.saveAppCredentials(identifier.trim(), password, institution.trim())
                         onLoggedIn()
-                        // Best-effort: pull + cache the manifest + branding for offline use. Failures
-                        // here must NOT undo the already-saved login; CoordinatorApp retries on launch.
-                        runCatching {
-                            val m = ManifestClient(Graph.db.dao()).fetchAndStore(res.token)
-                            AppState.manifest = m; SessionStore.saveManifest(m)
-                        }
+                        // Institution branding applies to every role.
                         runCatching {
                             ug.qaat.coordinator.net.BrandingClient(res.token).fetch()?.let {
                                 AppState.branding = it; SessionStore.saveBranding(it)
                             }
+                        }
+                        // Only the COORDINATOR needs the daily manifest (roster + keys for the hub).
+                        if (res.role == "COORDINATOR") runCatching {
+                            val m = ManifestClient(Graph.db.dao()).fetchAndStore(res.token)
+                            AppState.manifest = m; SessionStore.saveManifest(m)
                         }
                     }.onFailure { error = ug.qaat.coordinator.net.Net.friendly(it) }
                     busy = false

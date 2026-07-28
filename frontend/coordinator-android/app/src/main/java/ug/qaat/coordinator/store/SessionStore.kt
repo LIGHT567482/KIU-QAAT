@@ -50,13 +50,25 @@ object SessionStore {
 
     // ── Session + credentials ────────────────────────────────────────────────
     fun saveSession(token: String, userId: String, tenantId: String, bindingKey: String?,
-                    name: String, email: String, role: String, title: String = "", regNo: String = "") {
+                    name: String, email: String, role: String, title: String = "", regNo: String = "",
+                    studentId: String = "", staffId: String = "", org: String = "") {
         prefs.edit().apply {
             putString("token", token); putString("userId", userId); putString("tenantId", tenantId)
             putString("bindingKey", bindingKey); putString("name", name)
             putString("email", email); putString("role", role)
             putString("title", title); putString("regNo", regNo)
+            putString("studentId", studentId); putString("staffId", staffId); putString("org", org)
         }.apply()
+    }
+
+    /** Credentials for a silent re-login in the unified app (identifier + password + institution). */
+    fun saveAppCredentials(identifier: String, password: String, org: String) {
+        prefs.edit().putString("cred_id", identifier).putString("cred_pw", password).putString("cred_org", org).apply()
+    }
+    fun appCredentials(): Triple<String, String, String>? {
+        val i = prefs.getString("cred_id", null) ?: return null
+        val p = prefs.getString("cred_pw", null) ?: return null
+        return Triple(i, p, prefs.getString("cred_org", "") ?: "")
     }
 
     /** Stored so an expired token can be refreshed without bothering the coordinator. */
@@ -70,6 +82,10 @@ object SessionStore {
     }
 
     val hasSession: Boolean get() = ::prefs.isInitialized && prefs.getString("token", null) != null
+
+    /** Student attendance-cooldown deadline (epoch millis) after a device switch. */
+    fun saveAttendBlockUntil(ms: Long) { if (::prefs.isInitialized) prefs.edit().putLong("block_until", ms).apply() }
+    fun attendBlockUntil(): Long = if (::prefs.isInitialized) prefs.getLong("block_until", 0L) else 0L
 
     // Light/dark preference — persisted so the chosen theme survives restarts.
     fun saveTheme(dark: Boolean) { if (::prefs.isInitialized) prefs.edit().putBoolean("dark", dark).apply() }
@@ -114,6 +130,9 @@ object SessionStore {
         AppState.coordinatorRegNo = prefs.getString("regNo", null)
         AppState.coordinatorEmail = prefs.getString("email", null)
         AppState.role = prefs.getString("role", null)
+        AppState.studentId = prefs.getString("studentId", null)
+        AppState.staffId = prefs.getString("staffId", null)
+        AppState.org = prefs.getString("org", null)
         AppState.branding = restoreBranding()   // tenant identity shows offline too
         restoreSystemHotspot()                  // hotspot-mode choice + cohort SSID/password
         return true

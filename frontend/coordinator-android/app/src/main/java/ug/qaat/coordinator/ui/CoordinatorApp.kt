@@ -52,12 +52,13 @@ private val tabs = listOf(
  * can't (no saved creds, MFA required, or offline). @see SessionStore.credentials.
  */
 private suspend fun refreshTokenSilently(): String? {
-    val (email, pw) = SessionStore.credentials() ?: return null
+    val (identifier, pw, org) = SessionStore.appCredentials() ?: return null
     return runCatching {
-        val res = AuthClient().login(email, pw, null) { } ?: return@runCatching null   // MFA → can't do silently
+        val res = AuthClient().appLogin(identifier, pw, org, null) { } ?: return@runCatching null   // MFA → can't do silently
         AppState.token = res.token; AppState.userId = res.userId; AppState.tenantId = res.tenantId
         AppState.deviceBindingKey = res.deviceBindingKey
-        SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName, email, res.role, res.title, res.registrationNo)
+        SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName,
+            identifier, res.role, res.title, res.registrationNo, res.studentId, res.staffId, res.org.ifBlank { org })
         res.token
     }.getOrNull()
 }
@@ -119,13 +120,23 @@ private suspend fun refreshAll() {
     AppState.refreshing = false
 }
 
-/** Root: branded theme → gate on login → bottom-nav scaffold. */
+/** Root: branded theme → gate on login → route by ROLE (coordinator / student / lecturer).
+ *  ONE app "KIU QAAT" — the token's role decides which experience the user sees. */
+@Composable
+fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
+    AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
+    if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}); return@MaterialTheme }
+    when (AppState.role) {
+        "STUDENT" -> StudentRoleApp()
+        "LECTURER" -> LecturerApp()
+        else -> CoordinatorApp()          // COORDINATOR + admin roles → the in-room hub
+    }
+}
+
+/** Coordinator hub — the bottom-nav scaffold. Assumes a signed-in COORDINATOR. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CoordinatorApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
-    AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
-    if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}) ; return@MaterialTheme }
-
+fun CoordinatorApp() {
     // Keyed on loggedIn (a stable Boolean), NOT the token value — a silent token refresh
     // inside refreshAll() must not cancel-and-restart this effect ("coroutine scope left
     // the composition"). It fires once when the session appears, then refreshAll owns retries.
@@ -248,7 +259,7 @@ private fun InfoLine(label: String, value: String) {
 
 /** Change-password dialog — mirrors the PWA header action. */
 @Composable
-private fun ChangePasswordDialog(onClose: () -> Unit) {
+internal fun ChangePasswordDialog(onClose: () -> Unit) {
     var cur by remember { mutableStateOf("") }
     var next by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
@@ -308,10 +319,11 @@ private fun CrashReportDialog(trace: String, onClose: () -> Unit) {
     )
 }
 
-private fun signOut() {
+internal fun signOut() {
     SessionStore.clear()
     AppState.token = null; AppState.userId = null; AppState.tenantId = null
     AppState.deviceBindingKey = null; AppState.coordinatorName = null; AppState.coordinatorTitle = null
     AppState.coordinatorRegNo = null; AppState.coordinatorEmail = null; AppState.role = null
     AppState.manifest = null; AppState.cohortLabel = null
+    AppState.studentId = null; AppState.staffId = null; AppState.org = null; AppState.attendBlockUntil = 0L
 }

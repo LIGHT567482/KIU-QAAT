@@ -31,6 +31,13 @@ object AppState {
     var coordinatorRegNo by mutableStateOf<String?>(null)
     var coordinatorEmail by mutableStateOf<String?>(null)
     var role by mutableStateOf<String?>(null)
+    // Unified-app identity extras: the student's reg-number / the lecturer's staff-id, and the
+    // institution slug — used to route the UI by role and for reg-scoped online calls.
+    var studentId by mutableStateOf<String?>(null)
+    var staffId by mutableStateOf<String?>(null)
+    var org by mutableStateOf<String?>(null)
+    // Epoch millis until which a student's attendance is paused after a device switch (0 = none).
+    var attendBlockUntil by mutableStateOf(0L)
     // Cohort summary shown in the profile popup (moved out of the dashboard body).
     var cohortLabel by mutableStateOf<String?>(null)
     // Global refresh state driven by the top-nav ⟳ icon.

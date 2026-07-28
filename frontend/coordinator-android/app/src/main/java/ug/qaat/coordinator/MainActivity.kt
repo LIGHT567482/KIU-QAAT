@@ -11,7 +11,7 @@ import androidx.core.content.ContextCompat
 import ug.qaat.coordinator.di.Graph
 import ug.qaat.coordinator.net.Net
 import ug.qaat.coordinator.store.SessionStore
-import ug.qaat.coordinator.ui.CoordinatorApp
+import ug.qaat.coordinator.ui.RootApp
 
 /**
  * Hosts the coordinator UI. Requests the runtime permissions the in-room hotspot/server
@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
             if (f.exists()) { ug.qaat.coordinator.ui.AppState.lastCrash = f.readText(); f.delete() }
         }
         requestRuntimePermissions()
-        setContent { CoordinatorApp() }   // CoordinatorApp owns the branded MaterialTheme
+        setContent { RootApp() }   // RootApp owns the branded MaterialTheme + role routing
     }
 
     /** LocalOnlyHotspot needs location (all APIs) or NEARBY_WIFI_DEVICES (API 33+); the
