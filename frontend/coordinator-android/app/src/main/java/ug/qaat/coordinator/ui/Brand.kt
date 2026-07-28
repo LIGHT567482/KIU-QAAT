@@ -69,7 +69,7 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
         Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(6.dp),
             modifier = Modifier.size(size.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Text((branding?.name ?: "Q").take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary)
+                Text((branding?.name ?: "KIU").take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -94,7 +94,7 @@ fun BrandHeader(branding: BrandingClient.Branding?) {
         Spacer(Modifier.width(8.dp))
         Column {
             Text(
-                branding?.name ?: "QAAT",
+                branding?.name ?: "KIU QAAT",
                 fontSize = 13.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )

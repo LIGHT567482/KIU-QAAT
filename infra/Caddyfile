@@ -34,11 +34,6 @@
 	reverse_proxy admin-dashboards:3001
 }
 
-:3002 {
-	tls /certs/qaat.crt /certs/qaat.key
-	reverse_proxy super-admin:3002
-}
-
 :3003 {
 	tls /certs/qaat.crt /certs/qaat.key
 	reverse_proxy student-portal:3003

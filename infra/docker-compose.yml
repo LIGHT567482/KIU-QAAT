@@ -41,7 +41,7 @@ services:
 
   auth-service:
     build:
-      context: ../services/auth-service
+      context: ../backend/auth-service
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -76,7 +76,7 @@ services:
 
   api-gateway:
     build:
-      context: ../services/api-gateway
+      context: ../backend/api-gateway
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -120,7 +120,7 @@ services:
 
   qr-generator:
     build:
-      context: ../services/qr-generator
+      context: ../backend/qr-generator
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -157,7 +157,7 @@ services:
   # Atomic sync of closed-session attendance packages from the coordinator PWA.
   sync-receiver:
     build:
-      context: ../services/sync-receiver
+      context: ../backend/sync-receiver
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -182,7 +182,7 @@ services:
   # Session lifecycle helpers (warden link, clearance token).
   session-manager:
     build:
-      context: ../services/session-manager
+      context: ../backend/session-manager
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -205,7 +205,7 @@ services:
 
   notification-service:
     build:
-      context: ../services/notification-service
+      context: ../backend/notification-service
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -226,23 +226,20 @@ services:
 
   # Frontends are fronted by Caddy (HTTPS) — no host port mapping; Caddy reaches
   # them by container name on the compose network.
-  super-admin:
-    build: { context: ../apps/super-admin, dockerfile: Dockerfile }
-    restart: unless-stopped
-    expose: ["3002"]
+  # super-admin app removed — single-institution (KIU) build has no platform owner.
 
   admin-dashboards:
-    build: { context: ../apps/admin-dashboards, dockerfile: Dockerfile }
+    build: { context: ../frontend/admin-dashboards, dockerfile: Dockerfile }
     restart: unless-stopped
     expose: ["3001"]
 
   coordinator-pwa:
-    build: { context: ../apps/coordinator-pwa, dockerfile: Dockerfile }
+    build: { context: ../frontend/coordinator-pwa, dockerfile: Dockerfile }
     restart: unless-stopped
     expose: ["3000"]
 
   student-portal:
-    build: { context: ../apps/student-portal, dockerfile: Dockerfile }
+    build: { context: ../frontend/student-portal, dockerfile: Dockerfile }
     restart: unless-stopped
     expose: ["3003"]
 
@@ -254,7 +251,6 @@ services:
       - "8443:8443"
       - "3000:3000"
       - "3001:3001"
-      - "3002:3002"
       - "3003:3003"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -263,7 +259,6 @@ services:
       - caddyconfig:/config
     depends_on:
       - api-gateway
-      - super-admin
       - admin-dashboards
       - coordinator-pwa
       - student-portal

@@ -25,31 +25,6 @@ export default function Login() {
   const [resolvedTenantId, setResolvedTenantId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // Lecturers sign in passwordless with their staff ID (single institution — no org).
-  const [lecturerMode, setLecturerMode] = useState(false)
-  const [staffId, setStaffId] = useState('')
-
-  async function handleLecturerSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null); setLoading(true)
-    try {
-      const res = await fetch(`${API}/api/v1/auth/lecturer-login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_id: staffId.trim() }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setError(data.message ?? 'Login failed'); setLoading(false); return }
-      // The JWT carries sub (user_id), tenant_id, role and exp.
-      const p = JSON.parse(atob(data.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-      sessionStorage.setItem('qaat_welcome', data.full_name || staffId.trim())
-      login(data.access_token, { userId: p.sub, tenantId: p.tenant_id, role: p.role as Role, expiresAt: p.exp })
-      navigate(ROLE_REDIRECT[p.role as Role] ?? '/lecturer')
-    } catch {
-      setError('Network error')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   async function resolveTenant(email: string): Promise<string> {
     const res = await fetch(`${API}/api/v1/auth/tenant-lookup?email=${encodeURIComponent(email)}`)
@@ -121,8 +96,11 @@ export default function Login() {
         <ThemeToggle theme={theme} toggle={toggle} />
       </div>
       <div style={{ background: 'var(--surface)', color: 'var(--text)', borderRadius: 12, padding: 40, width: 380, boxShadow: 'var(--shadow)', border: '1px solid var(--border)' }}>
-        <h1 style={{ marginBottom: 4 }}>QAAT</h1>
-        <p style={{ color: 'var(--muted)', marginBottom: 28 }}>{lecturerMode ? 'Lecturer sign-in' : 'Sign in to your dashboard'}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+          {brand.logo_url && <img src={brand.logo_url} alt={brand.name} style={{ height: 48, width: 48, objectFit: 'contain', borderRadius: 8 }} />}
+          <h1 style={{ margin: 0, fontSize: 20, lineHeight: 1.15 }}>{brand.name}</h1>
+        </div>
+        <p style={{ color: 'var(--muted)', marginBottom: 28 }}>Sign in to your dashboard</p>
 
         {error && (
           <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '10px 14px', borderRadius: 6, marginBottom: 16 }}>
@@ -130,37 +108,21 @@ export default function Login() {
           </div>
         )}
 
-        {lecturerMode ? (
-          <form onSubmit={handleLecturerSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="text" placeholder="Staff ID" value={staffId} autoComplete="username" autoFocus
-              onChange={e => setStaffId(e.target.value)} required style={inp} />
-            <div style={{ fontSize: 11, color: 'var(--muted)', margin: '-4px 2px 0' }}>
-              No password needed — sign in with your staff ID. (You can also scan your personal lecturer QR.)
-            </div>
-            <button type="submit" disabled={loading} style={btn}>{loading ? 'Signing in…' : 'Sign In'}</button>
-          </form>
-        ) : (
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input type="email" placeholder="Email" value={form.email} autoComplete="username"
-              onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setResolvedTenantId('') }}
-              required style={inp} />
-            <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
-            {needsMFA && (
-              <input type="text" inputMode="numeric" pattern="\d{6}" placeholder="Authenticator code"
-                value={form.totp_code} onChange={e => setForm(f => ({ ...f, totp_code: e.target.value }))}
-                required autoFocus style={inp} />
-            )}
-            <button type="submit" disabled={loading} style={btn}>
-              {loading ? 'Signing in…' : needsMFA ? 'Verify' : 'Sign In'}
-            </button>
-          </form>
-        )}
-
-        <button onClick={() => { setLecturerMode(m => !m); setError(null) }}
-          style={{ marginTop: 16, background: 'none', border: 'none', color: 'var(--brand)', cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}>
-          {lecturerMode ? '← Back to staff/admin sign-in' : 'Lecturer? Sign in with your Staff ID'}
-        </button>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input type="email" placeholder="Email" value={form.email} autoComplete="username"
+            onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setResolvedTenantId('') }}
+            required style={inp} />
+          <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
+            onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
+          {needsMFA && (
+            <input type="text" inputMode="numeric" pattern="\d{6}" placeholder="Authenticator code"
+              value={form.totp_code} onChange={e => setForm(f => ({ ...f, totp_code: e.target.value }))}
+              required autoFocus style={inp} />
+          )}
+          <button type="submit" disabled={loading} style={btn}>
+            {loading ? 'Signing in…' : needsMFA ? 'Verify' : 'Sign In'}
+          </button>
+        </form>
       </div>
     </div>
   )

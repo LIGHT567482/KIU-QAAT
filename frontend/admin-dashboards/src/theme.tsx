@@ -17,16 +17,17 @@ const CSS = `
   --text: #0f172a;
   --muted: #334155;
   --border: #e2e8f0;
-  --brand: #1a73e8;
+  --brand: #1a7a3f;
   --brand-contrast: #ffffff;
   --shadow: 0 1px 4px rgba(0,0,0,.06);
-  /* Brand palette regions — overridden per-tenant by applyPalette(). Default to
-     the theme so an unbranded tenant still looks right in light & dark. */
-  --app-bg: #f1f5f9;
-  --sidebar: #1e293b;
-  --sidebar-text: #e2e8f0;
-  --footer: #0f172a;
-  --footer-text: #e2e8f0;
+  /* Brand palette regions — the KIU green is the built-in default (matches brand.json)
+     so the app paints on-brand from the very first frame, before applyPalette() runs.
+     Sidebar and footer share the same green. */
+  --app-bg: #f0fdf4;
+  --sidebar: #1a7a3f;
+  --sidebar-text: #ffffff;
+  --footer: #1a7a3f;
+  --footer-text: #ffffff;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -39,10 +40,12 @@ const CSS = `
   --brand-contrast: #ffffff;
   --shadow: 0 1px 6px rgba(0,0,0,.5);
   --app-bg: #0b1220;
-  --sidebar: #0f1729;
-  --sidebar-text: #e2e8f0;
-  --footer: #060b16;
-  --footer-text: #cbd5e1;
+  /* Sidebar + footer stay the brand green in dark mode too, so the chrome is
+     consistently KIU-green regardless of theme. */
+  --sidebar: #1a7a3f;
+  --sidebar-text: #ffffff;
+  --footer: #1a7a3f;
+  --footer-text: #ffffff;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }

@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QAAT Admin</title>
+    <title>KIU QAAT</title>
+    <!-- Pre-paint brand colours so the very first frame is KIU-green (no black/white
+         flash before the app's JS + theme engine load). Kept in sync with brand.json. -->
+    <style>
+      :root { --app-bg:#f0fdf4; --sidebar:#1a7a3f; --footer:#1a7a3f; --brand:#1a7a3f; }
+      html, body { margin:0; background:#f0fdf4; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -4,12 +4,18 @@ import { useAuth, type Role } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 import PasswordInput from '../components/PasswordInput'
 import { useTheme, ThemeToggle, applyPalette } from '../theme'
+import brandDefault from '../brand.json'
 
 interface Branding {
   name: string; logo_url: string; motto: string
   brand_color: string; sidebar_color: string; background_color: string; footer_color: string
   text_color_light?: string; text_color_dark?: string
 }
+
+// The bundled brand.json is the single source of truth for identity, so the sidebar
+// shows the real KIU logo + name from the first frame (never the "Q" letter). The
+// backend /branding fetch below simply confirms it.
+const BUNDLED_BRAND = brandDefault as unknown as Branding
 
 interface RoleLayoutProps {
   allowedRoles: Role[]
@@ -18,14 +24,16 @@ interface RoleLayoutProps {
 // Wraps a route group — redirects to /login if unauthenticated or wrong role.
 export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
   const { user, isAuthenticated } = useAuth()
-  const [brand, setBrand] = useState<Branding | null>(null)
+  const [brand, setBrand] = useState<Branding | null>(BUNDLED_BRAND)
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Institution branding + colour palette, fetched once and applied app-wide.
+  // Start on the bundled brand (instant logo + palette), then let the backend
+  // /branding fetch confirm/refresh it. On failure we keep the bundled brand.
   useEffect(() => {
+    applyPalette(BUNDLED_BRAND)
     if (!isAuthenticated) return
-    api.get<Branding>('/api/v1/branding').then(b => { setBrand(b); applyPalette(b) }).catch(() => setBrand(null))
+    api.get<Branding>('/api/v1/branding').then(b => { setBrand(b); applyPalette(b) }).catch(() => {})
   }, [isAuthenticated])
 
   if (!isAuthenticated || !user) {
