@@ -103,8 +103,8 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 	hash, _ := bcrypt.GenerateFromPassword([]byte("Lecturer"), 12)
 
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (tenant_id, email, password_hash, role, full_name)
-		VALUES ($1, $2, $3, 'LECTURER', $4)
+		INSERT INTO users (tenant_id, email, password_hash, role, full_name, force_password_change)
+		VALUES ($1, $2, $3, 'LECTURER', $4, true)
 		ON CONFLICT (tenant_id, email) DO UPDATE SET role = users.role
 		RETURNING user_id::text`,
 		tenantID, email, string(hash), name).Scan(&userID); err != nil {

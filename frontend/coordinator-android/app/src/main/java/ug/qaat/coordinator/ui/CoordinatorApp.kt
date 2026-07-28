@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.*
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -126,6 +127,16 @@ private suspend fun refreshAll() {
 fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
     AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
     if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}); return@MaterialTheme }
+    // First sign-in with the seeded default password → force a private one before ANY role UI.
+    if (AppState.forcePasswordChange) {
+        Surface(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("Securing your account…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        ChangePasswordDialog(onClose = { AppState.forcePasswordChange = false }, mandatory = true)
+        return@MaterialTheme
+    }
     when (AppState.role) {
         "STUDENT" -> StudentRoleApp()
         "LECTURER" -> LecturerApp()
@@ -137,6 +148,19 @@ fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoordinatorApp() {
+    // The in-room hotspot needs location / nearby-wifi — requested ONLY here (coordinator UI), so a
+    // student/lecturer is never prompted for them. Fires when a coordinator first opens the hub.
+    val hotspotPerms = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { }
+    LaunchedEffect(Unit) {
+        val ask = buildList {
+            add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU)
+                add(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+        }.filter { androidx.core.content.ContextCompat.checkSelfPermission(Graph.appContext, it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (ask.isNotEmpty()) runCatching { hotspotPerms.launch(ask.toTypedArray()) }
+    }
+
     // Keyed on loggedIn (a stable Boolean), NOT the token value — a silent token refresh
     // inside refreshAll() must not cancel-and-restart this effect ("coroutine scope left
     // the composition"). It fires once when the session appears, then refreshAll owns retries.
@@ -257,10 +281,11 @@ private fun InfoLine(label: String, value: String) {
     Text(value, fontSize = 13.sp)
 }
 
-/** Change-password dialog — mirrors the PWA header action. */
+/** Change-password dialog. In [mandatory] mode (first sign-in with the seeded default password)
+ *  it can't be dismissed — the user must set a private password before using the app. */
 @Composable
-internal fun ChangePasswordDialog(onClose: () -> Unit) {
-    var cur by remember { mutableStateOf("") }
+internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = false) {
+    var cur by remember { mutableStateOf(if (mandatory) "Student" else "") }
     var next by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -269,13 +294,15 @@ internal fun ChangePasswordDialog(onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Change password") },
+        onDismissRequest = { if (!mandatory) onClose() },   // mandatory → can't tap-away
+        title = { Text(if (mandatory) "Set your password" else "Change password") },
         text = {
             if (done) Text("✓ Password changed.", color = MaterialTheme.colorScheme.primary)
             else Column {
+                if (mandatory) Text("For your security, replace the default password before continuing.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                PasswordField(cur, { cur = it }, "Current password", modifier = Modifier.fillMaxWidth())
+                PasswordField(cur, { cur = it }, if (mandatory) "Current (default) password" else "Current password", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.padding(4.dp))
                 PasswordField(next, { next = it }, "New password (min 8)", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.padding(4.dp))
@@ -283,17 +310,17 @@ internal fun ChangePasswordDialog(onClose: () -> Unit) {
             }
         },
         confirmButton = {
-            if (done) TextButton(onClick = onClose) { Text("Close") }
+            if (done) TextButton(onClick = onClose) { Text("Continue") }
             else TextButton(enabled = !busy && cur.isNotBlank() && next.length >= 8 && next == confirm, onClick = {
                 busy = true; err = null
                 scope.launch {
                     err = AppState.token?.let { AuthClient().changePassword(it, cur, next) } ?: "Not signed in"
-                    if (err == null) done = true
+                    if (err == null) { done = true; AppState.forcePasswordChange = false }
                     busy = false
                 }
             }) { Text(if (busy) "Saving…" else "Update") }
         },
-        dismissButton = { if (!done) TextButton(onClick = onClose) { Text("Cancel") } },
+        dismissButton = { if (!done && !mandatory) TextButton(onClick = onClose) { Text("Cancel") } },
     )
 }
 

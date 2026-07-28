@@ -36,6 +36,8 @@ class AuthClient {
         // Unified app-login extras: the student's reg-number / the lecturer's staff-id, and the
         // institution slug the user signed in with (kept for later reg-scoped online calls).
         val studentId: String = "", val staffId: String = "", val org: String = "",
+        // True when the account still has the seeded default password (must change before use).
+        val forcePasswordChange: Boolean = false,
     )
 
     /**
@@ -75,6 +77,7 @@ class AuthClient {
             studentId = j.optString("student_id", ""),
             staffId = j.optString("staff_id", ""),
             org = j.optString("org", org),
+            forcePasswordChange = j.optBoolean("force_password_change", false),
         )
     }
 

@@ -276,8 +276,9 @@ type loginResponse struct {
 	FullName         string `json:"full_name,omitempty"`
 	Title            string `json:"title,omitempty"`
 	RegistrationNo   string `json:"registration_number,omitempty"`
-	TenantID         string `json:"tenant_id"`
-	DeviceBindingKey string `json:"device_binding_key,omitempty"`
+	TenantID            string `json:"tenant_id"`
+	DeviceBindingKey    string `json:"device_binding_key,omitempty"`
+	ForcePasswordChange bool   `json:"force_password_change"`
 }
 
 type refreshRequest struct {
@@ -406,8 +407,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		FullName:         user.FullName,
 		Title:            user.Title,
 		RegistrationNo:   user.RegistrationNumber,
-		TenantID:         user.TenantID,
-		DeviceBindingKey: bindingKey,
+		TenantID:            user.TenantID,
+		DeviceBindingKey:    bindingKey,
+		ForcePasswordChange: user.ForcePasswordChange,
 	})
 }
 

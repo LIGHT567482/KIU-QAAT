@@ -38,6 +38,9 @@ object AppState {
     var org by mutableStateOf<String?>(null)
     // Epoch millis until which a student's attendance is paused after a device switch (0 = none).
     var attendBlockUntil by mutableStateOf(0L)
+    // True when the account still has the seeded default password — the app forces a change before
+    // showing any role UI (closes the shared-default-password gap).
+    var forcePasswordChange by mutableStateOf(false)
     // Cohort summary shown in the profile popup (moved out of the dashboard body).
     var cohortLabel by mutableStateOf<String?>(null)
     // Global refresh state driven by the top-nav ⟳ icon.

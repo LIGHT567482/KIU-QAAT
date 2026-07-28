@@ -32,7 +32,7 @@ func (s *UserStore) GetByEmailAndTenant(ctx context.Context, email string, tenan
 		       COALESCE(title,''), COALESCE(registration_number,''),
 		       is_active, totp_secret_enc, totp_enabled, totp_backup_codes_enc,
 		       device_binding_key_enc, last_login_at, failed_login_count,
-		       locked_until, created_at, updated_at
+		       locked_until, COALESCE(force_password_change, false), created_at, updated_at
 		FROM users
 		WHERE email = $1 AND tenant_id = $2`
 
@@ -44,7 +44,7 @@ func (s *UserStore) GetByEmailAndTenant(ctx context.Context, email string, tenan
 		&u.Title, &u.RegistrationNumber,
 		&u.IsActive, &u.TOTPSecretEnc, &u.TOTPEnabled, &u.TOTPBackupCodesEnc,
 		&u.DeviceBindingKeyEnc, &u.LastLoginAt, &u.FailedLoginCount,
-		&u.LockedUntil, &u.CreatedAt, &u.UpdatedAt,
+		&u.LockedUntil, &u.ForcePasswordChange, &u.CreatedAt, &u.UpdatedAt,
 	)
 	u.Role = models.Role(role)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -135,7 +135,8 @@ func (s *UserStore) TenantDomain(ctx context.Context, tenantID string) (string, 
 // UpdatePassword sets a new bcrypt hash for the user (self-service change).
 func (s *UserStore) UpdatePassword(ctx context.Context, userID string, passwordHash string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE users SET password_hash = $1, failed_login_count = 0, locked_until = NULL, updated_at = now()
+		`UPDATE users SET password_hash = $1, failed_login_count = 0, locked_until = NULL,
+		        force_password_change = false, updated_at = now()
 		 WHERE user_id = $2`,
 		passwordHash, userID)
 	return err
@@ -146,7 +147,7 @@ func (s *UserStore) GetByID(ctx context.Context, userID string) (*models.User, e
 		SELECT user_id, tenant_id, email, password_hash, role, full_name,
 		       is_active, totp_secret_enc, totp_enabled, totp_backup_codes_enc,
 		       device_binding_key_enc, last_login_at, failed_login_count,
-		       locked_until, created_at, updated_at
+		       locked_until, COALESCE(force_password_change, false), created_at, updated_at
 		FROM users WHERE user_id = $1`
 
 	row := s.pool.QueryRow(ctx, q, userID)
@@ -156,7 +157,7 @@ func (s *UserStore) GetByID(ctx context.Context, userID string) (*models.User, e
 		&u.UserID, &u.TenantID, &u.Email, &u.PasswordHash, &role, &u.FullName,
 		&u.IsActive, &u.TOTPSecretEnc, &u.TOTPEnabled, &u.TOTPBackupCodesEnc,
 		&u.DeviceBindingKeyEnc, &u.LastLoginAt, &u.FailedLoginCount,
-		&u.LockedUntil, &u.CreatedAt, &u.UpdatedAt,
+		&u.LockedUntil, &u.ForcePasswordChange, &u.CreatedAt, &u.UpdatedAt,
 	)
 	u.Role = models.Role(role)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -80,6 +80,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                         AppState.studentId = res.studentId.ifBlank { null }
                         AppState.staffId = res.staffId.ifBlank { null }
                         AppState.org = res.org.ifBlank { institution.trim() }
+                        AppState.forcePasswordChange = res.forcePasswordChange
                         // Persist the session IMMEDIATELY so auto-login survives a close.
                         SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey,
                             res.fullName, identifier.trim(), res.role, res.title, res.registrationNo,

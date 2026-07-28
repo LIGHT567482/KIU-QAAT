@@ -42,13 +42,18 @@ class MainActivity : ComponentActivity() {
         setContent { RootApp() }   // RootApp owns the branded MaterialTheme + role routing
     }
 
-    /** LocalOnlyHotspot needs location (all APIs) or NEARBY_WIFI_DEVICES (API 33+); the
-     *  foreground notification needs POST_NOTIFICATIONS (API 33+). Ask for whatever's missing. */
+    /** Notifications are useful for everyone; the hotspot permissions (location / nearby-wifi) are
+     *  ONLY needed by a COORDINATOR running the in-room hub, so students/lecturers are never asked
+     *  for them. A coordinator who logs in fresh is prompted from CoordinatorApp instead. */
     private fun requestRuntimePermissions() {
-        val needed = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            needed += Manifest.permission.NEARBY_WIFI_DEVICES
             needed += Manifest.permission.POST_NOTIFICATIONS
+        }
+        if (ug.qaat.coordinator.ui.AppState.role == "COORDINATOR") {
+            needed += Manifest.permission.ACCESS_FINE_LOCATION
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                needed += Manifest.permission.NEARBY_WIFI_DEVICES
         }
         val toAsk = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED

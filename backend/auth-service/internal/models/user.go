@@ -38,6 +38,7 @@ type User struct {
 	LastLoginAt         *time.Time `db:"last_login_at"`
 	FailedLoginCount    int16      `db:"failed_login_count"`
 	LockedUntil         *time.Time `db:"locked_until"`
+	ForcePasswordChange bool       `db:"force_password_change"`
 	CreatedAt           time.Time  `db:"created_at"`
 	UpdatedAt           time.Time  `db:"updated_at"`
 }
