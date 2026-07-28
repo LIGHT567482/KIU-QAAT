@@ -260,4 +260,58 @@ class InRoomCheckinE2ETest {
             engine.stop(100, 200)
         }
     }
+
+    @Test
+    fun session_endpoint_reports_active_unit_and_cohort() {
+        // GET /session is what the STUDENT APP reads to show WHICH unit it's checking into
+        // (offline, over the hotspot). Before a session is live it reports inactive; once the
+        // coordinator opens one, it exposes the unit + cohort.
+        val store = InMemoryStore()
+        val validator = CheckinValidator(store)
+        val server = InRoomServer(validator, "<html>A</html>", "<html>G</html>")
+        val port = freePort()
+        val engine = server.start(port)
+        try {
+            val base = "http://127.0.0.1:$port"
+            var up = false
+            repeat(50) { if (!up) runCatching { if (http("GET", "$base/status").first == 200) up = true }; if (!up) Thread.sleep(100) }
+            assertTrue(up, "server did not come up")
+
+            // No live session → active=false.
+            val (noCode, noBody) = http("GET", "$base/session")
+            assertEquals(200, noCode)
+            assertTrue(noBody.contains("\"active\":\"false\""), "no session should report active=false, got $noBody")
+
+            // Wire a live session carrying the unit + cohort.
+            val aliceHash = VaultCrypto.hmacHex(hashKey, "STU-ALICE")
+            val session = ActiveSession(
+                sessionId = "sess-meta", tenantId = tenantId, academicYear = academicYear,
+                institutionPublicKeyPem = pubPem, studentHashKey = hashKey,
+                rosterHashes = setOf(aliceHash), rosterSerials = mapOf(aliceHash to "SER-A"),
+            )
+            val secret = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+            server.setLive(
+                InRoomServer.Live(
+                    session = session, roomCodeSecret = secret,
+                    unitId = "CS101", unitName = "Intro to CS", cohort = "BScIT Yr1 Sem1",
+                    gateContext = {
+                        LecturerGateContext(
+                            assignedStaffId = "KIU/STAFF/001", roomCodeSecret = secret, gateState = GateState.STARTED,
+                            attended = 0, enrolled = 1, ratio = 0.5, requireBiometric = false,
+                        )
+                    },
+                    onGate = { _, _ -> }, lecturerStarted = { true },
+                )
+            )
+            val (code, body) = http("GET", "$base/session")
+            assertEquals(200, code)
+            assertTrue(body.contains("\"active\":\"true\""), "active should be true, got $body")
+            assertTrue(body.contains("\"lecturer_started\":\"true\""), "lecturer_started missing, got $body")
+            assertTrue(body.contains("\"unit_name\":\"Intro to CS\""), "unit_name missing, got $body")
+            assertTrue(body.contains("BScIT Yr1 Sem1"), "cohort missing, got $body")
+            println("SESSION endpoint OK — $body")
+        } finally {
+            engine.stop(100, 200)
+        }
+    }
 }
