@@ -13,10 +13,10 @@ button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;co
 .t{font-size:18px;font-weight:800;color:#5b21b6}.muted{color:#64748b;font-size:13px}</style></head>
 <body>
 <div id="form">
-  <h2>Lecturer gate</h2>
+  <h2 id="title">Lecturer gate</h2>
   <p class="muted" id="rcnote"></p>
   <input id="staff" inputmode="text" placeholder="Your staff ID (e.g. KIU/STAFF/001)" autofocus>
-  <button onclick="submit()">Confirm — Start / End</button>
+  <button id="go" onclick="submit()">Confirm</button>
   <p id="err" style="color:#b91c1c"></p>
 </div>
 <div id="done">
@@ -29,6 +29,15 @@ var rc=qs.get('rc')||'';               // rotating code, carried by the scanned 
 document.getElementById('rcnote').textContent = rc
   ? 'Live code detected from the QR — just enter your staff ID.'
   : 'No live code — re-scan the rotating gate QR on the coordinator screen.';
+// Ask the hub whether the session is already running, so this scan is clearly labelled as
+// STARTING vs ENDING (the lecturer just clicks the one button; the END button ends the session).
+(async function(){ try{
+  var s=await (await fetch('/session')).json();
+  var started = s && s.lecturer_started==='true';
+  var unit = (s && s.unit_name) ? (' — '+s.unit_name) : '';
+  document.getElementById('title').textContent = started ? ('End session'+unit) : ('Start session'+unit);
+  document.getElementById('go').textContent = started ? 'End session' : 'Start session';
+}catch(e){} })();
 async function fingerprint(){var raw=[navigator.userAgent,navigator.language,screen.width+'x'+screen.height,new Date().getTimezoneOffset()].join('|');
   var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
 async function submit(){

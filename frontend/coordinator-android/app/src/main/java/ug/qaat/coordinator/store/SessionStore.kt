@@ -152,7 +152,7 @@ object SessionStore {
             m.units.forEach {
                 put(JSONObject().put("unit_id", it.unitId).put("unit_name", it.unitName)
                     .put("lecturer_staff_id", it.lecturerStaffId).put("lecturer_name", it.lecturerName)
-                    .put("lecturer_phone", it.lecturerPhone))
+                    .put("lecturer_phone", it.lecturerPhone).put("duration_minutes", it.durationMinutes))
             }
         }
         prefs.edit().apply {
@@ -178,7 +178,8 @@ object SessionStore {
                 val u = arr.getJSONObject(i)
                 val id = u.getString("unit_id")
                 units.add(ManifestClient.UnitInfo(id, u.optString("unit_name", id),
-                    u.optString("lecturer_staff_id", ""), u.optString("lecturer_name", ""), u.optString("lecturer_phone", "")))
+                    u.optString("lecturer_staff_id", ""), u.optString("lecturer_name", ""), u.optString("lecturer_phone", ""),
+                    u.optInt("duration_minutes", 0)))
                 roster[id] = dao.roster(id)   // roster cached in Room survives offline
             }
         }

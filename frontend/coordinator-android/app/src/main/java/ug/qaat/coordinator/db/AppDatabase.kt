@@ -40,8 +40,11 @@ data class SessionEntity(
     @PrimaryKey val sessionId: String,
     val unitId: String,
     val sessionDate: String,     // ISO date, used to order chronologically + group by week
-    val status: String,
+    val status: String,          // sync status: OPEN → CLOSED → SYNCED / PENDING_SYNC
     val enrolled: Int,
+    // How it ended: "MANUAL" (coordinator/lecturer) or "AUTO_CLOSED" (past scheduled duration + 5m).
+    // Shown on the Sync/audit log; also uploaded so the dashboards distinguish them.
+    val closedReason: String? = null,
 )
 
 /**
@@ -132,8 +135,16 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
 @Database(
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
         SessionEntity::class, PresentDisplayEntity::class],
-    version = 1,
+    version = 2,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
+}
+
+/** v1→v2: adds sessions.closedReason (MANUAL | AUTO_CLOSED). A real migration — NOT destructive —
+ *  so a coordinator's pending, not-yet-synced sessions are preserved across the app update. */
+val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE sessions ADD COLUMN closedReason TEXT")
+    }
 }

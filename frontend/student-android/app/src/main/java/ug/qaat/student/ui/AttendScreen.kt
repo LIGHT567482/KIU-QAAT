@@ -73,6 +73,15 @@ fun AttendScreen(onReonboard: () -> Unit) {
                 session?.let { Text("${it.unitName} · ${it.cohort}", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Text("You can turn Wi-Fi off now so a classmate can connect.", Modifier.padding(top = 8.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            session?.active == true && System.currentTimeMillis() < StudentStore.attendBlockUntil -> {
+                // 12h post-device-switch cooldown: attendance is paused on this newly-registered phone.
+                val until = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault())
+                    .format(java.util.Date(StudentStore.attendBlockUntil))
+                Text("⏸", style = MaterialTheme.typography.displaySmall)
+                Text("Attendance paused", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("You recently switched phones. You can take attendance on this device from $until.",
+                    textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            }
             session?.active == true -> {
                 Text("Attendance for", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(session!!.unitName.ifBlank { "this session" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)

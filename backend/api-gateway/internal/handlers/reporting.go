@@ -116,11 +116,11 @@ func VCOverview(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Ghost lecture list.
 		type ghostSession struct {
-			SessionID   string `json:"session_id"`
-			UnitID      string `json:"unit_id"`
-			UnitName    string `json:"unit_name"`
-			SessionDate string `json:"session_date"`
-			StudentCount int   `json:"student_count"`
+			SessionID    string `json:"session_id"`
+			UnitID       string `json:"unit_id"`
+			UnitName     string `json:"unit_name"`
+			SessionDate  string `json:"session_date"`
+			StudentCount int    `json:"student_count"`
 		}
 		ghostRows, err := conn.Query(r.Context(), `
 			SELECT s.session_id, s.unit_id, cu.name, s.session_date::text,
@@ -219,13 +219,13 @@ func VCLecturerWorkload(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type record struct {
-			CoordinatorID         string  `json:"coordinator_id"`
-			CoordinatorName       string  `json:"coordinator_name"`
-			ScheduledSessions     int     `json:"scheduled_sessions"`
-			ActualSessions        int     `json:"actual_sessions"`
-			TotalContactHours     float64 `json:"total_contact_hours_actual"`
-			DistinctUnits         int     `json:"distinct_units"`
-			AttendanceRate        float64 `json:"attendance_rate_pct"`
+			CoordinatorID     string  `json:"coordinator_id"`
+			CoordinatorName   string  `json:"coordinator_name"`
+			ScheduledSessions int     `json:"scheduled_sessions"`
+			ActualSessions    int     `json:"actual_sessions"`
+			TotalContactHours float64 `json:"total_contact_hours_actual"`
+			DistinctUnits     int     `json:"distinct_units"`
+			AttendanceRate    float64 `json:"attendance_rate_pct"`
 		}
 
 		var records []record
@@ -504,11 +504,11 @@ func SessionRoster(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type student struct {
-			StudentID    string `json:"student_id"`
-			FullName     string `json:"full_name"`
-			Status       string `json:"status"`
-			CheckinTime  string `json:"checkin_time,omitempty"`
-			EntryMethod  string `json:"entry_method,omitempty"`
+			StudentID   string `json:"student_id"`
+			FullName    string `json:"full_name"`
+			Status      string `json:"status"`
+			CheckinTime string `json:"checkin_time,omitempty"`
+			EntryMethod string `json:"entry_method,omitempty"`
 		}
 
 		var roster []student
@@ -771,17 +771,20 @@ func QADeviceReset(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
+		// Admin override: a FULL reset (rebind_count -> 0). This both clears the hardware/QR-card
+		// binding AND unblocks the student app's self-rebind limit — so a student who used up their
+		// 2 self-rebinds (REBIND_LIMIT) can register a fresh phone. The stale student_device_bindings
+		// row is harmlessly overwritten on their next register-device call (which will itself apply
+		// the standard 12h cooldown as a rebind).
 		tag, err := conn.Exec(r.Context(), `
 			UPDATE students_extended
 			SET hardware_fingerprint = NULL,
-			    rebind_count         = rebind_count + 1,
+			    rebind_count         = 0,
 			    last_rebind_date     = now(),
 			    updated_at           = now()
-			WHERE student_id = $1 AND tenant_id = $2
-			  AND rebind_count < 2`, req.StudentID, tenantID)
+			WHERE student_id = $1 AND tenant_id = $2`, req.StudentID, tenantID)
 		if err != nil || tag.RowsAffected() == 0 {
-			writeJSON(w, http.StatusConflict, errBody("REBIND_LIMIT_REACHED",
-				"student has reached the maximum of 2 device resets per academic year"))
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "no such student in this institution"))
 			return
 		}
 

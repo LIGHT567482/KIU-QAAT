@@ -31,10 +31,16 @@ object StudentStore {
 
     val onboarded: Boolean get() = !reg.isNullOrBlank()
     val reg: String? get() = prefs.getString("reg", null)
+    val org: String? get() = prefs.getString("org", null)
     val fullName: String? get() = prefs.getString("name", null)
+    /** Epoch millis until which attendance is paused after a device switch (0 = not paused). */
+    val attendBlockUntil: Long get() = prefs.getLong("block_until", 0L)
 
-    fun save(reg: String, fullName: String) {
-        prefs.edit().putString("reg", reg).putString("name", fullName).apply()
+    fun save(reg: String, org: String, fullName: String, attendBlockUntilMs: Long) {
+        prefs.edit()
+            .putString("reg", reg).putString("org", org).putString("name", fullName)
+            .putLong("block_until", attendBlockUntilMs)
+            .apply()
     }
 
     fun clear() { prefs.edit().clear().apply() }

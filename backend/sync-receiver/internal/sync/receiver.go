@@ -377,9 +377,10 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 	// The outer wrapper is a JSON object produced by sealSessionPackage in the PWA.
 	var pkg struct {
 		Session struct {
-			SessionID   string `json:"session_id"`
-			UnitID      string `json:"unit_id"`
-			SessionDate string `json:"session_date"`
+			SessionID     string `json:"session_id"`
+			UnitID        string `json:"unit_id"`
+			SessionDate   string `json:"session_date"`
+			SessionStatus string `json:"session_status"` // "CLOSED" or "AUTO_CLOSED"
 		} `json:"session"`
 		AttendanceRecords []struct {
 			LogID                string `json:"log_id"`
@@ -427,11 +428,17 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 	// from the package before inserting rows. Laptop-hub sessions already exist, so
 	// ON CONFLICT is a no-op. (No-op too if the package omits the session block.)
 	if pkg.Session.SessionID != "" && pkg.Session.UnitID != "" {
+		// Preserve how the session ended: AUTO_CLOSED when the coordinator auto-closed it after the
+		// scheduled duration + grace; CLOSED otherwise. Whitelist to avoid an invalid enum value.
+		sessionStatus := "CLOSED"
+		if pkg.Session.SessionStatus == "AUTO_CLOSED" {
+			sessionStatus = "AUTO_CLOSED"
+		}
 		if _, err := conn.Exec(ctx, `
 			INSERT INTO sessions (session_id, tenant_id, coordinator_id, unit_id, session_date, session_status)
-			VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5,'')::date, CURRENT_DATE), 'CLOSED')
+			VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5,'')::date, CURRENT_DATE), $6::session_status_enum)
 			ON CONFLICT (session_id) DO NOTHING`,
-			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate,
+			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate, sessionStatus,
 		); err != nil {
 			return 0, 0, 0, fmt.Errorf("create session from package: %w", err)
 		}

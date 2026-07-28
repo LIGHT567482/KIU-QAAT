@@ -30,6 +30,10 @@ object SessionPackage {
         unitId: String = "",        // lets the central sync-receiver create the session (phone-hub)
         sessionDate: String = "",
         lecturer: LecturerScan? = null,
+        // How the session ended: "CLOSED" (lecturer/coordinator ended it) or "AUTO_CLOSED" (the
+        // coordinator auto-closed it after the scheduled duration + 5 min grace). Stored as the
+        // central session_status so it shows in the dashboards/logs. Both are valid enum values.
+        sessionStatus: String = "CLOSED",
         packageVersion: String = "1.0",
     ): String {
         val recsJson = records.joinToString(",", "[", "]") { r ->
@@ -53,7 +57,7 @@ object SessionPackage {
                 "}"
         } ?: ""
         return "{" +
-            "\"session\":{\"session_id\":\"${esc(sessionId)}\",\"unit_id\":\"${esc(unitId)}\",\"session_date\":\"${esc(sessionDate)}\"}," +
+            "\"session\":{\"session_id\":\"${esc(sessionId)}\",\"unit_id\":\"${esc(unitId)}\",\"session_date\":\"${esc(sessionDate)}\",\"session_status\":\"${esc(sessionStatus)}\"}," +
             "\"attendance_records\":$recsJson" +
             lecturerJson +                                   // ",\"lecturer\":{…}" or "" — no dangling comma
             ",\"sealed_at\":\"${esc(sealedAt)}\"," +

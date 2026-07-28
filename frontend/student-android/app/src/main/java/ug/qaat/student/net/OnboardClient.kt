@@ -19,7 +19,7 @@ class OnboardClient {
     private val http = Net.client()
     private val base = Net.baseUrl
 
-    data class Result(val reg: String, val fullName: String)
+    data class Result(val reg: String, val fullName: String, val attendBlockUntilMs: Long)
 
     suspend fun register(reg: String, org: String, fingerprint: String): Result = withContext(Dispatchers.IO) {
         val resp = http.post("$base/api/v1/student/register-device") {
@@ -36,8 +36,12 @@ class OnboardClient {
             friendly(resp.bodyAsText(), "Registration failed (${resp.status.value}).")
         }
         val j = JSONObject(resp.bodyAsText())
-        Result(j.optString("student_id", reg), j.optString("full_name", ""))
+        Result(j.optString("student_id", reg), j.optString("full_name", ""), parseInstantMs(j.optString("attend_block_until", "")))
     }
+
+    // RFC3339 → epoch millis (0 when blank/unparseable).
+    private fun parseInstantMs(s: String): Long =
+        if (s.isBlank()) 0L else runCatching { java.time.Instant.parse(s).toEpochMilli() }.getOrDefault(0L)
 
     private fun friendly(body: String, fallback: String): String =
         runCatching { JSONObject(body).optString("message", "") }.getOrNull()?.takeIf { it.isNotBlank() } ?: fallback

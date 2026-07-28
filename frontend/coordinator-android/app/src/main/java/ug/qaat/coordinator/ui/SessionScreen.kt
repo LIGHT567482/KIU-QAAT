@@ -185,6 +185,15 @@ private fun QrCard(title: String, payload: String, caption: String) {
 private fun AttendanceIdle(onOpenSession: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Attendance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        AppState.sessionNotice?.let { note ->
+            Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(note, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { AppState.sessionNotice = null }) { Text("Dismiss") }
+                }
+            }
+        }
         Text("Start a session so students can check in — this works even with no internet once today's data is downloaded.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))

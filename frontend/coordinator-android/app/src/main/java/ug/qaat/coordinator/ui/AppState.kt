@@ -46,6 +46,10 @@ object AppState {
     val displayName: String get() = coordinatorName?.takeIf { it.isNotBlank() }
         ?: coordinatorEmail?.substringBefore("@")?.takeIf { it.isNotBlank() } ?: "Coordinator"
 
+    // One-shot notice about the session lifecycle (auto-close fired, or "end the current one
+    // first" when a second open is attempted). Shown on the attendance screens, then cleared.
+    var sessionNotice by mutableStateOf<String?>(null)
+
     // Daily manifest (config inherited from the cloud while online).
     var manifest by mutableStateOf<ug.qaat.coordinator.net.ManifestClient.Parsed?>(null)
     // Why the last manifest fetch failed (HTTP code / network reason), so a failed

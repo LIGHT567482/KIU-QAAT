@@ -63,7 +63,7 @@ fun OnboardScreen(onDone: () -> Unit) {
                 scope.launch {
                     val fp = Fingerprint.get(ctx)
                     runCatching { OnboardClient().register(reg, org, fp) }
-                        .onSuccess { r -> StudentStore.save(r.reg, r.fullName.ifBlank { r.reg }); onDone() }
+                        .onSuccess { r -> StudentStore.save(r.reg, org, r.fullName.ifBlank { r.reg }, r.attendBlockUntilMs); onDone() }
                         .onFailure { error = it.message ?: "Registration failed"; busy = false }
                 }
             },

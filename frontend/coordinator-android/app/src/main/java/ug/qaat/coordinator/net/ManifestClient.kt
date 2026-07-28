@@ -22,6 +22,7 @@ class ManifestClient(private val dao: AppDao) {
     data class UnitInfo(
         val unitId: String, val unitName: String,
         val lecturerStaffId: String = "", val lecturerName: String = "", val lecturerPhone: String = "",
+        val durationMinutes: Int = 0,   // scheduled length; drives the auto-close deadline
     )
     data class Parsed(
         val academicYear: String,
@@ -54,6 +55,7 @@ class ManifestClient(private val dao: AppDao) {
             units.add(UnitInfo(
                 unitId, s.optString("unit_name", unitId),
                 s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
+                s.optInt("session_duration_minutes", 0),
             ))
         }
 

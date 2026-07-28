@@ -28,7 +28,9 @@ fun SyncAuditScreen() {
                 val synced = s.status.equals("SYNCED", ignoreCase = true)
                 ListItem(
                     headlineContent = { Text("${s.unitId} · ${s.sessionDate}") },
-                    supportingContent = { Text(s.sessionId.take(8)) },
+                    supportingContent = {
+                        Text(s.sessionId.take(8) + (if (s.closedReason == "AUTO_CLOSED") "  ·  ⏱ auto-closed" else ""))
+                    },
                     trailingContent = {
                         Text(if (synced) "SYNCED" else s.status,
                             color = if (synced) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)

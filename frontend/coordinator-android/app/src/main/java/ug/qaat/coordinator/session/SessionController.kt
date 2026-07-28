@@ -39,10 +39,18 @@ object SessionController {
     private var lecturerEndFp: String = ""
     private var enrolled: Int = 0
     private var current: SessionEntity? = null
+    // Wall-clock deadline after which a forgotten session auto-closes (scheduled duration + 5m grace).
+    private var autoCloseAtMillis: Long = Long.MAX_VALUE
     private val sm get() = SessionService.session.get()
 
     /** Open a session for [unitId] with the present [lecturerStaffId]. Requires login + manifest. */
     fun open(unitId: String, lecturerStaffId: String) = scope.launch {
+        // A coordinator runs ONE session at a time — refuse to open a second while one is live
+        // (the current must be ended, manually or by the auto-close, first).
+        if (current != null || AppState.currentSessionId != null) {
+            AppState.sessionNotice = "You already have a live session. End it before starting another."
+            return@launch
+        }
         val token = AppState.token ?: return@launch
         val tenantId = AppState.tenantId ?: return@launch
         val m = AppState.manifest ?: return@launch
@@ -76,8 +84,12 @@ object SessionController {
 
         val dao = Graph.db.dao()
         // Unit name + cohort for the student app's GET /session (so it shows what it's checking into).
-        val unitName = m.units.firstOrNull { it.unitId == unitId }?.unitName?.takeIf { it.isNotBlank() } ?: unitId
+        val unit = m.units.firstOrNull { it.unitId == unitId }
+        val unitName = unit?.unitName?.takeIf { it.isNotBlank() } ?: unitId
         val cohort = AppState.cohortLabel?.takeIf { it.isNotBlank() } ?: ""
+        // Auto-close deadline: scheduled duration (fallback 120m) + 5m grace after the hour it runs.
+        val durationMin = (unit?.durationMinutes?.takeIf { it > 0 } ?: 120)
+        autoCloseAtMillis = System.currentTimeMillis() + (durationMin + 5) * 60_000L
         server.setLive(
             InRoomServer.Live(
                 session = session,
@@ -128,11 +140,13 @@ object SessionController {
 
     /** Close the session: tear the room down IMMEDIATELY (stop the server + hotspot), then seal +
      *  upload in the background. Teardown must NOT wait on the (possibly slow) network upload. */
-    fun close() = scope.launch {
+    fun close(auto: Boolean = false) = scope.launch {
         ticker?.cancel()
+        autoCloseAtMillis = Long.MAX_VALUE
         val s = current ?: return@launch
         val userId = AppState.userId ?: return@launch
         val bindingKey = AppState.deviceBindingKey
+        val closedReason = if (auto) "AUTO_CLOSED" else "MANUAL"
         // Snapshot the lecturer's presence proof before teardown. START is what makes the session's
         // student attendance "verified" server-side; END adds their contact hours.
         val lecturerScan = lecturerStartAt.takeIf { it.isNotBlank() }?.let {
@@ -162,7 +176,7 @@ object SessionController {
         }
 
         // 2) Seal + upload in the background. The room is already closed regardless of the result.
-        Graph.db.dao().upsertSession(s.copy(status = "CLOSED"))
+        Graph.db.dao().upsertSession(s.copy(status = "CLOSED", closedReason = closedReason))
         val records = Graph.db.dao().rosterForSession(s.sessionId).map {
             AttendanceRecord(it.logId, it.sessionId, it.studentIdHash, it.deviceFingerprintHash,
                 it.sequenceNumber, it.checkinTimestamp, it.entryMethod)
@@ -171,10 +185,12 @@ object SessionController {
             val pkg = SessionPackage.build(
                 s.sessionId, userId, records, sealedAt = Instant.now().toString(),
                 unitId = s.unitId, sessionDate = s.sessionDate, lecturer = lecturerScan,
+                // Central session_status: AUTO_CLOSED vs CLOSED — surfaces in the cloud dashboards.
+                sessionStatus = if (auto) "AUTO_CLOSED" else "CLOSED",
             )
             val ok = runCatching { SyncClient(Net_base(), AppState.token ?: "").upload(userId, s.sessionId, bindingKey, pkg) }
                 .getOrDefault(false)
-            Graph.db.dao().upsertSession(s.copy(status = if (ok) "SYNCED" else "PENDING_SYNC"))
+            Graph.db.dao().upsertSession(s.copy(status = if (ok) "SYNCED" else "PENDING_SYNC", closedReason = closedReason))
         }
     }
 
@@ -184,6 +200,13 @@ object SessionController {
             // No student room code any more — students prove presence by being on the hotspot.
             // Only the lecturer code rotates (read off-screen for the START/END gate).
             while (isActive) {
+                // Auto-close a forgotten session once past its deadline (duration + 5m grace), so the
+                // coordinator isn't blocked from starting the next one and the log shows it was auto-closed.
+                if (System.currentTimeMillis() >= autoCloseAtMillis && current != null) {
+                    AppState.sessionNotice = "Session auto-closed — the scheduled time elapsed and it wasn't ended."
+                    close(auto = true)
+                    return@launch
+                }
                 val now = System.currentTimeMillis() / 1000
                 AppState.lecturerCode = RoomCode.derive(secret, now) // rotating — lecturer
                 AppState.secondsLeft = RoomCode.secondsRemaining(now)

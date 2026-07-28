@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -58,7 +59,7 @@ func RegisterDevice(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// (a) Is this device already bound to a DIFFERENT student?
+		// (a) Is this device already bound to a DIFFERENT student? (hard block — one phone, one student)
 		var deviceOwner string
 		if err := adminPool.QueryRow(ctx,
 			`SELECT student_id FROM student_device_bindings WHERE device_fingerprint_hash = $1`,
@@ -66,26 +67,51 @@ func RegisterDevice(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusConflict, errBody("DEVICE_TAKEN", "this phone is already registered to another student"))
 			return
 		}
-		// (b) Is this student already bound to a DIFFERENT device?
+
+		// (b) Is this student already bound to a device? A SWITCH to a new phone is a self-rebind,
+		//     allowed up to 2 times; after that only an admin (QA device reset) can move them.
 		var studentDevice string
-		if err := adminPool.QueryRow(ctx,
+		hasBinding := adminPool.QueryRow(ctx,
 			`SELECT device_fingerprint_hash FROM student_device_bindings WHERE student_id = $1`,
-			reg).Scan(&studentDevice); err == nil && studentDevice != fp {
-			writeJSON(w, http.StatusConflict, errBody("STUDENT_ON_ANOTHER_DEVICE", "your registration is already set up on another phone — ask your admin to reset it"))
-			return
+			reg).Scan(&studentDevice) == nil
+		isRebind := hasBinding && studentDevice != fp
+
+		var blockUntil *time.Time
+		if isRebind {
+			var rebindCount int
+			_ = adminPool.QueryRow(ctx, `SELECT rebind_count FROM students_extended WHERE student_id = $1 AND tenant_id = $2`, reg, tenantID).Scan(&rebindCount)
+			if rebindCount >= 2 {
+				writeJSON(w, http.StatusConflict, errBody("REBIND_LIMIT", "you've already switched phones twice — ask your admin to reset your device"))
+				return
+			}
+			if _, err := adminPool.Exec(ctx,
+				`UPDATE students_extended SET rebind_count = rebind_count + 1, last_rebind_date = now()
+				  WHERE student_id = $1 AND tenant_id = $2`, reg, tenantID); err != nil {
+				writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "could not record the device switch"))
+				return
+			}
+			t := time.Now().UTC().Add(12 * time.Hour)
+			blockUntil = &t
 		}
 
-		// Upsert — idempotent when the same student re-onboards on the same device.
+		// Upsert. On a rebind we set the 12h attendance cooldown; a same-device re-onboard clears it.
 		if _, err := adminPool.Exec(ctx,
-			`INSERT INTO student_device_bindings (student_id, tenant_id, device_fingerprint_hash)
-			 VALUES ($1, $2, $3)
+			`INSERT INTO student_device_bindings (student_id, tenant_id, device_fingerprint_hash, attend_block_until)
+			 VALUES ($1, $2, $3, $4)
 			 ON CONFLICT (student_id)
-			 DO UPDATE SET device_fingerprint_hash = EXCLUDED.device_fingerprint_hash, updated_at = now()`,
-			reg, tenantID, fp); err != nil {
+			 DO UPDATE SET device_fingerprint_hash = EXCLUDED.device_fingerprint_hash,
+			               attend_block_until = EXCLUDED.attend_block_until, updated_at = now()`,
+			reg, tenantID, fp, blockUntil); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "could not register this device"))
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{"student_id": reg, "full_name": fullName})
+		blockStr := ""
+		if blockUntil != nil {
+			blockStr = blockUntil.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"student_id": reg, "full_name": fullName, "attend_block_until": blockStr,
+		})
 	}
 }
