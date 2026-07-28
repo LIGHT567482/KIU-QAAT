@@ -11,6 +11,7 @@ import io.ktor.server.engine.*
 import kotlinx.coroutines.*
 import ug.qaat.coordinator.db.AppDatabase
 import ug.qaat.coordinator.hotspot.HotspotManager
+import ug.qaat.coordinator.hotspot.NsdAdvertiser
 import ug.qaat.coordinator.server.InRoomServer
 import ug.qaat.coordinator.store.RoomStore
 import ug.qaat.engine.CheckinValidator
@@ -43,6 +44,7 @@ class SessionService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var hotspotMgr: HotspotManager
+    private var nsd: NsdAdvertiser? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -109,6 +111,13 @@ class SessionService : Service() {
             if (!listening) throw IllegalStateException("HTTP server did not bind on port 8080 after 6 tries (port busy or blocked). Reopen the app or reboot the phone.")
             android.util.Log.i(TAG, "hub listening on :8080")
             ug.qaat.coordinator.ui.AppState.serverReady = true
+
+            // Advertise on the LAN so the student app auto-discovers us (no address typing).
+            runCatching {
+                nsd = NsdAdvertiser(this@SessionService).also {
+                    it.register(ug.qaat.coordinator.ui.AppState.cohortLabel.orEmpty(), 8080)
+                }
+            }
 
             if (ug.qaat.coordinator.ui.AppState.useSystemHotspot) {
                 // System-hotspot mode: the coordinator runs their OWN phone hotspot; we just poll for
@@ -204,6 +213,7 @@ class SessionService : Service() {
     override fun onDestroy() {
         scope.cancel()
         ug.qaat.coordinator.ui.AppState.serverReady = false
+        runCatching { nsd?.unregister() }; nsd = null
         runCatching { ktor?.stop(100, 200) }
         ktor = null
         runCatching { server?.clear() }             // null if startup never got this far

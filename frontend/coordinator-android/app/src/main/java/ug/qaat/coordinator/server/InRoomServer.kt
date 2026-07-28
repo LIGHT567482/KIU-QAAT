@@ -31,6 +31,11 @@ class InRoomServer(
     class Live(
         val session: ActiveSession,
         val roomCodeSecret: ByteArray,
+        // The unit + cohort this session is for — served to connected students (GET /session) so
+        // the student app can show "Attendance for: <unit> · <cohort>" before the one-tap check-in.
+        val unitId: String = "",
+        val unitName: String = "",
+        val cohort: String = "",
         val gateContext: () -> LecturerGateContext,
         // (action, lecturerFingerprintHash) — the fingerprint lets us record the lecturer's
         // START/END presence proof into the uploaded package (lecturer_attendance_logs).
@@ -135,6 +140,20 @@ class InRoomServer(
                 call.json(mapOf(
                     "active" to (cur != null).toString(),
                     "room_code" to lecturerCode,       // rotating — lecturer gate only
+                ))
+            }
+
+            // Active session metadata for a connected student's app (offline, over the hotspot).
+            // The app fetches this on connect to show WHICH unit it's checking into before the one
+            // tap. Cohort-scoped by construction: this server only holds this coordinator's session.
+            get("/session") {
+                val cur = live.get()
+                call.json(mapOf(
+                    "active" to (cur != null).toString(),
+                    "lecturer_started" to (cur?.lecturerStarted?.invoke() == true).toString(),
+                    "unit_id" to (cur?.unitId ?: ""),
+                    "unit_name" to (cur?.unitName ?: ""),
+                    "cohort" to (cur?.cohort ?: ""),
                 ))
             }
         }

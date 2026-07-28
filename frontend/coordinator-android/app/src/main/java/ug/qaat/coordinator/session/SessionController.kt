@@ -75,10 +75,16 @@ object SessionController {
         SessionService.session.set(SessionManager(session.sessionId).apply { open() })
 
         val dao = Graph.db.dao()
+        // Unit name + cohort for the student app's GET /session (so it shows what it's checking into).
+        val unitName = m.units.firstOrNull { it.unitId == unitId }?.unitName?.takeIf { it.isNotBlank() } ?: unitId
+        val cohort = AppState.cohortLabel?.takeIf { it.isNotBlank() } ?: ""
         server.setLive(
             InRoomServer.Live(
                 session = session,
                 roomCodeSecret = secret,
+                unitId = unitId,
+                unitName = unitName,
+                cohort = cohort,
                 gateContext = {
                     LecturerGateContext(
                         assignedStaffId = lecturerStaffId,
