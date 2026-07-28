@@ -52,12 +52,12 @@ type manifestPolicy struct {
 }
 
 type dailyManifest struct {
-	ManifestVersion      string                   `json:"manifest_version"`
-	GeneratedAt          string                   `json:"generated_at"`
-	ExpiresAt            string                   `json:"expires_at"`
-	Sessions             []manifestSession        `json:"sessions"`
-	Policy               manifestPolicy           `json:"policy"`
-	InstitutionPublicKey string                   `json:"institution_public_key"`
+	ManifestVersion      string            `json:"manifest_version"`
+	GeneratedAt          string            `json:"generated_at"`
+	ExpiresAt            string            `json:"expires_at"`
+	Sessions             []manifestSession `json:"sessions"`
+	Policy               manifestPolicy    `json:"policy"`
+	InstitutionPublicKey string            `json:"institution_public_key"`
 	// StudentHashKey is the per-tenant secret the Coordinator uses to recompute
 	// keyed student-id hashes (HMAC-SHA256). Delivered over TLS and stored only
 	// inside the AES-encrypted manifest vault on the device (F-07).
@@ -72,8 +72,8 @@ type dailyManifest struct {
 func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
-		userID   := middleware.GetUserID(r.Context())
-		today    := time.Now().UTC().Format("2006-01-02")
+		userID := middleware.GetUserID(r.Context())
+		today := time.Now().UTC().Format("2006-01-02")
 		cacheKey := fmt.Sprintf("manifest:%s:%s:%s", tenantID, userID, today)
 
 		source := "fresh"
@@ -269,7 +269,9 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		if err != nil {
 			continue
 		}
-		var entries []rosterEntry
+		// Non-nil so a unit with no enrolled students marshals to [] rather than null
+		// (a null roster value crashes strict clients that expect a JSON array).
+		entries := make([]rosterEntry, 0)
 		for rRows.Next() {
 			var studentID, serial string
 			if err := rRows.Scan(&studentID, &serial); err != nil {
@@ -292,7 +294,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	return &dailyManifest{
 		ManifestVersion:      fmt.Sprintf("%s-%s", date, idPrefix),
 		GeneratedAt:          now.Format(time.RFC3339),
-		ExpiresAt:            now.Truncate(24*time.Hour).Add(24*time.Hour).Format(time.RFC3339),
+		ExpiresAt:            now.Truncate(24 * time.Hour).Add(24 * time.Hour).Format(time.RFC3339),
 		Sessions:             sessions,
 		Policy:               policy,
 		InstitutionPublicKey: publicKeyPEM,

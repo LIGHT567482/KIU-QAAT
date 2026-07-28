@@ -31,11 +31,20 @@ function downloadText(name: string, content: string) {
   const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
 }
 const hourOf = (hhmm: string) => parseInt((hhmm || '').split(':')[0] || '0', 10)
+const toMin = (hhmm: string) => { const [h, m] = (hhmm || '').split(':').map(Number); return (h || 0) * 60 + (m || 0) }
 const endTime = (start: string, mins: number) => {
-  const [h, m] = start.split(':').map(Number)
-  const t = h * 60 + m + (mins || 60)
+  const t = Math.min(24 * 60, toMin(start) + (mins || 60))   // a lecture never runs past midnight
   return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
 }
+// 24h "14:30" → 12h "2:30 PM". A whole hour (e.g. 14) → "2 PM".
+const to12 = (hhmm: string) => {
+  const [h, m] = (hhmm || '').split(':').map(Number)
+  if (isNaN(h)) return hhmm || ''
+  const suf = h < 12 || h === 24 ? 'AM' : 'PM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return m ? `${h12}:${String(m).padStart(2, '0')} ${suf}` : `${h12} ${suf}`
+}
+const hourLabel = (h: number) => to12(`${((h % 24) + 24) % 24}:00`)
 
 export default function Timetable() {
   const { data, status, refetch } = useQuery<{ offerings: Offering[]; slots: Slot[] }>(
@@ -89,6 +98,8 @@ export default function Timetable() {
       // Widen to cover the WHOLE duration so a multi-hour block has enough rows to span.
       if (h + spanOf(s.duration_minutes) > hi) hi = h + spanOf(s.duration_minutes)
     }
+    // Clamp to a real clock — a day has 24 hours, so the axis never shows 24:00/25:00…
+    lo = Math.max(0, lo); hi = Math.min(24, hi)
     return Array.from({ length: Math.max(1, hi - lo) }, (_, i) => lo + i)
   }, [current, curSlots])
 
@@ -170,7 +181,7 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
           <tbody>
             {rows.map(hour => (
               <tr key={hour}>
-                <td style={timeCell}>{String(hour).padStart(2, '0')}:00<br />{String(hour + 1).padStart(2, '0')}:00</td>
+                <td style={timeCell}>{hourLabel(hour)}<br />{hourLabel(hour + 1)}</td>
                 {days.map(d => {
                   const key = `${d}-${hour}`
                   if (covered.has(key)) return null // a block above spans into this cell
@@ -184,7 +195,7 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
                           <div style={{ fontWeight: 800, color: KIU_GREEN, fontSize: 12 }}>{s.unit_id}</div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{s.unit_name}</div>
                           {s.lecturer_name && <div style={{ fontSize: 11, color: '#475569' }}>Lecturer: {s.lecturer_name}</div>}
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.start_time}–{endTime(s.start_time, s.duration_minutes)}{s.room ? ` · Room: ${s.room}` : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{to12(s.start_time)}–{to12(endTime(s.start_time, s.duration_minutes))}{s.room ? ` · Room: ${s.room}` : ''}</div>
                         </div>
                       ))}
                     </td>
@@ -210,16 +221,20 @@ function AddSlot({ offering, units, onDone, onCancel }: {
   offering: Offering; units: OverviewRow[]; onDone: () => void; onCancel: () => void
 }) {
   const ttDays = daysFor(offering.session_type)
+  const isEve = offering.session_type.toLowerCase().startsWith('eve')
   const [unit, setUnit] = useState('')
   const [day, setDay] = useState(ttDays[0])
-  const [start, setStart] = useState(offering.session_type.toLowerCase().startsWith('eve') ? '17:00' : '08:00')
-  const [dur, setDur] = useState(60)
+  const [start, setStart] = useState(isEve ? '17:00' : '08:00')
+  const [end, setEnd] = useState(isEve ? '18:00' : '09:00')
   const [room, setRoom] = useState('')
   const [saving, setSaving] = useState(false)
   const uniqUnits = Array.from(new Map(units.map(u => [u.unit_id, u])).values())
+  // The API still stores a duration; derive it from the two clock times the user enters.
+  const dur = toMin(end) - toMin(start)
 
   async function save() {
     if (!unit) return
+    if (dur <= 0) { alert('End time must be after the start time.'); return }
     setSaving(true)
     try {
       await api.put('/api/v1/dashboard/timetable/slots', {
@@ -235,10 +250,10 @@ function AddSlot({ offering, units, onDone, onCancel }: {
     <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
       <Field label="Unit"><select value={unit} onChange={e => setUnit(e.target.value)} style={sel_}><option value="">— select —</option>{uniqUnits.map(u => <option key={u.unit_id} value={u.unit_id}>{u.unit_id} — {u.unit_name}</option>)}</select></Field>
       <Field label="Day"><select value={day} onChange={e => setDay(Number(e.target.value))} style={sel_}>{ttDays.map(d => <option key={d} value={d}>{DAYS[d]}</option>)}</select></Field>
-      <Field label="Start"><input type="time" value={start} onChange={e => setStart(e.target.value)} style={inp} /></Field>
-      <Field label="Minutes"><input type="number" min={15} max={300} value={dur} onChange={e => setDur(Number(e.target.value))} style={{ ...inp, width: 80 }} /></Field>
+      <Field label="Start (HH:MM)"><input type="time" value={start} onChange={e => setStart(e.target.value)} style={inp} /></Field>
+      <Field label="End (HH:MM)"><input type="time" value={end} onChange={e => setEnd(e.target.value)} style={{ ...inp, borderColor: dur <= 0 ? '#dc2626' : '#e2e8f0' }} /></Field>
       <Field label="Room"><input value={room} onChange={e => setRoom(e.target.value)} placeholder="e.g. C01 O.B." style={{ ...inp, width: 120 }} /></Field>
-      <button onClick={save} disabled={!unit || saving} style={{ ...btnGhost, background: KIU_GREEN, color: '#fff', borderColor: KIU_GREEN }}>{saving ? 'Saving…' : 'Add'}</button>
+      <button onClick={save} disabled={!unit || saving || dur <= 0} style={{ ...btnGhost, background: KIU_GREEN, color: '#fff', borderColor: KIU_GREEN, opacity: dur <= 0 ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Add'}</button>
       <button onClick={onCancel} style={btnGhost}>Cancel</button>
     </div>
   )

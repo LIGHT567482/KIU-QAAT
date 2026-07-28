@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth, type Role } from '../contexts/AuthContext'
 import { api } from '../lib/api'
+import PasswordInput from '../components/PasswordInput'
 import { useTheme, ThemeToggle, applyPalette } from '../theme'
 
 interface Branding {
@@ -210,9 +211,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{err}</div>}
-            <input type="password" placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} style={pwInp} />
-            <input type="password" placeholder="New password (min 8)" value={next} onChange={e => setNext(e.target.value)} style={pwInp} />
-            <input type="password" placeholder="Confirm new password" value={confirm} onChange={e => setConfirm(e.target.value)} style={pwInp} />
+            <PasswordInput placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} style={pwInp} />
+            <PasswordInput placeholder="New password (min 8)" value={next} onChange={e => setNext(e.target.value)} style={pwInp} />
+            <PasswordInput placeholder="Confirm new password" value={confirm} onChange={e => setConfirm(e.target.value)} style={pwInp} />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button onClick={submit} disabled={busy || !cur || !next} style={pwBtn}>{busy ? 'Saving…' : 'Update password'}</button>
               <button onClick={onClose} style={{ ...pwBtn, background: 'transparent', color: 'var(--text,#334155)', border: '1px solid var(--border,#e2e8f0)' }}>Cancel</button>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
+import PasswordInput from '../../components/PasswordInput'
 import { useQuery } from '../../lib/useApi'
 
 // The Users page manages the oversight roles only — coordinators have their own
@@ -362,8 +363,9 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
           )}
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Your admin password" autoFocus
-              style={{ flex: 1, maxWidth: 260, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
+            <PasswordInput value={pw} onChange={e => setPw(e.target.value)} placeholder="Your admin password" autoFocus
+              wrapperStyle={{ flex: 1, maxWidth: 260 }}
+              style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
             <button onClick={advance} disabled={busy || !pw} style={{ ...btn, background: '#b45309', opacity: !pw ? 0.5 : 1 }}>{busy ? 'Advancing…' : 'Confirm advance'}</button>
           </div>
         </div>
@@ -391,8 +393,9 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
             </div>
             {clrErr && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{clrErr}</div>}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="password" value={clrPw} onChange={e => setClrPw(e.target.value)} placeholder="Your admin password"
-                style={{ flex: 1, maxWidth: 260, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
+              <PasswordInput value={clrPw} onChange={e => setClrPw(e.target.value)} placeholder="Your admin password"
+                wrapperStyle={{ flex: 1, maxWidth: 260 }}
+                style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }} />
               <button onClick={clearData} disabled={clrBusy || !clrPw || clrIntakes.length === 0} style={{ ...btn, background: '#b91c1c', opacity: (!clrPw || clrIntakes.length === 0) ? 0.5 : 1 }}>{clrBusy ? 'Archiving & clearing…' : 'Archive & clear'}</button>
             </div>
           </div>
@@ -467,14 +470,16 @@ function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
           : 'No passcode is set yet. Create one to protect the Users page from here on.'}
       </p>
       {err && <div style={errorBox}>{err}</div>}
-      <input type="password" value={code} placeholder="Passcode" autoFocus
+      <PasswordInput value={code} placeholder="Passcode" autoFocus
         onChange={e => setCode(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && isSet) verify() }}
-        style={{ width: '100%', padding: '11px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15, boxSizing: 'border-box', marginBottom: 10 }} />
+        wrapperStyle={{ marginBottom: 10 }}
+        style={{ padding: '11px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15 }} />
       {!isSet && (
-        <input type="password" value={confirm} placeholder="Confirm passcode"
+        <PasswordInput value={confirm} placeholder="Confirm passcode"
           onChange={e => setConfirm(e.target.value)}
-          style={{ width: '100%', padding: '11px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15, boxSizing: 'border-box', marginBottom: 10 }} />
+          wrapperStyle={{ marginBottom: 10 }}
+          style={{ padding: '11px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15 }} />
       )}
       <button onClick={isSet ? verify : setPasscode} disabled={busy} style={{ ...btn, width: '100%', padding: 12 }}>
         {busy ? 'Please wait…' : isSet ? 'Unlock' : 'Set passcode & continue'}
@@ -484,11 +489,17 @@ function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
 }
 
 function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
+  const [show, setShow] = useState(false)
+  const isPw = type === 'password'
   return (
     <label>
       <div style={labelStyle}>{label}</div>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
-        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
+      <div style={{ position: 'relative' }}>
+        <input type={isPw && show ? 'text' : type} value={value} onChange={e => onChange(e.target.value)}
+          style={{ width: '100%', padding: '8px 10px', paddingRight: isPw ? 58 : 10, borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
+        {isPw && <button type="button" tabIndex={-1} onClick={() => setShow(s => !s)}
+          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#64748b', padding: 4 }}>{show ? 'Hide' : 'Show'}</button>}
+      </div>
     </label>
   )
 }

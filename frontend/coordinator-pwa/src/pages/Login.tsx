@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAuthStore } from '../store/auth'
+import PasswordInput from '../components/PasswordInput'
 import { useTheme, ThemeToggle } from '../theme'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
@@ -132,8 +133,7 @@ export default function Login() {
             autoComplete="username"
             style={inputStyle}
           />
-          <input
-            type="password"
+          <PasswordInput
             placeholder="Password"
             value={form.password}
             onChange={e => setForm(f => ({ ...f, password: e.target.value }))}

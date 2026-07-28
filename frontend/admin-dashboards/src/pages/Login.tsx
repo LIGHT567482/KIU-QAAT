@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import PasswordInput from '../components/PasswordInput'
 import { useAuth, type Role } from '../contexts/AuthContext'
 import { useTheme, ThemeToggle } from '../theme'
 
@@ -140,7 +141,7 @@ export default function Login() {
             <input type="email" placeholder="Email" value={form.email} autoComplete="username"
               onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setResolvedTenantId('') }}
               required style={inp} />
-            <input type="password" placeholder="Password" value={form.password} autoComplete="current-password"
+            <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
             <div>
               <input type="text" placeholder="Institution ID" value={form.institution_id} autoComplete="off"

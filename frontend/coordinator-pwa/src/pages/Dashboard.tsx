@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme'
 import SyncAudit from '../components/SyncAudit'
+import PasswordInput from '../components/PasswordInput'
 import ChronicAbsentee from '../components/ChronicAbsentee'
 import Trends from '../components/Trends'
 import { processOutboxQueue } from '../sync/outbox'
@@ -352,6 +353,7 @@ function Timetable({ units, sessionType }: { units: Unit[]; sessionType: string 
   // block has enough rows to span.
   let lo = 8, hi = 19
   for (const u of scheduled) { const h = hourOf(u.session_start); if (h < lo) lo = h; if (h + spanOf(u.session_duration_minutes) > hi) hi = h + spanOf(u.session_duration_minutes) }
+  lo = Math.max(0, lo); hi = Math.min(24, hi)   // clamp to a real clock — never 24:00/25:00
   const rows = Array.from({ length: Math.max(1, hi - lo) }, (_, i) => lo + i)
 
   // Where each unit STARTS + which lower cells it COVERS, so a unit spans all the cells
@@ -477,9 +479,9 @@ function ChangePasswordModal({ token, onClose }: { token: string | null; onClose
         <h3 style={{ marginTop: 0 }}>Change password</h3>
         {done ? <><p style={{ color: '#16a34a' }}>✓ Password changed.</p><button onClick={onClose} style={b}>Close</button></> : <>
           {err && <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 10, fontSize: 13 }}>{err}</div>}
-          <input type="password" placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} style={inp} />
-          <input type="password" placeholder="New password (min 8)" value={next} onChange={e => setNext(e.target.value)} style={inp} />
-          <input type="password" placeholder="Confirm new password" value={confirm} onChange={e => setConfirm(e.target.value)} style={inp} />
+          <PasswordInput placeholder="Current password" value={cur} onChange={e => setCur(e.target.value)} style={inp} />
+          <PasswordInput placeholder="New password (min 8)" value={next} onChange={e => setNext(e.target.value)} style={inp} />
+          <PasswordInput placeholder="Confirm new password" value={confirm} onChange={e => setConfirm(e.target.value)} style={inp} />
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={submit} disabled={busy || !cur || !next} style={b}>{busy ? 'Saving…' : 'Update'}</button>
             <button onClick={onClose} style={{ ...b, background: 'transparent', color: 'inherit', border: '1px solid var(--border,#e2e8f0)' }}>Cancel</button>

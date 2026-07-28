@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { getSession, clearSession, type Session } from './auth'
+import PasswordInput from './components/PasswordInput'
 import { BrandHeader } from './components/BrandHeader'
 import { useTheme, ThemeToggle } from './theme'
 import { api } from './lib/api'
@@ -86,13 +87,13 @@ function AccountModal({ onClose }: { onClose: () => void }) {
 
         <h4 style={{ margin: '16px 0 8px' }}>Change sign-in email</h4>
         <input type="email" placeholder="New sign-in email" value={em.email} onChange={e => setEm(s => ({ ...s, email: e.target.value }))} style={inp} />
-        <input type="password" placeholder="Current password" value={em.cur} onChange={e => setEm(s => ({ ...s, cur: e.target.value }))} style={inp} />
+        <PasswordInput placeholder="Current password" value={em.cur} onChange={e => setEm(s => ({ ...s, cur: e.target.value }))} style={inp} />
         <button onClick={changeEmail} disabled={busy || !em.cur || !em.email} style={btn}>{busy ? 'Saving…' : 'Update email'}</button>
 
         <h4 style={{ margin: '20px 0 8px' }}>Change password</h4>
-        <input type="password" placeholder="Current password" value={pw.cur} onChange={e => setPw(s => ({ ...s, cur: e.target.value }))} style={inp} />
-        <input type="password" placeholder="New password (min 8)" value={pw.next} onChange={e => setPw(s => ({ ...s, next: e.target.value }))} style={inp} />
-        <input type="password" placeholder="Confirm new password" value={pw.confirm} onChange={e => setPw(s => ({ ...s, confirm: e.target.value }))} style={inp} />
+        <PasswordInput placeholder="Current password" value={pw.cur} onChange={e => setPw(s => ({ ...s, cur: e.target.value }))} style={inp} />
+        <PasswordInput placeholder="New password (min 8)" value={pw.next} onChange={e => setPw(s => ({ ...s, next: e.target.value }))} style={inp} />
+        <PasswordInput placeholder="Confirm new password" value={pw.confirm} onChange={e => setPw(s => ({ ...s, confirm: e.target.value }))} style={inp} />
         <button onClick={changePassword} disabled={busy || !pw.cur || !pw.next} style={btn}>{busy ? 'Saving…' : 'Update password'}</button>
       </div>
     </div>

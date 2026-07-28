@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { setSession, PLATFORM_TENANT_ID, type Session } from '../auth'
+import PasswordInput from '../components/PasswordInput'
 import { ThemeToggle, type Theme } from '../theme'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
@@ -80,7 +81,7 @@ export default function Login({ onLogin, theme, toggle }: { onLogin: (s: Session
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input type="email" placeholder="Email" value={form.email} autoComplete="username"
             onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required style={inp} />
-          <input type="password" placeholder="Password" value={form.password} autoComplete="current-password"
+          <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
             onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />
           {needsMFA && (
             <input type="text" inputMode="numeric" pattern="\d{6}" placeholder="Authenticator code"

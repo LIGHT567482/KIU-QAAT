@@ -84,6 +84,21 @@ object SessionStore {
     fun saveHotspotIp(ip: String?) { if (::prefs.isInitialized) prefs.edit().putString("hotspot_ip", ip?.trim()?.takeIf { it.isNotBlank() }).apply() }
     fun hotspotIp(): String? = if (::prefs.isInitialized) prefs.getString("hotspot_ip", null) else null
 
+    // System-hotspot mode toggle + the cohort-named SSID/password the coordinator configured, so
+    // the choice and the join QR survive an app restart (they set the same hotspot each day).
+    fun saveSystemHotspot(enabled: Boolean, ssid: String?, pass: String?) {
+        if (!::prefs.isInitialized) return
+        prefs.edit().putBoolean("sys_hotspot", enabled)
+            .putString("sys_ssid", ssid?.trim()?.takeIf { it.isNotBlank() })
+            .putString("sys_pass", pass?.takeIf { it.isNotBlank() }).apply()
+    }
+    fun restoreSystemHotspot() {
+        if (!::prefs.isInitialized) return
+        AppState.useSystemHotspot = prefs.getBoolean("sys_hotspot", false)
+        AppState.systemHotspotSsid = prefs.getString("sys_ssid", null)
+        AppState.systemHotspotPass = prefs.getString("sys_pass", null)
+    }
+
     /** Restore the session SCALARS into AppState (safe on the main thread — no DB). The
      *  cached manifest is hydrated separately (loadManifest) off the main thread.
      *  @return true if a session was restored. */
@@ -100,6 +115,7 @@ object SessionStore {
         AppState.coordinatorEmail = prefs.getString("email", null)
         AppState.role = prefs.getString("role", null)
         AppState.branding = restoreBranding()   // tenant identity shows offline too
+        restoreSystemHotspot()                  // hotspot-mode choice + cohort SSID/password
         return true
     }
 

@@ -395,11 +395,17 @@ function PalettePreview({ form }: { form: typeof EMPTY_FORM }) {
 function Field({ label, value, onChange, type = 'text', placeholder }: {
   label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string
 }) {
+  const [show, setShow] = useState(false)
+  const isPw = type === 'password'
   return (
     <label style={{ display: 'block' }}>
       <div style={labelStyle}>{label}</div>
-      <input type={type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
-        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, boxSizing: 'border-box' }} />
+      <div style={{ position: 'relative' }}>
+        <input type={isPw && show ? 'text' : type} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
+          style={{ width: '100%', padding: '8px 10px', paddingRight: isPw ? 58 : 10, borderRadius: 6, border: '1px solid var(--border)', fontSize: 14, boxSizing: 'border-box' }} />
+        {isPw && <button type="button" tabIndex={-1} onClick={() => setShow(s => !s)}
+          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#64748b', padding: 4 }}>{show ? 'Hide' : 'Show'}</button>}
+      </div>
     </label>
   )
 }

@@ -7,7 +7,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ug.qaat.coordinator.R
@@ -49,8 +48,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        PasswordField(password, { password = it }, "Password", modifier = Modifier.fillMaxWidth())
         if (needsMfa) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(totp, { totp = it }, label = { Text("Authenticator code") }, singleLine = true, modifier = Modifier.fillMaxWidth())

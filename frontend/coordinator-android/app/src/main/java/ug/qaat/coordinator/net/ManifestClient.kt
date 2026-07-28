@@ -48,9 +48,11 @@ class ManifestClient(private val dao: AppDao) {
         val units = mutableListOf<UnitInfo>()
         val sessions = j.optJSONArray("sessions")
         if (sessions != null) for (i in 0 until sessions.length()) {
-            val s = sessions.getJSONObject(i)
+            val s = sessions.optJSONObject(i) ?: continue
+            val unitId = s.optString("unit_id", "")
+            if (unitId.isBlank()) continue
             units.add(UnitInfo(
-                s.getString("unit_id"), s.optString("unit_name", s.getString("unit_id")),
+                unitId, s.optString("unit_name", unitId),
                 s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
             ))
         }
@@ -58,14 +60,19 @@ class ManifestClient(private val dao: AppDao) {
         val rosterByUnit = LinkedHashMap<String, List<RosterEntity>>()
         val roster = j.optJSONObject("roster")
         if (roster != null) for (unitId in roster.keys()) {
-            val arr = roster.getJSONArray(unitId)
+            // A unit with no enrolled students comes back as null (or is simply absent) —
+            // optJSONArray returns null instead of throwing, so ONE empty unit no longer
+            // aborts the whole manifest parse. Treat it as an empty roster and move on.
+            val arr = roster.optJSONArray(unitId) ?: continue
             val rows = ArrayList<RosterEntity>(arr.length())
             for (i in 0 until arr.length()) {
-                val e = arr.getJSONObject(i)
-                rows.add(RosterEntity(unitId, e.getString("student_id_hash"), e.optString("qr_serial_number", "")))
+                val e = arr.optJSONObject(i) ?: continue
+                val hash = e.optString("student_id_hash", "")
+                if (hash.isBlank()) continue
+                rows.add(RosterEntity(unitId, hash, e.optString("qr_serial_number", "")))
             }
             rosterByUnit[unitId] = rows
-            dao.upsertRoster(rows)   // cache for offline validation
+            if (rows.isNotEmpty()) dao.upsertRoster(rows)   // cache for offline validation
         }
         Parsed(academicYear, publicKey, hashKey, units, rosterByUnit)
         }

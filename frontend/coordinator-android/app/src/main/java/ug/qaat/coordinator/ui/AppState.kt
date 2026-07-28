@@ -43,6 +43,9 @@ object AppState {
 
     // Daily manifest (config inherited from the cloud while online).
     var manifest by mutableStateOf<ug.qaat.coordinator.net.ManifestClient.Parsed?>(null)
+    // Why the last manifest fetch failed (HTTP code / network reason), so a failed
+    // refresh explains itself instead of silently showing "hasn't loaded yet".
+    var manifestError by mutableStateOf<String?>(null)
 
     // Tenant branding (logo + colours), applied app-wide after login.
     var branding by mutableStateOf<ug.qaat.coordinator.net.BrandingClient.Branding?>(null)
@@ -84,4 +87,19 @@ object AppState {
     // gateway (192.168.49.1); detectApIp() confirms/overrides it once the hotspot is up.
     var inRoomIp by mutableStateOf(LOCAL_HOTSPOT_IP)
     val inRoomBaseUrl: String get() = "http://$inRoomIp:8080"
+
+    // ── System-hotspot mode: the cohort-named Wi-Fi the coordinator sets up on their OWN phone.
+    // Android forbids an app from setting the system hotspot's name/password, so the coordinator
+    // types them into Android settings; we capture the SAME values here so the projected
+    // "Connect to Wi-Fi" QR encodes them and students can scan-join. Persisted across sessions.
+    var systemHotspotSsid by mutableStateOf<String?>(null)
+    var systemHotspotPass by mutableStateOf<String?>(null)
+
+    /** A Wi-Fi-friendly SSID suggested from the cohort label (spaces/·/symbols stripped, ≤28 chars),
+     *  so every coordinator's hotspot is identifiable per-cohort in a shared room. */
+    fun suggestedSsid(): String {
+        val base = (cohortLabel ?: "").ifBlank { "QAAT-Room" }
+        val clean = base.replace("·", "-").replace(Regex("\\s+"), "").replace(Regex("[^A-Za-z0-9-]"), "")
+        return clean.trim('-').take(28).ifBlank { "QAAT-Room" }
+    }
 }

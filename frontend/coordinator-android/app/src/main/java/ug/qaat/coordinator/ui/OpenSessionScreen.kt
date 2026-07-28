@@ -31,20 +31,95 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Take attendance", style = MaterialTheme.typography.titleLarge)
 
-        if (AppState.manifest == null) { Text("No manifest — sign in while online first."); return }
+        if (AppState.manifest == null) {
+            Text("Today's schedule hasn't loaded yet. Tap the ⟳ at the top-right to refresh " +
+                "(needs internet once — your session may have expired and is being renewed).",
+                color = MaterialTheme.colorScheme.error)
+            AppState.manifestError?.let { reason ->
+                Spacer(Modifier.height(8.dp))
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Last refresh failed: $reason",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(10.dp))
+                }
+            }
+            return
+        }
         if (units.isEmpty()) { Text("No units scheduled for today in the manifest."); return }
 
         Spacer(Modifier.height(12.dp))
         Text("1. Start the room Wi-Fi + server", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "The app creates the room's Wi-Fi and the check-in server at a fixed address " +
-                "(${AppState.LOCAL_HOTSPOT_IP}) — the same on every coordinator phone, so nothing to " +
-                "configure. Students join by scanning the “Connect to Wi-Fi” QR shown on the next screen.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+
+        // Two ways to bring up the room's Wi-Fi. Automatic (app-owned) needs no setup but gets an
+        // OS-assigned random name; cohort-named uses the coordinator's OWN phone hotspot, which
+        // they name after the cohort with a password they choose (essential in a shared room with
+        // several coordinators). Persisted so the choice sticks.
+        var systemMode by remember { mutableStateOf(AppState.useSystemHotspot) }
         Spacer(Modifier.height(6.dp))
-        Button(onClick = { AppState.useSystemHotspot = false; ctx.startForegroundService(Intent(ctx, SessionService::class.java)) }) {
-            Text(if (AppState.serverReady) "Server running" else "Start room Wi-Fi + server")
+        Row(Modifier.fillMaxWidth().selectable(!systemMode) { systemMode = false }.padding(vertical = 4.dp)) {
+            RadioButton(!systemMode, { systemMode = false })
+            Spacer(Modifier.width(6.dp))
+            Column { Text("Automatic (recommended)", fontWeight = FontWeight.SemiBold)
+                Text("The app creates the Wi-Fi + server at ${AppState.LOCAL_HOTSPOT_IP}. No setup — name/password are picked by Android.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Row(Modifier.fillMaxWidth().selectable(systemMode) { systemMode = true }.padding(vertical = 4.dp)) {
+            RadioButton(systemMode, { systemMode = true })
+            Spacer(Modifier.width(6.dp))
+            Column { Text("Use my phone's hotspot, named after the cohort", fontWeight = FontWeight.SemiBold)
+                Text("You turn on your phone's own hotspot with a cohort name + password you choose. Best for shared rooms.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+
+        var sysSsid by remember { mutableStateOf(AppState.systemHotspotSsid?.takeIf { it.isNotBlank() } ?: AppState.suggestedSsid()) }
+        var sysPass by remember { mutableStateOf(AppState.systemHotspotPass.orEmpty()) }
+
+        if (systemMode) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Set up your phone's hotspot with EXACTLY these, then turn it on:",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(sysSsid, { sysSsid = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Wi-Fi name (SSID) — cohort") })
+                    Spacer(Modifier.height(6.dp))
+                    PasswordField(sysPass, { sysPass = it }, "Wi-Fi password (min 8)", modifier = Modifier.fillMaxWidth())
+                    if (sysPass.isNotEmpty() && sysPass.length < 8)
+                        Text("Password must be at least 8 characters.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Android can't set these for the app, so type them into your phone's Hotspot settings yourself. We use the same values for the students' “Connect to Wi-Fi” QR.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = {
+                        runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) }
+                    }) { Text("Open hotspot settings") }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        val sysReady = !systemMode || (sysSsid.isNotBlank() && sysPass.length >= 8)
+        Button(
+            enabled = sysReady,
+            onClick = {
+                AppState.useSystemHotspot = systemMode
+                if (systemMode) {
+                    AppState.systemHotspotSsid = sysSsid.trim(); AppState.systemHotspotPass = sysPass
+                    // Feed the projected join-QR so students can scan to join the cohort hotspot.
+                    AppState.hotspotSsid = sysSsid.trim(); AppState.hotspotPass = sysPass
+                }
+                SessionStore.saveSystemHotspot(systemMode, sysSsid, sysPass)
+                ctx.startForegroundService(Intent(ctx, SessionService::class.java))
+            },
+        ) {
+            Text(when {
+                AppState.serverReady -> "Server running"
+                systemMode -> "I've turned on my hotspot — start server"
+                else -> "Start room Wi-Fi + server"
+            })
         }
         AppState.serverError?.let { err ->
             Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small,

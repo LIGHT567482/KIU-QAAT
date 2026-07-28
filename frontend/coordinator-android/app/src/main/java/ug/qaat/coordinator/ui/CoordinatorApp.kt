@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
@@ -24,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,14 +45,69 @@ private val tabs = listOf(
     Tab("audit", "Sync", "⟳"),
 )
 
+/**
+ * Silently re-login with the saved credentials and swap in a fresh token — so an EXPIRED session
+ * (restored on launch) self-heals instead of leaving the app "logged in" with a dead token that
+ * 401s every call ("No manifest — sign in while online"). Returns the new token, or null if we
+ * can't (no saved creds, MFA required, or offline). @see SessionStore.credentials.
+ */
+private suspend fun refreshTokenSilently(): String? {
+    val (email, pw) = SessionStore.credentials() ?: return null
+    return runCatching {
+        val res = AuthClient().login(email, pw, null) { } ?: return@runCatching null   // MFA → can't do silently
+        AppState.token = res.token; AppState.userId = res.userId; AppState.tenantId = res.tenantId
+        AppState.deviceBindingKey = res.deviceBindingKey
+        SessionStore.saveSession(res.token, res.userId, res.tenantId, res.deviceBindingKey, res.fullName, email, res.role, res.title, res.registrationNo)
+        res.token
+    }.getOrNull()
+}
+
+/** Turn a manifest-fetch failure into a plain-language reason for the coordinator, so a
+ *  failed ⟳ says WHY instead of silently leaving "schedule hasn't loaded". */
+private fun describeManifestFailure(t: Throwable?): String {
+    val msg = t?.message.orEmpty()
+    val cls = t?.let { it::class.java.simpleName }.orEmpty()
+    return when {
+        // Our own require(): "manifest fetch failed: <code>".
+        "401" in msg -> "Your session has expired and couldn't be renewed. Sign out and sign in again while on internet."
+        "403" in msg -> "This account isn't a coordinator on the server, or has no access to today's schedule."
+        "500" in msg -> "The server couldn't build today's schedule (no active academic year set for your institution)."
+        Regex("fetch failed: 5\\d\\d").containsMatchIn(msg) -> "The server is waking up or is temporarily down — wait ~30s and tap ⟳ again."
+        // Ktor / JVM network exceptions (no imports needed — match by name).
+        "UnresolvedAddress" in cls || "UnknownHost" in cls -> "No internet. You must be on a network that reaches the cloud (NOT the room hotspot) to load the schedule."
+        "Timeout" in cls || "ConnectException" in cls || "Socket" in cls ->
+            "Couldn't reach the server (timed out). Check internet and retry; the cloud may be starting up."
+        t == null -> "Couldn't renew your session automatically. Sign out and sign in again while online."
+        else -> "Couldn't load the schedule: ${msg.ifBlank { cls.ifBlank { "unknown error" } }}"
+    }
+}
+
 /** Pull current data (branding + manifest + cohort) + upload pending attendance. Bumps
  *  refreshTick so screens reload. Driven by the top-nav ⟳ icon and on every open. */
 private suspend fun refreshAll() {
-    val t = AppState.token ?: return
+    var t = AppState.token ?: return
     AppState.refreshing = true
     val dao = Graph.db.dao()
+    // The manifest is the critical one. If it fails (most often an EXPIRED token → 401), try a
+    // silent re-login once and retry, so the app recovers on its own instead of showing "No manifest".
+    var lastErr: Throwable? = null
+    val manifest = runCatching { ManifestClient(dao).fetchAndStore(t) }.getOrElse { first ->
+        if (first is CancellationException) throw first          // normal cancellation — not a fetch failure
+        val fresh = refreshTokenSilently()
+        if (fresh != null) {
+            t = fresh
+            runCatching { ManifestClient(dao).fetchAndStore(t) }.getOrElse { retry ->
+                if (retry is CancellationException) throw retry
+                lastErr = retry; null
+            }
+        } else { lastErr = first; null }
+    }
+    if (manifest != null) {
+        AppState.manifest = manifest; SessionStore.saveManifest(manifest); AppState.manifestError = null
+    } else {
+        AppState.manifestError = describeManifestFailure(lastErr)
+    }
     runCatching { BrandingClient(t).fetch()?.let { AppState.branding = it; runCatching { SessionStore.saveBranding(it) } } }
-    runCatching { val m = ManifestClient(dao).fetchAndStore(t); AppState.manifest = m; SessionStore.saveManifest(m) }
     runCatching {
         DashboardClient().overview(t).offering?.let {
             AppState.cohortLabel = listOf(it.courseName, it.sessionType, "Year ${it.studyYear}", "Sem ${it.semester}", it.level, it.intake)
@@ -71,7 +126,10 @@ fun CoordinatorApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.b
     AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
     if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}) ; return@MaterialTheme }
 
-    LaunchedEffect(AppState.token) {
+    // Keyed on loggedIn (a stable Boolean), NOT the token value — a silent token refresh
+    // inside refreshAll() must not cancel-and-restart this effect ("coroutine scope left
+    // the composition"). It fires once when the session appears, then refreshAll owns retries.
+    LaunchedEffect(AppState.loggedIn) {
         val t = AppState.token ?: return@LaunchedEffect
         if (AppState.manifest == null) {
             AppState.manifest = withContext(Dispatchers.IO) { runCatching { SessionStore.loadManifest(Graph.db.dao()) }.getOrNull() }
@@ -198,7 +256,6 @@ private fun ChangePasswordDialog(onClose: () -> Unit) {
     var err by remember { mutableStateOf<String?>(null) }
     var done by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val pw = PasswordVisualTransformation()
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -207,11 +264,11 @@ private fun ChangePasswordDialog(onClose: () -> Unit) {
             if (done) Text("✓ Password changed.", color = MaterialTheme.colorScheme.primary)
             else Column {
                 err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                OutlinedTextField(cur, { cur = it }, label = { Text("Current password") }, singleLine = true, visualTransformation = pw, modifier = Modifier.fillMaxWidth())
+                PasswordField(cur, { cur = it }, "Current password", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.padding(4.dp))
-                OutlinedTextField(next, { next = it }, label = { Text("New password (min 8)") }, singleLine = true, visualTransformation = pw, modifier = Modifier.fillMaxWidth())
+                PasswordField(next, { next = it }, "New password (min 8)", modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.padding(4.dp))
-                OutlinedTextField(confirm, { confirm = it }, label = { Text("Confirm new password") }, singleLine = true, visualTransformation = pw, modifier = Modifier.fillMaxWidth())
+                PasswordField(confirm, { confirm = it }, "Confirm new password", modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {

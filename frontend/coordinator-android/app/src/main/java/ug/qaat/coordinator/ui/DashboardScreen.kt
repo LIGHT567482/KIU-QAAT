@@ -190,10 +190,11 @@ private fun TimetableView(units: List<DashboardClient.Unit>, sessionType: String
     val today = LocalDate.now().dayOfWeek.value
     var lo = 8; var hi = 19
     scheduled.forEach { val h = ttHourOf(it.start); if (h < lo) lo = h; if (h + ttSpan(it.durationMin) > hi) hi = h + ttSpan(it.durationMin) }
+    lo = lo.coerceIn(0, 23); hi = hi.coerceIn(lo + 1, 24)   // clamp to a real clock — no 24:00/25:00 rows
     val hours = (lo until hi).toList()
     val rowH = 40.dp
     val dayW = 108.dp
-    val timeW = 40.dp
+    val timeW = 46.dp
     val brand = MaterialTheme.colorScheme.primary
     val line = MaterialTheme.colorScheme.outlineVariant
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -207,7 +208,7 @@ private fun TimetableView(units: List<DashboardClient.Unit>, sessionType: String
                 }
                 hours.forEach { h ->
                     Box(Modifier.width(timeW).height(rowH), contentAlignment = Alignment.TopCenter) {
-                        Text("%02d:00".format(h), fontSize = 10.sp, color = muted, modifier = Modifier.padding(top = 2.dp))
+                        Text(ampmHour(h), fontSize = 9.sp, color = muted, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
             }
@@ -381,6 +382,14 @@ fun StandbyCard(client: DashboardClient, token: String?) {
 private fun EmptyNote(msg: String) {
     Text(msg, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp,
         modifier = Modifier.fillMaxWidth().padding(20.dp))
+}
+
+/** Whole-hour axis label: 8 → "8 AM", 12 → "12 PM", 13 → "1 PM", 24 → "12 AM". */
+private fun ampmHour(h: Int): String {
+    val hh = ((h % 24) + 24) % 24
+    val suffix = if (hh < 12) "AM" else "PM"
+    val h12 = if (hh % 12 == 0) 12 else hh % 12
+    return "$h12 $suffix"
 }
 
 /** "14:30" → "2:30 PM". */
