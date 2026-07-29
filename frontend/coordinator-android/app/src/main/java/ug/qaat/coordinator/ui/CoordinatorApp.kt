@@ -126,21 +126,25 @@ private suspend fun refreshAll() {
 @Composable
 fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
     AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
-    if (!AppState.loggedIn) { LoginScreen(onLoggedIn = {}); return@MaterialTheme }
-    // First sign-in with the seeded default password → force a private one before ANY role UI.
-    if (AppState.forcePasswordChange) {
-        Surface(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                Text("Securing your account…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // One full-screen Box so the faint institution-logo watermark sits on EVERY page (login,
+    // the mandatory password change, and all three role experiences).
+    Box(Modifier.fillMaxSize()) {
+        when {
+            !AppState.loggedIn -> LoginScreen(onLoggedIn = {})
+            // First sign-in with the seeded default password → force a private one before ANY role UI.
+            AppState.forcePasswordChange -> {
+                Surface(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text("Securing your account…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                ChangePasswordDialog(onClose = { AppState.forcePasswordChange = false }, mandatory = true)
             }
+            AppState.role == "STUDENT" -> StudentRoleApp()
+            AppState.role == "LECTURER" -> LecturerApp()
+            else -> CoordinatorApp()          // COORDINATOR + admin roles → the in-room hub
         }
-        ChangePasswordDialog(onClose = { AppState.forcePasswordChange = false }, mandatory = true)
-        return@MaterialTheme
-    }
-    when (AppState.role) {
-        "STUDENT" -> StudentRoleApp()
-        "LECTURER" -> LecturerApp()
-        else -> CoordinatorApp()          // COORDINATOR + admin roles → the in-room hub
+        BrandWatermark(AppState.branding)   // faint, non-interactive; drawn over every screen
     }
 }
 

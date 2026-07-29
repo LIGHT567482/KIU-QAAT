@@ -75,6 +75,18 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
     }
 }
 
+/** A faint, centered institution-logo watermark for EVERY app screen. It's a plain Image with
+ *  no pointer handler, so it is not a hit target — touches pass straight through to the UI
+ *  beneath it. Place it as the last child of a full-screen Box so it overlays all content. */
+@Composable
+fun BoxScope.BrandWatermark(branding: BrandingClient.Branding?) {
+    val bmp = rememberDataUrlBitmap(branding?.logoUrl.orEmpty()) ?: return
+    Image(
+        bmp, contentDescription = null, contentScale = ContentScale.Fit, alpha = 0.05f,
+        modifier = Modifier.align(Alignment.Center).fillMaxWidth(0.6f),
+    )
+}
+
 @Composable
 private fun rememberDataUrlBitmap(url: String): androidx.compose.ui.graphics.ImageBitmap? {
     if (!url.startsWith("data:")) return null
