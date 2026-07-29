@@ -225,7 +225,7 @@ fun CoordinatorApp() {
                     NavigationBarItem(
                         selected = selected,
                         onClick = { nav.navigate(t.route) { launchSingleTop = true; restoreState = true } },
-                        icon = { Text(t.icon) }, label = { Text(t.label) }, colors = itemColors,
+                        icon = { TabGlyph(t.icon) }, label = { Text(t.label) }, colors = itemColors,
                     )
                 }
             }

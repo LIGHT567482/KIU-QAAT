@@ -14,10 +14,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ug.qaat.coordinator.R
 import ug.qaat.coordinator.net.BrandingClient
 
 /** Parse "#RRGGBB" → Color, or null. */
@@ -72,6 +74,22 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
                 Text((branding?.name ?: "KIU").take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary)
             }
         }
+    }
+}
+
+/** Bottom-nav tab icon: the app logo rendered beside the tab's own glyph, so every tab link in
+ *  every role window (student / lecturer / coordinator) visibly bears the KIU QAAT logo. */
+@Composable
+fun TabGlyph(glyph: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Image(
+            painter = painterResource(R.drawable.qaat_logo),
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(15.dp),
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(glyph, fontSize = 13.sp)
     }
 }
 

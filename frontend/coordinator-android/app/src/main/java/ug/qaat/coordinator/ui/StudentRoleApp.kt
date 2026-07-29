@@ -92,11 +92,11 @@ fun StudentRoleApp() {
                     unselectedIconColor = onNav.copy(alpha = .65f), unselectedTextColor = onNav.copy(alpha = .65f),
                     indicatorColor = onNav.copy(alpha = .18f),
                 ) else NavigationBarItemDefaults.colors()
-                NavigationBarItem(tab == 0, { tab = 0 }, icon = { Text("✓") }, label = { Text("Attend") }, colors = itemColors)
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { Text("📊") }, label = { Text("Attendance") }, colors = itemColors)
+                NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph("✓") }, label = { Text("Attend") }, colors = itemColors)
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph("📊") }, label = { Text("Attendance") }, colors = itemColors)
                 NavigationBarItem(tab == 2, { tab = 2 }, colors = itemColors, label = { Text("Alerts") },
-                    icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { Text("🔔") } else Text("🔔") })
-                NavigationBarItem(tab == 3, { tab = 3 }, icon = { Text("☰") }, label = { Text("Profile") }, colors = itemColors)
+                    icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph("🔔") } else TabGlyph("🔔") })
+                NavigationBarItem(tab == 3, { tab = 3 }, icon = { TabGlyph("☰") }, label = { Text("Profile") }, colors = itemColors)
             }
         },
     ) { pad ->
