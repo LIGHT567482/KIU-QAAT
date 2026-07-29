@@ -43,6 +43,7 @@ private val tabs = listOf(
     Tab("session", "Attendance", "▶"),
     Tab("absentees", "Absentees", "⚠"),
     Tab("trends", "Trends", "📈"),
+    Tab("alerts", "Alerts", "🔔"),
     Tab("audit", "Sync", "⟳"),
 )
 
@@ -236,6 +237,7 @@ fun CoordinatorApp() {
             composable("open") { OpenSessionScreen(onOpened = { nav.navigate("session") { popUpTo("dashboard"); launchSingleTop = true } }) }
             composable("absentees") { AbsenteeScreen() }
             composable("trends") { TrendsScreen() }
+            composable("alerts") { CoordinatorAlertsScreen() }
             composable("audit") { SyncAuditScreen() }
         }
     }
@@ -283,6 +285,29 @@ private fun InfoLine(label: String, value: String) {
     Spacer(Modifier.height(6.dp))
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text(value, fontSize = 13.sp)
+}
+
+/** Coordinator notifications: read messages (e.g. from a lecturer) and send to his cohort's
+ *  students or to his course's lecturers. */
+@Composable
+private fun CoordinatorAlertsScreen() {
+    val scope = rememberCoroutineScope()
+    var inbox by remember { mutableStateOf<List<ug.qaat.coordinator.net.NotificationClient.Notif>?>(null) }
+    var composing by remember { mutableStateOf(false) }
+    fun load() { scope.launch { inbox = ug.qaat.coordinator.net.NotificationClient().inbox() } }
+    LaunchedEffect(Unit) { load() }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Button(onClick = { composing = !composing }) { Text(if (composing) "Close" else "✎ New") }
+        }
+        if (composing) NotificationComposer(
+            audiences = listOf("STUDENTS" to "My students", "LECTURERS" to "Lecturers"),
+            onSent = { composing = false; load() },
+        )
+        Spacer(Modifier.height(8.dp))
+        NotificationInboxList(inbox) { load() }
+    }
 }
 
 /** Change-password dialog. In [mandatory] mode (first sign-in with the seeded default password)
