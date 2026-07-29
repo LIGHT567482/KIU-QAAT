@@ -203,6 +203,23 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleDQADirector)).
 			Post("/api/v1/eligibility/clearance-token", sessionProxy)
 
+		// ── DQA ⇄ QA-officer messaging (in-app inbox) ────────────────────────
+		// The DQA director shares reports/notifications to QA officers (all / by
+		// department / by college-school); QA officers reply to the DQA. Optional
+		// file attachment. adminPool + explicit tenant scoping in the handlers.
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+			Post("/api/v1/messages", handlers.SendQAMessage(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+			Get("/api/v1/messages", handlers.ListQAMessages(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+			Get("/api/v1/messages/unread-count", handlers.UnreadQAMessageCount(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleDQADirector)).
+			Get("/api/v1/messages/audiences", handlers.QAAudiences(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+			Post("/api/v1/messages/{id}/read", handlers.MarkQAMessageRead(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+			Get("/api/v1/messages/{id}/attachment", handlers.QAMessageAttachment(adminPool))
+
 		// ── Branding (any authenticated role: own tenant's logo + motto) ─────
 		// Feeds the top-left header on every dashboard.
 		r.Get("/api/v1/branding", handlers.GetBranding(pool))

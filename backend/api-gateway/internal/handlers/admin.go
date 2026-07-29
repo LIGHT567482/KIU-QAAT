@@ -258,7 +258,7 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 
 		rows, err := pool.Query(r.Context(), `
 			SELECT user_id, email, role, full_name, is_active, last_login_at, created_at,
-			       COALESCE(coordinator_code, '')
+			       COALESCE(coordinator_code, ''), COALESCE(department, ''), COALESCE(school, '')
 			FROM users WHERE tenant_id = $1 ORDER BY role, email`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -275,13 +275,15 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 			LastLoginAt     *string `json:"last_login_at"`
 			CreatedAt       string  `json:"created_at"`
 			CoordinatorCode string  `json:"coordinator_code"`
+			Department      string  `json:"department"`
+			School          string  `json:"school"`
 		}
 		var users []user
 		for rows.Next() {
 			var u user
 			var lastLogin *time.Time
 			var createdAt time.Time
-			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode) //nolint:errcheck
+			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode, &u.Department, &u.School) //nolint:errcheck
 			u.CreatedAt = createdAt.Format(time.RFC3339)
 			if lastLogin != nil {
 				s := lastLogin.Format(time.RFC3339)
@@ -311,14 +313,24 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			RegistrationNumber string `json:"registration_number"`
 			Title              string `json:"title"`
 			Gender             string `json:"gender"`
+			Department         string `json:"department"`
+			School             string `json:"school"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
 			return
 		}
 		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+		req.Department = strings.TrimSpace(req.Department)
+		req.School = strings.TrimSpace(req.School)
 		if req.Email == "" || req.Password == "" || req.Role == "" || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "email, password, role, full_name required"))
+			return
+		}
+		// QA officers act as ambassadors under a department, so it is mandatory for them
+		// (the school/college stays optional). Other roles may leave both blank.
+		if req.Role == "QA_OFFICER" && req.Department == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "department is required for a QA officer"))
 			return
 		}
 
@@ -370,11 +382,11 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 		for attempt := 0; attempt < 6; attempt++ {
 			err2 = pool.QueryRow(r.Context(), `
 				INSERT INTO users (tenant_id, email, password_hash, role, full_name, is_active, coordinator_code,
-				                   phone, whatsapp, registration_number, title, gender)
-				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''))
+				                   phone, whatsapp, registration_number, title, gender, department, school)
+				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), NULLIF($13,''))
 				RETURNING user_id::text`,
 				tenantID, req.Email, string(hash), req.Role, req.FullName, coordCode,
-				req.Phone, req.Whatsapp, req.RegistrationNumber, req.Title, req.Gender,
+				req.Phone, req.Whatsapp, req.RegistrationNumber, req.Title, req.Gender, req.Department, req.School,
 			).Scan(&userID)
 			if err2 != nil && coordCode != nil && strings.Contains(err2.Error(), "coordinator_code") {
 				c := genCoordinatorCode() // code clash — regenerate and retry

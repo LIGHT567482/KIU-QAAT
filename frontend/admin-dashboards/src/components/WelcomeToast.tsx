@@ -15,7 +15,7 @@ export default function WelcomeToast() {
   if (!msg) return null
   return (
     <div style={{
-      position: 'fixed', top: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+      position: 'fixed', bottom: 18, right: 18, zIndex: 9999,
       background: 'var(--brand, #1a7a3f)', color: '#fff', padding: '10px 20px', borderRadius: 10,
       boxShadow: '0 8px 24px rgba(0,0,0,.18)', fontWeight: 600, fontSize: 14,
     }}>{msg}</div>

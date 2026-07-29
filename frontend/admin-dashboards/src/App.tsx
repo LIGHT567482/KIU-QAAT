@@ -35,6 +35,7 @@ import AdminReports from './pages/admin/AdminReports'
 import DashLecturerAttendance from './pages/shared/DashLecturerAttendance'
 import QAStudentAttendance from './pages/qa/QAStudentAttendance'
 import Timetable from './pages/shared/Timetable'
+import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
 
 export default function App() {
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/dqa/punctuality"  element={<DQAPunctuality />} />
             <Route path="/dqa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/dqa/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/dqa/messages"            element={<Messages />} />
           </Route>
 
           {/* ── QA Officer ─────────────────────────────────────────────── */}
@@ -78,6 +80,7 @@ export default function App() {
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />
+            <Route path="/qa/messages"            element={<Messages />} />
           </Route>
 
           {/* ── Tenant Admin (own institution only) ────────────────────── */}

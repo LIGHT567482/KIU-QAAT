@@ -13,6 +13,7 @@ interface User {
   user_id: string; email: string; role: string
   full_name: string; is_active: boolean; last_login_at: string | null; created_at: string
   coordinator_code?: string
+  department?: string; school?: string
 }
 
 export default function AdminUsers() {
@@ -37,7 +38,7 @@ function UsersInner() {
   const GENDERS = ['', 'Male', 'Female', 'Other']
 
   const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '' })
+  const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [issuedCode, setIssuedCode] = useState<string | null>(null)
@@ -46,14 +47,15 @@ function UsersInner() {
     setSaving(true); setError(null)
     try {
       if (!form.local.trim()) throw new Error('Email username is required.')
+      if (form.role === 'QA_OFFICER' && !form.department.trim()) throw new Error('Department is required for a QA officer.')
       const email = `${form.local.trim().toLowerCase()}@${domain}`
       const res = await api.post(`/api/v1/admin/tenants/${tenantId}/users`, {
         email, password: form.password, role: form.role, full_name: form.full_name,
         phone: form.phone, whatsapp: form.whatsapp, registration_number: form.registration_number,
-        title: form.title, gender: form.gender,
+        title: form.title, gender: form.gender, department: form.department, school: form.school,
       }) as { coordinator_code?: string }
       setCreating(false)
-      setForm({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '' })
+      setForm({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
       setIssuedCode(res?.coordinator_code ?? null)
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
@@ -73,6 +75,11 @@ function UsersInner() {
 
   // Only the oversight roles belong on this page (coordinators/students excluded).
   const users = (status === 'ok' ? (data ?? []) : []).filter(u => MANAGED_ROLES.has(u.role))
+
+  // Datalist suggestions from departments/schools already in use (free-text, but guided).
+  const deptSuggestions = [...new Set((data ?? []).map(u => u.department).filter((d): d is string => !!d && d.trim() !== ''))].sort()
+  const schoolSuggestions = [...new Set((data ?? []).map(u => u.school).filter((s): s is string => !!s && s.trim() !== ''))].sort()
+  const qaMissingDept = form.role === 'QA_OFFICER' && !form.department.trim()
 
   return (
     <div>
@@ -125,11 +132,26 @@ function UsersInner() {
                 {GENDERS.map(g => <option key={g} value={g}>{g || '—'}</option>)}
               </select>
             </label>
+            <label>
+              <div style={labelStyle}>Department {form.role === 'QA_OFFICER' ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
+              <input list="dept-suggestions" value={form.department} placeholder="e.g. Computer Science"
+                onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${form.role === 'QA_OFFICER' && !form.department.trim() ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
+              <datalist id="dept-suggestions">{deptSuggestions.map(d => <option key={d} value={d} />)}</datalist>
+              {form.role === 'QA_OFFICER' && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>QA officers are placed under a department — required.</div>}
+            </label>
+            <label>
+              <div style={labelStyle}>College / School (optional)</div>
+              <input list="school-suggestions" value={form.school} placeholder="e.g. SOMAC"
+                onChange={e => setForm(f => ({ ...f, school: e.target.value }))}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
+              <datalist id="school-suggestions">{schoolSuggestions.map(s => <option key={s} value={s} />)}</datalist>
+            </label>
             <Field label="Phone (optional)"        value={form.phone}    onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <Field label="WhatsApp (optional)"      value={form.whatsapp} onChange={v => setForm(f => ({ ...f, whatsapp: v }))} />
             <Field label="Registration No. (optional)" value={form.registration_number} onChange={v => setForm(f => ({ ...f, registration_number: v }))} />
           </div>
-          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || !form.password} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || !form.password) ? 0.5 : 1 }}>
+          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || !form.password || qaMissingDept} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || !form.password || qaMissingDept) ? 0.5 : 1 }}>
             {saving ? 'Creating…' : 'Create User'}
           </button>
         </div>
@@ -150,7 +172,7 @@ function UsersInner() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Name', 'Email', 'Role', 'Last Login', 'Status', ''].map(h => (
+            {['Name', 'Email', 'Role', 'Dept / School', 'Last Login', 'Status', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -169,6 +191,9 @@ function UsersInner() {
                 <span style={{ background: roleColor(u.role).bg, color: roleColor(u.role).text, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>
                   {u.role.replace(/_/g, ' ')}
                 </span>
+              </td>
+              <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 12 }}>
+                {u.department || '—'}{u.school ? <span style={{ opacity: .7 }}> · {u.school}</span> : ''}
               </td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 12 }}>
                 {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}

@@ -80,6 +80,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Punctuality',         path: '/dqa/punctuality' },
     { label: 'Lecturer Attendance', path: '/dqa/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/dqa/student-attendance' },
+    { label: 'Messages',            path: '/dqa/messages' },
   ],
   QA_OFFICER: [
     { label: 'Live Sessions',       path: '/qa/live' },
@@ -89,6 +90,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Manual Correction',   path: '/qa/correction' },
     { label: 'Coordinator Health',  path: '/qa/coordinator-health' },
     { label: 'Device Reset',        path: '/qa/device-reset' },
+    { label: 'Messages',            path: '/qa/messages' },
   ],
   COORDINATOR: [],
   ADMIN: [], // built per-tenant in adminNav() — needs the admin's tenant_id.
