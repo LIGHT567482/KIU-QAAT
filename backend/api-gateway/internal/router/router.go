@@ -464,6 +464,14 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/lecturer/overview", handlers.LecturerOverview(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).
 			Get("/api/v1/lecturer/attendance", handlers.LecturerAttendance(adminPool))
+		// Lecturer roster & analytics: enrolled/attended students across cohorts, sessions,
+		// and per-session present/absent — all sortable/filterable by the app.
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Get("/api/v1/lecturer/roster", handlers.LecturerRoster(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Get("/api/v1/lecturer/sessions", handlers.LecturerSessions(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Get("/api/v1/lecturer/sessions/{session_id}/students", handlers.LecturerSessionStudents(adminPool))
 
 		// Admin — lecturer attendance logs + summary (own tenant)
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
