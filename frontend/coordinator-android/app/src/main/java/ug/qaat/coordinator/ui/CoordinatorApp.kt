@@ -319,10 +319,14 @@ internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = fals
                 busy = true; err = null
                 scope.launch {
                     err = AppState.token?.let { AuthClient().changePassword(it, cur, next) } ?: "Not signed in"
-                    if (err == null) { done = true; AppState.forcePasswordChange = false }
+                    if (err == null) {
+                        AppState.forcePasswordChange = false
+                        // Mandatory (temp-password) flow: save AND go straight into the dashboard.
+                        if (mandatory) onClose() else done = true
+                    }
                     busy = false
                 }
-            }) { Text(if (busy) "Saving…" else "Update") }
+            }) { Text(if (busy) "Saving…" else if (mandatory) "Save & proceed" else "Update") }
         },
         dismissButton = { if (!done && !mandatory) TextButton(onClick = onClose) { Text("Cancel") } },
     )

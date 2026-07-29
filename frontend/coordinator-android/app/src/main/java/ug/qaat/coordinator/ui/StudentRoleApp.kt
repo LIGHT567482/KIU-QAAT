@@ -11,8 +11,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import ug.qaat.coordinator.net.AuthClient
+import ug.qaat.coordinator.net.NotificationClient
 import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.student.CheckinClient
 import ug.qaat.coordinator.student.Discovery
@@ -32,6 +34,7 @@ private val REASONS = mapOf(
 
 /** The STUDENT experience inside the unified app: one-tap Attend + online My-attendance + Profile.
  *  Identity (reg-number, institution) comes from the login token via AppState. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StudentRoleApp() {
     val ctx = LocalContext.current
@@ -45,23 +48,120 @@ fun StudentRoleApp() {
         if (AppState.attendBlockUntil == 0L) AppState.attendBlockUntil = SessionStore.attendBlockUntil()
     }
 
+    val navColor = navBarColor(AppState.branding)
+    val onNav = navColor?.let { onNavColor(it) }
     var tab by remember { mutableStateOf(0) }
+    var unread by remember { mutableStateOf(0) }
+    // Refresh the unread badge whenever the tab changes (so it clears after reading the inbox).
+    LaunchedEffect(tab) { runCatching { unread = NotificationClient().unread() } }
+
     Scaffold(
+        containerColor = (if (!AppState.darkTheme) appBackgroundColor(AppState.branding) else null)
+            ?: MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                colors = if (navColor != null) TopAppBarDefaults.topAppBarColors(
+                    containerColor = navColor, titleContentColor = onNav!!, actionIconContentColor = onNav,
+                ) else TopAppBarDefaults.topAppBarColors(),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BrandLogo(AppState.branding, size = 30)
+                        Spacer(Modifier.width(8.dp))
+                        Text("KIU QAAT", fontWeight = FontWeight.Bold)
+                    }
+                },
+                actions = {
+                    // Light/dark toggle, like the coordinator app.
+                    IconButton(onClick = { AppState.darkTheme = !AppState.darkTheme; SessionStore.saveTheme(AppState.darkTheme) }) {
+                        Text(if (AppState.darkTheme) "☀" else "☾", fontSize = 18.sp, color = onNav ?: MaterialTheme.colorScheme.primary)
+                    }
+                },
+            )
+        },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(tab == 0, { tab = 0}, icon = { Text("✓") }, label = { Text("Attend") })
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { Text("📊") }, label = { Text("Attendance") })
-                NavigationBarItem(tab == 2, { tab = 2 }, icon = { Text("☰") }, label = { Text("Profile") })
+            NavigationBar(containerColor = navColor ?: MaterialTheme.colorScheme.surface) {
+                val itemColors = if (onNav != null) NavigationBarItemDefaults.colors(
+                    selectedIconColor = onNav, selectedTextColor = onNav,
+                    unselectedIconColor = onNav.copy(alpha = .65f), unselectedTextColor = onNav.copy(alpha = .65f),
+                    indicatorColor = onNav.copy(alpha = .18f),
+                ) else NavigationBarItemDefaults.colors()
+                NavigationBarItem(tab == 0, { tab = 0 }, icon = { Text("✓") }, label = { Text("Attend") }, colors = itemColors)
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { Text("📊") }, label = { Text("Attendance") }, colors = itemColors)
+                NavigationBarItem(tab == 2, { tab = 2 }, colors = itemColors, label = { Text("Alerts") },
+                    icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { Text("🔔") } else Text("🔔") })
+                NavigationBarItem(tab == 3, { tab = 3 }, icon = { Text("☰") }, label = { Text("Profile") }, colors = itemColors)
             }
         },
     ) { pad ->
-        Box(Modifier.padding(pad)) {
-            when (tab) {
-                0 -> StudentAttend()
-                1 -> StudentProgress()
-                else -> StudentProfile()
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            StudentHeader()
+            Box(Modifier.weight(1f)) {
+                when (tab) {
+                    0 -> StudentAttend()
+                    1 -> StudentProgress()
+                    2 -> StudentNotifications(onRead = { runCatching { } })
+                    else -> StudentProfile()
+                }
             }
         }
+    }
+}
+
+/** The KIU-branded page header: institution logo + KIU QAAT is in the top bar; here we show
+ *  WHO is signed in — student name, registration number and (when known) their cohort. */
+@Composable
+private fun StudentHeader() {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+        AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let {
+            Text(it, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        }
+        AppState.studentId?.let {
+            Text("Reg. no: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        AppState.cohortLabel?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** The student's notification inbox — messages from their lecturers and coordinator. Tapping a
+ *  message marks it read. Fully cloud-backed (fetched when the phone is online). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StudentNotifications(onRead: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<NotificationClient.Notif>?>(null) }
+    fun load() { scope.launch { items = NotificationClient().inbox() } }
+    LaunchedEffect(Unit) { load() }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        when {
+            items == null -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
+            items!!.isEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                items(items!!) { n ->
+                    var expanded by remember { mutableStateOf(false) }
+                    Surface(
+                        color = if (!n.read) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium,
+                        onClick = {
+                            expanded = !expanded
+                            if (!n.read) scope.launch { NotificationClient().markRead(n.id); load(); onRead() }
+                        },
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                            Text(n.subject, fontWeight = if (n.read) FontWeight.SemiBold else FontWeight.Bold)
+                            Text("from ${n.senderName} · ${n.senderRole.replace('_', ' ')}",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (expanded && n.body.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(n.body) }
+                        }
+                    }
+                }
+            }
+        }
+        OutlinedButton(onClick = { load() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Refresh") }
     }
 }
 
