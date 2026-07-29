@@ -201,8 +201,19 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	// NOT gate on a global semester. The academic year IS shared: restrict to it (units
 	// with a blank/NULL academic_year always show).
 	_ = activeSemester // per-cohort semester lives on the offering; no global gate
+
+	// One coordinator = one cohort. Resolve THIS coordinator's single offering and scope the
+	// ENTIRE manifest (unit list + roster) to it, so another cohort's units or students can
+	// never leak in. If stray data gave the coordinator more than one offering, take the most
+	// recent — the manifest still shows exactly one cohort.
+	var offeringID string
+	_ = conn.QueryRow(ctx, `
+		SELECT offering_id FROM course_offerings
+		WHERE coordinator_id = $1 AND tenant_id = $2
+		ORDER BY created_at DESC LIMIT 1`, coordinatorID, tenantID).Scan(&offeringID)
+
 	semFilter := "cu.year = o.study_year AND cu.semester = o.semester AND cu.level = o.level"
-	semArgs := []interface{}{coordinatorID, tenantID}
+	semArgs := []interface{}{offeringID, tenantID}
 	if activeAcademicYear != "" {
 		semFilter += fmt.Sprintf(" AND (cu.academic_year = $%d OR cu.academic_year IS NULL OR cu.academic_year = '')", len(semArgs)+1)
 		semArgs = append(semArgs, activeAcademicYear)
@@ -228,7 +239,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		    ORDER BY la.academic_year DESC
 		    LIMIT 1
 		) lec ON true
-		WHERE o.coordinator_id = $1
+		WHERE o.offering_id = $1
 		  AND o.tenant_id = $2
 		  AND %s
 		ORDER BY cu.year, cu.semester, cu.name`, semFilter), semArgs...)
@@ -266,9 +277,9 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 			FROM students_extended s
 			JOIN course_offerings o ON o.offering_id = s.offering_id
 			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
-			WHERE cu.unit_id = $1 AND o.coordinator_id = $2 AND s.tenant_id = $3
+			WHERE cu.unit_id = $1 AND o.offering_id = $2 AND s.tenant_id = $3
 			  AND s.enrollment_status = 'ACTIVE'`,
-			uid, coordinatorID, tenantID)
+			uid, offeringID, tenantID)
 		if err != nil {
 			continue
 		}
