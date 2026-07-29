@@ -35,12 +35,16 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 
 		var offeringID, courseID, courseName, level, intake, sessionType string
 		var studyYear, semester int
+		// One coordinator = ONE cohort. If a coordinator is (wrongly) attached to more than one
+		// offering, deterministically take the most recent so the dashboard shows exactly one
+		// cohort — never a mix of two cohorts that share the same course.
 		err = conn.QueryRow(r.Context(), `
 			SELECT o.offering_id::text, o.course_id, c.name,
 			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''), o.session_type
 			FROM course_offerings o
 			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
-			WHERE o.coordinator_id = $1 AND o.tenant_id = $2`,
+			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
+			ORDER BY o.created_at DESC LIMIT 1`,
 			coordID, tenantID).Scan(&offeringID, &courseID, &courseName, &studyYear, &semester, &level, &intake, &sessionType)
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, map[string]interface{}{"offering": nil, "units": []any{}})
@@ -159,14 +163,20 @@ func CoordinatorStudents(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// COHORT ISOLATION: return ONLY the students of this coordinator's own cohort (their
+		// single most-recent offering). Scoping strictly by offering_id means two coordinators
+		// who share the same course but run different cohorts never see each other's students.
 		rows, err := conn.Query(r.Context(), `
 			SELECT se.student_id, se.full_name, se.email,
 			       COALESCE(se.current_year,1), COALESCE(se.semester,1),
 			       COALESCE(se.academic_year,''), COALESCE(se.intake_session,''),
 			       se.enrollment_status::text
-			FROM course_offerings o
-			JOIN students_extended se ON se.offering_id = o.offering_id
-			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
+			FROM students_extended se
+			WHERE se.tenant_id = $2
+			  AND se.offering_id = (
+			        SELECT offering_id FROM course_offerings
+			        WHERE coordinator_id = $1 AND tenant_id = $2
+			        ORDER BY created_at DESC LIMIT 1)
 			ORDER BY se.full_name`, coordID, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -214,15 +224,19 @@ func CoordinatorAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Scoped to the coordinator's own cohort only (their single most-recent offering).
 		rows, err := conn.Query(r.Context(), `
 			SELECT se.student_id, se.full_name, s.unit_id, s.unit_name,
 			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
 			       COALESCE(t.attendance_threshold, 75)
-			FROM course_offerings o
-			JOIN students_extended se ON se.offering_id = o.offering_id
+			FROM students_extended se
 			JOIN student_attendance_summary s ON s.student_id = se.student_id AND s.tenant_id = se.tenant_id
-			JOIN tenants t ON t.tenant_id = o.tenant_id
-			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
+			JOIN tenants t ON t.tenant_id = se.tenant_id
+			WHERE se.tenant_id = $2
+			  AND se.offering_id = (
+			        SELECT offering_id FROM course_offerings
+			        WHERE coordinator_id = $1 AND tenant_id = $2
+			        ORDER BY created_at DESC LIMIT 1)
 			ORDER BY s.attendance_percentage ASC, se.full_name`, coordID, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -287,8 +301,10 @@ func CoordinatorLastRoster(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Roster scoped to the session's offering cohort (fall back to program for
-		// legacy sessions without an offering_id).
+		// COHORT ISOLATION: the roster is ALWAYS a single cohort — the session's own offering, or
+		// (for a legacy session with no offering_id) THIS coordinator's single most-recent offering.
+		// We must NOT fall back to the whole course: two coordinators who share the same course but
+		// run different cohorts would otherwise see each other's students mixed into one roster.
 		rows, err := conn.Query(r.Context(), `
 			SELECT se.student_id, se.full_name,
 			       CASE WHEN al.log_id IS NOT NULL THEN 'PRESENT' ELSE 'ABSENT' END,
@@ -296,12 +312,13 @@ func CoordinatorLastRoster(pool *pgxpool.Pool) http.HandlerFunc {
 			FROM students_extended se
 			LEFT JOIN attendance_logs al ON al.student_id = se.student_id AND al.session_id = $1
 			WHERE se.tenant_id = $2 AND se.enrollment_status = 'ACTIVE'
-			  AND ( ($3 <> '' AND se.offering_id::text = $3)
-			        OR ($3 = '' AND se.course_id = (
-			              SELECT cu.course_id FROM course_units cu
-			              JOIN sessions s ON s.unit_id = cu.unit_id WHERE s.session_id = $1)) )
+			  AND se.offering_id = COALESCE(
+			        NULLIF($3, '')::uuid,
+			        (SELECT offering_id FROM course_offerings
+			          WHERE coordinator_id = $4 AND tenant_id = $2
+			          ORDER BY created_at DESC LIMIT 1))
 			ORDER BY CASE WHEN al.log_id IS NOT NULL THEN 0 ELSE 1 END, se.full_name`,
-			sessionID, tenantID, offeringID)
+			sessionID, tenantID, offeringID, coordID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -423,8 +440,11 @@ func CoordinatorTrends(pool *pgxpool.Pool) http.HandlerFunc {
 			),
 			enrolled AS (
 			  SELECT COUNT(*)::int AS n FROM students_extended se
-			  JOIN course_offerings o ON o.offering_id = se.offering_id
-			  WHERE o.coordinator_id = $1 AND o.tenant_id = $2 AND se.enrollment_status = 'ACTIVE'
+			  WHERE se.tenant_id = $2 AND se.enrollment_status = 'ACTIVE'
+			    AND se.offering_id = (
+			          SELECT offering_id FROM course_offerings
+			          WHERE coordinator_id = $1 AND tenant_id = $2
+			          ORDER BY created_at DESC LIMIT 1)
 			)
 			SELECT to_char(wk,'YYYY-MM-DD'),
 			       COALESCE(SUM(attended),0)::int,

@@ -27,7 +27,11 @@ class MainActivity : ComponentActivity() {
         Net.init(applicationContext)      // load the embedded, pinned QAAT cert
         SessionStore.init(applicationContext)
         SessionStore.restoreTheme()
-        Net.setBaseUrl(SessionStore.serverUrl())   // runtime server override (local ⇄ cloud)
+        // Always use the built-in KIU cloud backend (BuildConfig.API_BASE) on every phone — no
+        // per-device server field anymore. Clear any override a previous build may have saved, so
+        // a phone that once had a wrong address typed in self-heals instead of failing to log in.
+        Net.setBaseUrl(null)
+        SessionStore.saveServerUrl(null)
         SessionStore.hotspotIp()?.let { ug.qaat.coordinator.ui.AppState.manualHotspotIp = it; ug.qaat.coordinator.ui.AppState.inRoomIp = it }
         // Auto-login: restore the cached session so the app opens straight to work — no
         // re-login. The cached manifest (for fully-offline attendance) is hydrated off the

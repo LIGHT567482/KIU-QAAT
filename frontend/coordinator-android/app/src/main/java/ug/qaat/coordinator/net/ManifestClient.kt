@@ -23,6 +23,11 @@ class ManifestClient(private val dao: AppDao) {
         val unitId: String, val unitName: String,
         val lecturerStaffId: String = "", val lecturerName: String = "", val lecturerPhone: String = "",
         val durationMinutes: Int = 0,   // scheduled length; drives the auto-close deadline
+        // Timetable schedule — cached so the coordinator's Timetable grid still renders the units,
+        // days and times with NO internet (offline these came back as unscheduled before).
+        val dayOfWeek: Int = 0,         // 1=Mon…7=Sun, 0 = unscheduled / any day
+        val startTime: String = "",     // "HH:MM" scheduled start
+        val venueId: String = "",       // room / venue label
     )
     data class Parsed(
         val academicYear: String,
@@ -56,6 +61,7 @@ class ManifestClient(private val dao: AppDao) {
                 unitId, s.optString("unit_name", unitId),
                 s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
                 s.optInt("session_duration_minutes", 0),
+                s.optInt("day_of_week", 0), s.optString("scheduled_start", ""), s.optString("venue_id", ""),
             ))
         }
 

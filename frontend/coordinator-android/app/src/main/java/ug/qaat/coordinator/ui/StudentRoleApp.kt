@@ -51,6 +51,13 @@ fun StudentRoleApp() {
     val navColor = navBarColor(AppState.branding)
     val onNav = navColor?.let { onNavColor(it) }
     var tab by remember { mutableStateOf(0) }
+    var showPortal by remember { mutableStateOf(false) }
+
+    // The KIU student portal takes over the whole screen (with its own back button) when opened.
+    if (showPortal) {
+        StudentPortalScreen(regNo = AppState.studentId, onClose = { showPortal = false })
+        return
+    }
     var unread by remember { mutableStateOf(0) }
     // Refresh the unread badge whenever the tab changes (so it clears after reading the inbox).
     LaunchedEffect(tab) { runCatching { unread = NotificationClient().unread() } }
@@ -100,7 +107,7 @@ fun StudentRoleApp() {
                     0 -> StudentAttend()
                     1 -> StudentProgress()
                     2 -> StudentNotifications(onRead = { runCatching { } })
-                    else -> StudentProfile()
+                    else -> StudentProfile(onOpenPortal = { showPortal = true })
                 }
             }
         }
@@ -301,11 +308,14 @@ private fun StudentProgress() {
 }
 
 @Composable
-private fun StudentProfile() {
+private fun StudentProfile(onOpenPortal: () -> Unit) {
     var showChangePw by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text("Profile", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        // Opens the KIU student portal in-app, with the reg number auto-filled.
+        Button(onClick = onOpenPortal, Modifier.fillMaxWidth()) { Text("🎓  Student portal") }
         Spacer(Modifier.height(12.dp))
         AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
         AppState.studentId?.let { Text("Reg. no: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

@@ -130,12 +130,24 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 		tenantID, id).Scan(&email, &studentID) == nil && email != "" {
 		return email, studentID, ""
 	}
-	// 3) Lecturer staff ID → the linked user's email.
+	// 3) Lecturer staff ID → ensure a login account exists, then return its email. Lecturers imported
+	// by the coordinator live in `lecturers` with NO linked users row (user_id NULL) and thus no
+	// password, so a plain JOIN found nothing and login wrongly reported "no account found" even
+	// though the staff ID is valid. Provision the login lazily here — default password "Lecturer",
+	// force change on first sign-in — exactly like the passwordless portal (ensureLecturerLogin),
+	// so any lecturer whose staff ID exists can sign in with the default and be sent to change it.
+	var lecturerID string
 	if adminPool.QueryRow(ctx,
-		`SELECT u.email, l.staff_id FROM lecturers l JOIN users u ON u.user_id = l.user_id
-		  WHERE l.tenant_id = $1 AND l.staff_id = $2 LIMIT 1`,
-		tenantID, id).Scan(&email, &staffID) == nil && email != "" {
-		return email, "", staffID
+		`SELECT lecturer_id::text, staff_id FROM lecturers
+		  WHERE tenant_id = $1 AND staff_id = $2 LIMIT 1`,
+		tenantID, id).Scan(&lecturerID, &staffID) == nil && lecturerID != "" {
+		if userID, err := ensureLecturerLogin(ctx, adminPool, tenantID, lecturerID); err == nil && userID != "" {
+			var e string
+			if adminPool.QueryRow(ctx,
+				`SELECT email FROM users WHERE user_id = $1::uuid`, userID).Scan(&e) == nil && e != "" {
+				return e, "", staffID
+			}
+		}
 	}
 	return "", "", ""
 }

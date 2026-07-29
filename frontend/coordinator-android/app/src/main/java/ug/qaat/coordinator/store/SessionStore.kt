@@ -171,7 +171,8 @@ object SessionStore {
             m.units.forEach {
                 put(JSONObject().put("unit_id", it.unitId).put("unit_name", it.unitName)
                     .put("lecturer_staff_id", it.lecturerStaffId).put("lecturer_name", it.lecturerName)
-                    .put("lecturer_phone", it.lecturerPhone).put("duration_minutes", it.durationMinutes))
+                    .put("lecturer_phone", it.lecturerPhone).put("duration_minutes", it.durationMinutes)
+                    .put("day_of_week", it.dayOfWeek).put("start_time", it.startTime).put("venue_id", it.venueId))
             }
         }
         prefs.edit().apply {
@@ -198,7 +199,8 @@ object SessionStore {
                 val id = u.getString("unit_id")
                 units.add(ManifestClient.UnitInfo(id, u.optString("unit_name", id),
                     u.optString("lecturer_staff_id", ""), u.optString("lecturer_name", ""), u.optString("lecturer_phone", ""),
-                    u.optInt("duration_minutes", 0)))
+                    u.optInt("duration_minutes", 0),
+                    u.optInt("day_of_week", 0), u.optString("start_time", ""), u.optString("venue_id", "")))
                 roster[id] = dao.roster(id)   // roster cached in Room survives offline
             }
         }

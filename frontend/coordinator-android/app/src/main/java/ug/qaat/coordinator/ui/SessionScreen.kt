@@ -1,8 +1,6 @@
 package ug.qaat.coordinator.ui
 
 import android.content.Intent
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,12 +50,13 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
         }
-        // Students JOIN the Wi-Fi by reading the name + password below (no connect QR), then OPEN the
-        // check-in address (scan or type), then type their reg-number. The self-test line shows the
-        // instant a phone actually reaches this server — the objective proof it's working.
+        // Fully hotspot-driven, no QR: students JOIN this Wi-Fi (name + password below), then open the
+        // QAAT app and tap ATTEND — the app finds this hub on the LAN and checks them in directly. The
+        // browser address is kept only as a no-app fallback. The self-test line shows the instant a
+        // phone actually reaches this server — the objective proof it's working.
         Surface(color = MaterialTheme.colorScheme.inverseSurface, shape = MaterialTheme.shapes.medium) {
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("STUDENTS: JOIN THE WI-FI, OPEN CHECK-IN, TYPE REG-NUMBER", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp, textAlign = TextAlign.Center)
+                Text("STUDENTS: JOIN THIS WI-FI, THEN OPEN THE QAAT APP AND TAP ATTEND", color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 12.sp, textAlign = TextAlign.Center)
                 // The Wi-Fi credentials to read out / project (replaces the Connect-to-Wi-Fi QR).
                 val ssid = AppState.hotspotSsid; val pass = AppState.hotspotPass
                 if (!ssid.isNullOrBlank()) {
@@ -70,7 +69,7 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (AppState.hotspotUp) "Check-in address: http://${AppState.inRoomIp}:8080"
+                    if (AppState.hotspotUp) "No app? Open  http://${AppState.inRoomIp}:8080"
                     else "Bringing up the room Wi-Fi…",
                     color = MaterialTheme.colorScheme.inverseOnSurface, fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
@@ -116,16 +115,9 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 Modifier.padding(12.dp), textAlign = TextAlign.Center)
         }
 
-        // Projected QRs: (1) Check-in page (opens http://<ip>:8080/attend — always the current IP, so
-        // it always resolves to THIS coordinator), (2) rotating lecturer gate. Rendered locally (ZXing).
-        // No Connect-to-Wi-Fi QR: students join by reading the Wi-Fi name + password shown above.
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            QrCard("Check in here", "${AppState.inRoomBaseUrl}/attend", "scan or type the address")
-            QrCard("Lecturer gate", "${AppState.inRoomBaseUrl}/gate?rc=${AppState.lecturerCode}",
-                "Lecturer scans · rotates ${AppState.secondsLeft}s")
-        }
-
+        // No QR codes at all — the system is hotspot-driven. Students tap ATTEND and lecturers tap
+        // START/END inside the app; both talk to this hub over the LAN (the app pulls the live gate
+        // code itself from GET /status, so the lecturer never scans anything).
         Spacer(Modifier.height(12.dp))
         Text("Present: $present", style = MaterialTheme.typography.titleMedium)
 
@@ -161,21 +153,6 @@ fun SessionScreen(onOpenSession: () -> Unit) {
             onClick = { ug.qaat.coordinator.session.SessionController.close() },
             Modifier.fillMaxWidth(),
         ) { Text("End session + sync") }
-    }
-}
-
-/** A single QR card (title + code + caption), rendered locally so it works offline. */
-@Composable
-private fun QrCard(title: String, payload: String, caption: String) {
-    val bmp = remember(payload) { qrImageBitmap(payload, 360) }
-    Card(Modifier.padding(end = 8.dp).width(140.dp)) {
-        Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            if (bmp != null) Image(bmp, contentDescription = title, modifier = Modifier.size(120.dp))
-            else Text("—", Modifier.size(120.dp))
-            Text(caption, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        }
     }
 }
 

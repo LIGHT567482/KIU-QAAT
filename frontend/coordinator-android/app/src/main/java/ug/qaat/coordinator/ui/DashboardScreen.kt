@@ -64,9 +64,11 @@ fun DashboardScreen() {
                     .filter { s -> s.isNotBlank() }.joinToString(" · ")
             }
         } else if (m != null) {
-            // Offline fallback: derive overview from cached manifest.
+            // Offline fallback: derive overview from cached manifest — including each unit's
+            // cached day/start/duration/room so the Timetable grid still renders with no internet.
             val units = m.units.map { u ->
-                DashboardClient.Unit(u.unitId, u.unitName, 0, 0, 0, "", 0, u.lecturerName, "", u.lecturerPhone)
+                DashboardClient.Unit(u.unitId, u.unitName, 0, 0,
+                    u.dayOfWeek, u.startTime, u.durationMinutes, u.lecturerName, u.venueId, u.lecturerPhone)
             }
             overview = DashboardClient.Overview(null, units)
         }
@@ -263,8 +265,25 @@ private fun ttSpan(mins: Int): Int { val m = if (mins <= 0) 60 else mins; return
 @Composable
 private fun UnitsView(units: List<DashboardClient.Unit>) {
     if (units.isEmpty()) { EmptyNote("No units in this program yet."); return }
+    // By default show ONLY the units scheduled for TODAY — a coordinator running today's
+    // sessions shouldn't have to wade through units timetabled for other days. A toggle
+    // reveals the full program catalogue when they actually need it.
+    val today = LocalDate.now().dayOfWeek.value   // 1=Mon … 7=Sun
+    var showAll by remember { mutableStateOf(false) }
+    val todays = units.filter { it.dayOfWeek == today }
+    val shown = if (showAll) units else todays
+
     Column {
-        units.forEach { u ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (showAll) "All units" else "Today (${DAYS.getOrElse(today) { "" }})",
+                fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+            TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Show today only" else "Show all units", fontSize = 12.sp) }
+        }
+        if (shown.isEmpty()) {
+            EmptyNote("No units scheduled for today. Tap “Show all units” to see the full program.")
+            return@Column
+        }
+        shown.forEach { u ->
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(u.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
