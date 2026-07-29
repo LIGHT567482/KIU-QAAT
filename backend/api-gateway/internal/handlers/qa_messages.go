@@ -52,9 +52,21 @@ func SendQAMessage(pool *pgxpool.Pool) http.HandlerFunc {
 				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "audience must be ALL_QA, DEPARTMENT or SCHOOL"))
 				return
 			}
-			if (req.Audience == "DEPARTMENT" || req.Audience == "SCHOOL") && req.AudienceValue == "" {
-				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick a department or school"))
-				return
+			if req.Audience == "DEPARTMENT" || req.Audience == "SCHOOL" {
+				// audience_value may be several values joined by '||' (multi-select).
+				// Normalise: trim each, drop blanks, rejoin — so no empty element can match.
+				parts := strings.Split(req.AudienceValue, "||")
+				clean := parts[:0]
+				for _, p := range parts {
+					if p = strings.TrimSpace(p); p != "" {
+						clean = append(clean, p)
+					}
+				}
+				req.AudienceValue = strings.Join(clean, "||")
+				if req.AudienceValue == "" {
+					writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick at least one department or school"))
+					return
+				}
 			}
 			if req.Audience == "ALL_QA" {
 				req.AudienceValue = ""
@@ -169,9 +181,10 @@ func ListQAMessages(pool *pgxpool.Pool) http.HandlerFunc {
 			cond = "AND m.audience = 'DQA' "
 		case role == middleware.RoleQAOfficer:
 			// QA inbox = broadcasts that target them: all QA, their department, or their school.
+			// audience_value may hold several departments/schools joined by '||' (DQA multi-select).
 			cond = `AND ( m.audience = 'ALL_QA'
-			             OR (m.audience = 'DEPARTMENT' AND m.audience_value = $3)
-			             OR (m.audience = 'SCHOOL'     AND m.audience_value = $4) ) `
+			             OR (m.audience = 'DEPARTMENT' AND $3 = ANY(string_to_array(m.audience_value, '||')))
+			             OR (m.audience = 'SCHOOL'     AND $4 = ANY(string_to_array(m.audience_value, '||'))) ) `
 			args = append(args, dept, school)
 		default:
 			writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "not a QA officer or DQA director"))
@@ -220,7 +233,7 @@ func UnreadQAMessageCount(pool *pgxpool.Pool) http.HandlerFunc {
 		case middleware.RoleDQADirector:
 			q += "m.audience = 'DQA'"
 		case middleware.RoleQAOfficer:
-			q += "(m.audience='ALL_QA' OR (m.audience='DEPARTMENT' AND m.audience_value=$3) OR (m.audience='SCHOOL' AND m.audience_value=$4))"
+			q += "(m.audience='ALL_QA' OR (m.audience='DEPARTMENT' AND $3=ANY(string_to_array(m.audience_value,'||'))) OR (m.audience='SCHOOL' AND $4=ANY(string_to_array(m.audience_value,'||'))))"
 			args = append(args, dept, school)
 		default:
 			writeJSON(w, http.StatusOK, map[string]int{"unread": 0})

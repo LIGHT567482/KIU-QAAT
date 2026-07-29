@@ -17,10 +17,11 @@ interface Msg {
 }
 
 function audienceLabel(m: Msg): string {
+  const vals = m.audience_value.split('||').filter(Boolean).join(', ')
   switch (m.audience) {
     case 'ALL_QA':     return 'All QA officers'
-    case 'DEPARTMENT': return `Dept · ${m.audience_value}`
-    case 'SCHOOL':     return `School · ${m.audience_value}`
+    case 'DEPARTMENT': return `Dept · ${vals}`
+    case 'SCHOOL':     return `School · ${vals}`
     case 'DQA':        return 'DQA Director'
   }
 }
@@ -125,7 +126,9 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
 
 function Compose({ isDQA, onSent }: { isDQA: boolean; onSent: () => void }) {
   const [audience, setAudience] = useState<'ALL_QA' | 'DEPARTMENT' | 'SCHOOL'>('ALL_QA')
-  const [audienceValue, setAudienceValue] = useState('')
+  const [audienceValue, setAudienceValue] = useState('')   // single college/school
+  const [selectedDepts, setSelectedDepts] = useState<string[]>([]) // multiple departments
+  const [deptInput, setDeptInput] = useState('')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -138,31 +141,41 @@ function Compose({ isDQA, onSent }: { isDQA: boolean; onSent: () => void }) {
     if (isDQA) api.get<{ departments: string[]; schools: string[] }>('/api/v1/messages/audiences').then(setAudOpts).catch(() => {})
   }, [isDQA])
 
+  function addDept(v: string) {
+    const d = v.trim()
+    if (d && !selectedDepts.includes(d)) setSelectedDepts(s => [...s, d])
+    setDeptInput('')
+  }
+
   async function send() {
     setErr(null)
     if (!subject.trim()) { setErr('Subject is required.'); return }
-    if (isDQA && (audience === 'DEPARTMENT' || audience === 'SCHOOL') && !audienceValue.trim()) {
-      setErr(`Pick a ${audience === 'DEPARTMENT' ? 'department' : 'college/school'}.`); return
-    }
+    if (isDQA && audience === 'DEPARTMENT' && selectedDepts.length === 0) { setErr('Pick at least one department.'); return }
+    if (isDQA && audience === 'SCHOOL' && !audienceValue.trim()) { setErr('Pick a college/school.'); return }
     setSaving(true)
     try {
       const att = file ? await fileToB64(file) : null
+      const audValue = !isDQA ? ''
+        : audience === 'DEPARTMENT' ? selectedDepts.join('||')
+        : audience === 'SCHOOL' ? audienceValue.trim()
+        : ''
       await api.post('/api/v1/messages', {
         audience: isDQA ? audience : 'DQA',
-        audience_value: isDQA ? audienceValue : '',
+        audience_value: audValue,
         subject: subject.trim(),
         body,
         attachment_name: att?.name ?? '',
         attachment_mime: att?.mime ?? '',
         attachment_b64: att?.b64 ?? '',
       })
-      setOk(true); setSubject(''); setBody(''); setFile(null); setAudienceValue('')
+      setOk(true); setSubject(''); setBody(''); setFile(null); setAudienceValue(''); setSelectedDepts([])
       setTimeout(onSent, 700)
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to send') }
     finally { setSaving(false) }
   }
 
-  const suggestions = audience === 'SCHOOL' ? audOpts.schools : audOpts.departments
+  // Chip options = the known departments plus any custom ones the DQA has already picked.
+  const deptChips = [...new Set([...audOpts.departments, ...selectedDepts])]
 
   return (
     <div style={{ maxWidth: 620, border: '1px solid var(--border)', borderRadius: 12, padding: 20, background: 'var(--surface)' }}>
@@ -182,11 +195,39 @@ function Compose({ isDQA, onSent }: { isDQA: boolean; onSent: () => void }) {
               </button>
             ))}
           </div>
-          {(audience === 'DEPARTMENT' || audience === 'SCHOOL') && (
+          {audience === 'DEPARTMENT' && (
+            <div style={{ marginBottom: 14 }}>
+              {deptChips.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {deptChips.map(d => {
+                    const on = selectedDepts.includes(d)
+                    return (
+                      <button key={d} type="button" onClick={() => setSelectedDepts(s => on ? s.filter(x => x !== d) : [...s, d])}
+                        style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                          border: on ? '1px solid var(--brand)' : '1px solid var(--border)',
+                          background: on ? 'var(--brand)' : 'transparent', color: on ? '#fff' : 'var(--text)' }}>
+                        {on ? '✓ ' : ''}{d}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={deptInput} onChange={e => setDeptInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDept(deptInput) } }}
+                  placeholder="Add a department…" style={{ ...inp, marginBottom: 0, flex: 1 }} />
+                <button type="button" onClick={() => addDept(deptInput)} style={smallBtn}>Add</button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                {selectedDepts.length > 0 ? `Sending to ${selectedDepts.length} department${selectedDepts.length > 1 ? 's' : ''}: ${selectedDepts.join(', ')}` : 'Tap a department to select — you can pick several.'}
+              </div>
+            </div>
+          )}
+          {audience === 'SCHOOL' && (
             <>
               <input list="aud-opts" value={audienceValue} onChange={e => setAudienceValue(e.target.value)}
-                placeholder={audience === 'DEPARTMENT' ? 'Department name' : 'College / school name'} style={inp} />
-              <datalist id="aud-opts">{suggestions.map(s => <option key={s} value={s} />)}</datalist>
+                placeholder="College / school name" style={inp} />
+              <datalist id="aud-opts">{audOpts.schools.map(s => <option key={s} value={s} />)}</datalist>
             </>
           )}
         </>

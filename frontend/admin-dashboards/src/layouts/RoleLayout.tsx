@@ -127,6 +127,19 @@ function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
   const links = role === 'ADMIN' ? adminNav(user?.tenantId ?? '') : (NAV[role] ?? [])
   const current = typeof window !== 'undefined' ? window.location.pathname : ''
 
+  // Unread-messages badge for the roles that have a Messages inbox. Polls, and refetches
+  // on navigation (so it clears after the user reads their inbox).
+  const [unread, setUnread] = useState(0)
+  useEffect(() => {
+    if (role !== 'DQA_DIRECTOR' && role !== 'QA_OFFICER') return
+    let alive = true
+    const fetchUnread = () => api.get<{ unread: number }>('/api/v1/messages/unread-count')
+      .then(r => { if (alive) setUnread(r.unread || 0) }).catch(() => {})
+    fetchUnread()
+    const id = setInterval(fetchUnread, 20000)
+    return () => { alive = false; clearInterval(id) }
+  }, [role, current])
+
   const name = brand?.name || 'QAAT'
 
   return (
@@ -155,13 +168,20 @@ function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
             : current === l.path || current.startsWith(l.path + '/')
           return (
             <a key={l.path} href={l.path} style={{
-              display: 'block', padding: '10px 20px', color: 'var(--sidebar-text)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              padding: '10px 20px', color: 'var(--sidebar-text)',
               opacity: active ? 1 : .82, textDecoration: 'none', fontSize: 14,
               fontWeight: active ? 700 : 400,
               background: active ? 'rgba(255,255,255,.16)' : 'transparent',
               borderLeft: active ? '3px solid var(--brand)' : '3px solid transparent',
             }}>
-              {l.label}
+              <span>{l.label}</span>
+              {l.path.endsWith('/messages') && unread > 0 && (
+                <span style={{
+                  background: '#ef4444', color: '#fff', borderRadius: 999, fontSize: 10,
+                  fontWeight: 700, padding: '1px 7px', minWidth: 18, textAlign: 'center',
+                }}>{unread > 99 ? '99+' : unread}</span>
+              )}
             </a>
           )
         })}
