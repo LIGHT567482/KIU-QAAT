@@ -473,6 +473,18 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).
 			Get("/api/v1/lecturer/sessions/{session_id}/students", handlers.LecturerSessionStudents(adminPool))
 
+		// ── Cross-role in-app notifications ──────────────────────────────────
+		// Lecturer → his students / the coordinator; Coordinator → his students / the
+		// lecturers. Students, coordinators and lecturers all read their own inbox.
+		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator)).
+			Post("/api/v1/app-notifications", handlers.SendAppNotification(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+			Get("/api/v1/app-notifications", handlers.ListAppNotifications(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
+
 		// Admin — lecturer attendance logs + summary (own tenant)
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturer-attendance", handlers.GetLecturerAttendanceLogs(adminPool))
