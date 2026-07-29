@@ -12,8 +12,8 @@ android {
         applicationId = "ug.qaat.coordinator"
         minSdk = 26          // LocalOnlyHotspot + java.time
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.1"
         // DEFAULT backend URL the app starts with. The app works for BOTH your local server
         // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
         // self-signed cert, and the URL is switchable at runtime (login "server" field /
