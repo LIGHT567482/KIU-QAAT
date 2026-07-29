@@ -133,8 +133,8 @@ services:
         value: /etc/secrets/auth_private.pem
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
-      - key: DISABLE_MFA          # set true only if you don't enforce TOTP for VC/DQA
-        value: "false"
+      - key: DISABLE_MFA          # standalone single-institution: VC/DQA sign in with password only
+        value: "true"
 
   # ─── session-manager (private) ─────────────────────────────────────────────
   - type: pserv

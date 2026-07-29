@@ -121,6 +121,36 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        // ── Advanced: server address ────────────────────────────────────────────
+        // Shows the backend the app is talking to, so a user can VERIFY it (the default is the
+        // KIU cloud) and change/reset it if a wrong address was ever saved. This is exactly the
+        // "server address in the login screen" the connection-error message refers to.
+        var showServer by remember { mutableStateOf(false) }
+        var server by remember { mutableStateOf(Net.baseUrl) }
+        Spacer(Modifier.height(10.dp))
+        TextButton(onClick = { showServer = !showServer }) {
+            Text(if (showServer) "Hide server settings" else "Server settings", style = MaterialTheme.typography.labelMedium)
+        }
+        if (showServer) {
+            OutlinedTextField(
+                server, { server = it }, label = { Text("Server address") }, singleLine = true,
+                supportingText = { Text("Default: ${ug.qaat.coordinator.BuildConfig.API_BASE}", style = MaterialTheme.typography.labelSmall) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = {
+                    val d = ug.qaat.coordinator.BuildConfig.API_BASE
+                    server = d; Net.setBaseUrl(null); SessionStore.saveServerUrl(null)
+                    Toast.makeText(ctx, "Server reset to the KIU cloud", Toast.LENGTH_SHORT).show()
+                }) { Text("Reset to default") }
+                TextButton(onClick = {
+                    Net.setBaseUrl(server); SessionStore.saveServerUrl(server)
+                    scope.launch { Net.warmUp() }
+                    Toast.makeText(ctx, "Server set to $server", Toast.LENGTH_SHORT).show()
+                }) { Text("Use this server") }
+            }
+        }
     }
     // Footer statement — same as the web apps.
     Text(

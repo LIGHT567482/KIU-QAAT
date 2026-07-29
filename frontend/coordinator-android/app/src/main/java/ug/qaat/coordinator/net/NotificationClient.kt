@@ -52,12 +52,14 @@ class NotificationClient {
     }
 
     /** Send (LECTURER/COORDINATOR). Returns null on success, else a human error. audience is
-     *  STUDENTS / COORDINATOR (lecturer) or STUDENTS / LECTURERS (coordinator). */
-    suspend fun send(audience: String, unitId: String?, subject: String, body: String): String? = withContext(Dispatchers.IO) {
+     *  STUDENTS / COORDINATOR (lecturer) or STUDENTS / LECTURERS / STUDENT / LECTURER (coordinator);
+     *  for a specific STUDENT/LECTURER pass targetId (student_id or lecturer_id). */
+    suspend fun send(audience: String, unitId: String?, subject: String, body: String, targetId: String? = null): String? = withContext(Dispatchers.IO) {
         val token = AppState.token ?: return@withContext "Not signed in"
         runCatching {
             val payload = JSONObject().put("audience", audience).put("subject", subject).put("body", body)
             if (!unitId.isNullOrBlank()) payload.put("unit_id", unitId)
+            if (!targetId.isNullOrBlank()) payload.put("target_id", targetId)
             val r = http.post("$base/api/v1/app-notifications") {
                 header("Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
                 setBody(payload.toString())

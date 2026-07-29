@@ -37,7 +37,7 @@ fun NotificationComposer(audiences: List<Pair<String, String>>, onSent: () -> Un
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
 
-    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium,
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text("Send to:", style = MaterialTheme.typography.labelMedium)
@@ -71,7 +71,7 @@ fun NotificationInboxList(items: List<NotificationClient.Notif>?, onChanged: () 
             items(items) { n ->
                 var expanded by remember { mutableStateOf(false) }
                 Surface(
-                    color = if (!n.read) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (!n.read) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else MaterialTheme.colorScheme.surface,
                     shape = MaterialTheme.shapes.medium,
                     onClick = { expanded = !expanded; if (!n.read) scope.launch { NotificationClient().markRead(n.id); onChanged() } },
                 ) {

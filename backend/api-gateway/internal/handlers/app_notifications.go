@@ -11,6 +11,7 @@ package handlers
 //   POST /api/v1/app-notifications/{id}/read             (any signed-in app user)
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ import (
 
 // resolveRecipients returns the distinct recipient user_ids for a send, based on the sender's
 // role + the requested audience + an optional unit scope.
-func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, senderRole, audience, unitID string) ([]string, error) {
+func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, senderRole, audience, unitID, targetID string) ([]string, error) {
 	var sql string
 	args := []interface{}{tenantID}
 
@@ -78,6 +79,23 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
 				JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
 				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL` + unitClause
+		case "STUDENT":
+			// One specific student, but ONLY if they belong to this coordinator's cohort.
+			args = append(args, targetID)
+			sql = fmt.Sprintf(`SELECT u.user_id::text
+				FROM course_offerings o
+				JOIN students_extended s ON s.offering_id = o.offering_id AND s.tenant_id = o.tenant_id AND s.enrollment_status='ACTIVE'
+				JOIN users u ON lower(u.email) = lower(s.email) AND u.tenant_id = s.tenant_id
+				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND s.student_id = $%d`, len(args))
+		case "LECTURER":
+			// One specific lecturer, but ONLY if they teach a unit of this coordinator's course.
+			args = append(args, targetID)
+			sql = fmt.Sprintf(`SELECT DISTINCT l.user_id::text
+				FROM course_offerings o
+				JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
+				JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL AND l.lecturer_id::text = $%d`, len(args))
 		default:
 			return nil, nil
 		}
@@ -100,6 +118,41 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 	return ids, nil
 }
 
+// CoordinatorLecturers — GET /api/v1/coordinator/lecturers → the lecturers who teach this
+// coordinator's course units (id + name), so the composer can target one specifically.
+func CoordinatorLecturers(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		coordID := middleware.GetUserID(r.Context())
+		rows, err := pool.Query(r.Context(), `
+			SELECT DISTINCT l.lecturer_id::text, l.full_name, COALESCE(l.staff_id,'')
+			FROM course_offerings o
+			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+			JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
+			JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+			WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL
+			ORDER BY l.full_name`, tenantID, coordID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		defer rows.Close()
+		type lec struct {
+			LecturerID string `json:"lecturer_id"`
+			FullName   string `json:"full_name"`
+			StaffID    string `json:"staff_id"`
+		}
+		out := []lec{}
+		for rows.Next() {
+			var l lec
+			if rows.Scan(&l.LecturerID, &l.FullName, &l.StaffID) == nil {
+				out = append(out, l)
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
 // SendAppNotification — POST /api/v1/app-notifications
 func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +167,7 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 		var req struct {
 			Audience string `json:"audience"`
 			UnitID   string `json:"unit_id"`
+			TargetID string `json:"target_id"` // specific student_id or lecturer_id (for STUDENT/LECTURER)
 			Subject  string `json:"subject"`
 			Body     string `json:"body"`
 		}
@@ -123,6 +177,7 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		req.Audience = strings.ToUpper(strings.TrimSpace(req.Audience))
 		req.UnitID = strings.TrimSpace(req.UnitID)
+		req.TargetID = strings.TrimSpace(req.TargetID)
 		req.Subject = strings.TrimSpace(req.Subject)
 		if req.Subject == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "subject is required"))
@@ -131,14 +186,18 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 		// Validate audience against the sender's role.
 		valid := map[string]map[string]bool{
 			middleware.RoleLecturer:    {"STUDENTS": true, "COORDINATOR": true},
-			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true},
+			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true, "STUDENT": true, "LECTURER": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))
 			return
 		}
+		if (req.Audience == "STUDENT" || req.Audience == "LECTURER") && req.TargetID == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick a recipient"))
+			return
+		}
 
-		recipients, err := resolveRecipients(pool, r, tenantID, senderID, role, req.Audience, req.UnitID)
+		recipients, err := resolveRecipients(pool, r, tenantID, senderID, role, req.Audience, req.UnitID, req.TargetID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

@@ -70,6 +70,14 @@ class DashboardClient {
         return Overview(off, units)
     }
 
+    data class Lecturer(val lecturerId: String, val fullName: String)
+    suspend fun lecturers(token: String): List<Lecturer> {
+        val r = http.get("$base/api/v1/coordinator/lecturers") { auth(token) }
+        if (r.status.value !in 200..299) return emptyList()
+        val arr = JSONArray(r.bodyAsText())
+        return (0 until arr.length()).map { i -> val l = arr.getJSONObject(i); Lecturer(l.optString("lecturer_id"), l.optString("full_name")) }
+    }
+
     suspend fun students(token: String): List<Student> {
         val r = http.get("$base/api/v1/coordinator/students") { auth(token) }
         if (r.status.value !in 200..299) return emptyList()

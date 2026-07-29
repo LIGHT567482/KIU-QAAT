@@ -484,6 +484,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
 			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
+		// Lecturers of the coordinator's course units (for the "notify a specific lecturer" picker).
+		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
+			Get("/api/v1/coordinator/lecturers", handlers.CoordinatorLecturers(adminPool))
 
 		// Admin — lecturer attendance logs + summary (own tenant)
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).

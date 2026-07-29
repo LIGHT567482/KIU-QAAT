@@ -288,7 +288,8 @@ private fun InfoLine(label: String, value: String) {
 }
 
 /** Coordinator notifications: read messages (e.g. from a lecturer) and send to his cohort's
- *  students or to his course's lecturers. */
+ *  students (all or one) or his course's lecturers (all or one). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CoordinatorAlertsScreen() {
     val scope = rememberCoroutineScope()
@@ -301,12 +302,76 @@ private fun CoordinatorAlertsScreen() {
             Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Button(onClick = { composing = !composing }) { Text(if (composing) "Close" else "✎ New") }
         }
-        if (composing) NotificationComposer(
-            audiences = listOf("STUDENTS" to "My students", "LECTURERS" to "Lecturers"),
-            onSent = { composing = false; load() },
-        )
+        if (composing) CoordinatorComposer(onSent = { composing = false; load() })
         Spacer(Modifier.height(8.dp))
         NotificationInboxList(inbox) { load() }
+    }
+}
+
+/** Coordinator composer with a recipient picker: all students / a specific student / all
+ *  lecturers / a specific lecturer. White card background. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CoordinatorComposer(onSent: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var audience by remember { mutableStateOf("STUDENTS") }   // STUDENTS | STUDENT | LECTURERS | LECTURER
+    var targetId by remember { mutableStateOf<String?>(null) }
+    var targetName by remember { mutableStateOf("") }
+    var subject by remember { mutableStateOf("") }
+    var body by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+    var students by remember { mutableStateOf<List<ug.qaat.coordinator.net.DashboardClient.Student>>(emptyList()) }
+    var lecturers by remember { mutableStateOf<List<ug.qaat.coordinator.net.DashboardClient.Lecturer>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        val t = AppState.token ?: return@LaunchedEffect
+        runCatching { students = ug.qaat.coordinator.net.DashboardClient().students(t) }
+        runCatching { lecturers = ug.qaat.coordinator.net.DashboardClient().lecturers(t) }
+    }
+
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Send to:", style = MaterialTheme.typography.labelMedium)
+            Column {
+                Row {
+                    FilterChip(audience == "STUDENTS", { audience = "STUDENTS"; targetId = null }, { Text("All students") }, modifier = Modifier.padding(end = 6.dp))
+                    FilterChip(audience == "STUDENT", { audience = "STUDENT"; targetId = null; targetName = "" }, { Text("A student") })
+                }
+                Row(Modifier.padding(top = 4.dp)) {
+                    FilterChip(audience == "LECTURERS", { audience = "LECTURERS"; targetId = null }, { Text("All lecturers") }, modifier = Modifier.padding(end = 6.dp))
+                    FilterChip(audience == "LECTURER", { audience = "LECTURER"; targetId = null; targetName = "" }, { Text("A lecturer") })
+                }
+            }
+            if (audience == "STUDENT" || audience == "LECTURER") {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        Text(if (targetName.isBlank()) "Pick a ${if (audience == "STUDENT") "student" else "lecturer"}" else targetName)
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        if (audience == "STUDENT") students.forEach { s ->
+                            DropdownMenuItem(text = { Text("${s.fullName} · ${s.studentId}") }, onClick = { targetId = s.studentId; targetName = s.fullName; open = false })
+                        } else lecturers.forEach { l ->
+                            DropdownMenuItem(text = { Text(l.fullName) }, onClick = { targetId = l.lecturerId; targetName = l.fullName; open = false })
+                        }
+                    }
+                }
+            }
+            err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
+            OutlinedTextField(subject, { subject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(body, { body = it }, label = { Text("Message") }, modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp))
+            Button(enabled = !busy && subject.isNotBlank() && (audience == "STUDENTS" || audience == "LECTURERS" || targetId != null),
+                modifier = Modifier.padding(top = 8.dp), onClick = {
+                    busy = true; err = null
+                    scope.launch {
+                        err = ug.qaat.coordinator.net.NotificationClient().send(audience, null, subject.trim(), body, targetId)
+                        busy = false; if (err == null) onSent()
+                    }
+                }) { Text(if (busy) "Sending…" else "Send") }
+        }
     }
 }
 
