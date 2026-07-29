@@ -90,8 +90,13 @@ object Net {
                 "The server is waking up (it sleeps when idle). Please wait a few seconds and tap again."
             "unable to resolve host" in m || "failed to connect" in m || "unreachable" in m || "connect" in m ->
                 "Can't reach the server — check your internet connection and try again."
+            // A wrong phone clock makes a perfectly valid certificate look expired / not-yet-valid.
+            // This is the #1 cause of a "secure connection" failure on a freshly set-up phone, so
+            // call it out explicitly instead of the misleading "update the app".
+            "not yet valid" in m || "expired" in m || "not valid" in m || "current time" in m || "validity" in m ->
+                "Secure connection failed — your phone's date & time look wrong. Set them to automatic (network) date/time, then try again."
             "trust anchor" in m || "certif" in m || "handshake" in m || "ssl" in m ->
-                "Secure connection failed. Update the app, or check the server address in the login screen."
+                "Secure connection failed. First set your phone's date & time to automatic and try again; if it persists, update the app or check the server address in the login screen."
             else -> t.message?.takeIf { it.isNotBlank() && it.length < 120 } ?: "Something went wrong. Please try again."
         }
     }

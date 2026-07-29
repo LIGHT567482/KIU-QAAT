@@ -49,13 +49,20 @@ export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
       <Sidebar role={user.role} brand={brand} />
       {/* Content column fills the rest and carries the tenant background colour. */}
       <div style={{
-        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--app-bg)',
+        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--app-bg)', position: 'relative',
       }}>
-        <main style={{ flex: 1, padding: 24, color: 'var(--text)' }}>
+        {/* Faint institution logo watermark, behind every page's content. */}
+        {brand?.logo_url && (
+          <img src={brand.logo_url} alt="" aria-hidden style={{
+            position: 'fixed', top: '50%', left: 'calc(50% + 110px)', transform: 'translate(-50%, -50%)',
+            width: '42vmin', maxWidth: 520, opacity: 0.05, pointerEvents: 'none', zIndex: 0, userSelect: 'none',
+          }} />
+        )}
+        <main style={{ flex: 1, padding: 24, color: 'var(--text)', position: 'relative', zIndex: 1 }}>
           <GoBack navigate={navigate} location={location} />
           <Outlet />
         </main>
-        <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '12px 24px', fontSize: 12, textAlign: 'center' }}>
+        <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '12px 24px', fontSize: 12, textAlign: 'center', position: 'relative', zIndex: 1 }}>
           {brand?.name ? `${brand.name} · ` : ''}Powered by LIGHT TECHNOLOGIES
         </footer>
       </div>

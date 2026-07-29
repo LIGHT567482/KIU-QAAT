@@ -120,8 +120,11 @@ func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		}
 		switch {
 		case len(scheduledToday) > 0:
-			// Timetable overrides: show today's scheduled units (+ any unscheduled ones).
-			manifest.Sessions = append(scheduledToday, unscheduled...)
+			// DAILY MANIFEST ONLY: when the timetable has units scheduled for today, show
+			// EXACTLY those — not the whole semester catalog. Units timetabled for other
+			// days, and un-timetabled units, are hidden today (they surface on their own day,
+			// or via the fallback below when nothing at all is scheduled today).
+			manifest.Sessions = scheduledToday
 			manifest.WindowOpen = true
 			manifest.WindowMessage = ""
 		case open:
