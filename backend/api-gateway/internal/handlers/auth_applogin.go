@@ -123,11 +123,17 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 			return e, "", ""
 		}
 	}
-	// 2) Student registration number → its account email.
+	// 2) Student registration number → its account email. Ensure a login exists: some students were
+	// imported with NO users row (the tenant had no domain set at import time, or they came in via a
+	// path that didn't create the hidden login), so a valid reg-number resolved but then failed
+	// auth-service with "no account". Provision lazily — default password "Student", force change on
+	// first sign-in — so any ACTIVE student whose reg-number exists can always sign in.
+	var sName string
 	if adminPool.QueryRow(ctx,
-		`SELECT email, student_id FROM students_extended
+		`SELECT email, student_id, COALESCE(full_name,'') FROM students_extended
 		  WHERE tenant_id = $1 AND student_id = $2 AND enrollment_status = 'ACTIVE' LIMIT 1`,
-		tenantID, id).Scan(&email, &studentID) == nil && email != "" {
+		tenantID, id).Scan(&email, &studentID, &sName) == nil && email != "" {
+		ensureStudentLogin(ctx, adminPool, tenantID, email, sName)
 		return email, studentID, ""
 	}
 	// 3) Lecturer staff ID → ensure a login account exists, then return its email. Lecturers imported

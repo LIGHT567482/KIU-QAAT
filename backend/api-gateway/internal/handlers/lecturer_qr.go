@@ -115,6 +115,31 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 	return userID, nil
 }
 
+// ensureStudentLogin guarantees a STUDENT login account exists for the given (synthetic or real)
+// student email, so a student who resolves by registration number can always password-login. This
+// mirrors the SIS-import hidden login, covering students imported before that existed or when the
+// tenant had no domain set. Best-effort: default password "Student", forced change on first sign-in.
+func ensureStudentLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, email, fullName string) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return
+	}
+	var exists bool
+	if pool.QueryRow(ctx, `SELECT true FROM users WHERE tenant_id = $1 AND lower(email) = lower($2) LIMIT 1`,
+		tenantID, email).Scan(&exists) == nil && exists {
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("Student"), 10)
+	if err != nil {
+		return
+	}
+	_, _ = pool.Exec(ctx, `
+		INSERT INTO users (tenant_id, email, password_hash, role, full_name, force_password_change)
+		VALUES ($1, $2, $3, 'STUDENT', $4, true)
+		ON CONFLICT (tenant_id, email) DO NOTHING`,
+		tenantID, email, string(hash), fullName)
+}
+
 func mintLecturerToken(ctx context.Context, userID, tenantID string) ([]byte, int) {
 	base := os.Getenv("AUTH_SERVICE_URL")
 	if base == "" {
