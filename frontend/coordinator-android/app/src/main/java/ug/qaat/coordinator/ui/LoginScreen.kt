@@ -69,7 +69,20 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(totp, { totp = it }, label = { Text("Authenticator code") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
-        error?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { msg ->
+            Spacer(Modifier.height(8.dp))
+            Text(msg, color = MaterialTheme.colorScheme.error)
+            // A "Secure connection failed" almost always means the phone's clock is wrong (phones with
+            // no SIM never network-sync their time). Surface the exact fix inline.
+            if (msg.contains("date", true) || msg.contains("time", true) || msg.contains("secure connection", true)) {
+                Spacer(Modifier.height(6.dp))
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
+                    Text("Fix: Settings → System → Date & time → turn ON “Set time automatically” (or set today’s correct date), then tap Sign in again. A wrong clock blocks the secure connection.",
+                        Modifier.padding(10.dp), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
         Button(

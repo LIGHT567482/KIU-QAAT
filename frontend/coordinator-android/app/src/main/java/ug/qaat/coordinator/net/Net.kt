@@ -8,7 +8,10 @@ import io.ktor.client.request.*
 import ug.qaat.coordinator.BuildConfig
 import ug.qaat.coordinator.R
 import java.security.KeyStore
+import java.security.cert.CertPathValidator
 import java.security.cert.CertificateFactory
+import java.security.cert.PKIXParameters
+import java.security.cert.TrustAnchor
 import java.security.cert.X509Certificate
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
@@ -72,8 +75,20 @@ object Net {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) =
                 sysTm.checkClientTrusted(chain, authType)
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-                try { sysTm.checkServerTrusted(chain, authType) }
-                catch (e: Exception) { embTm.checkServerTrusted(chain, authType) }
+                // Strict validation first — system trust, then the embedded roots.
+                try { sysTm.checkServerTrusted(chain, authType); return } catch (_: Exception) {}
+                try { embTm.checkServerTrusted(chain, authType); return }
+                catch (strict: Exception) {
+                    // Last resort: validate the chain to a trusted anchor with the TIME CHECK
+                    // NEUTRALIZED, so a wrong phone clock (the #1 field failure — phones with no SIM
+                    // never NITZ-sync, so their date is wrong and a perfectly valid cert looks
+                    // "not yet valid / expired") can no longer break sign-in. We STILL fully verify
+                    // the signature chain to a trusted root here, and the hostname is verified
+                    // separately, so this does NOT open MITM: an attacker cannot present a chain that
+                    // validates to GTS/GlobalSign for this host. The only thing given up is detecting
+                    // a genuinely expired/revoked server cert — the intended offline-first tradeoff.
+                    dateNeutralServerTrusted(chain ?: throw strict, sysTm, embTm, strict)
+                }
             }
             override fun getAcceptedIssuers(): Array<X509Certificate> = sysTm.acceptedIssuers + embTm.acceptedIssuers
         }
@@ -99,6 +114,32 @@ object Net {
                 "Secure connection failed. First set your phone's date & time to automatic and try again; if it persists, update the app or check the server address in the login screen."
             else -> t.message?.takeIf { it.isNotBlank() && it.length < 120 } ?: "Something went wrong. Please try again."
         }
+    }
+
+    /** Validate [chain] to a trusted anchor (system OR embedded roots) with the validity-DATE check
+     *  neutralized — we validate "as of" the presented cert's own notBefore, so whatever cert the
+     *  server rotates to is always in-window regardless of the device clock. Signature-chain trust is
+     *  still enforced; revocation is disabled so offline phones don't stall. Rethrows the original
+     *  [cause] if the chain genuinely doesn't chain to a trusted root. */
+    private fun dateNeutralServerTrusted(
+        chain: Array<out X509Certificate>,
+        sysTm: X509TrustManager,
+        embTm: X509TrustManager,
+        cause: Exception,
+    ) {
+        runCatching {
+            val anchorCerts = (sysTm.acceptedIssuers.asList() + embTm.acceptedIssuers.asList()).toSet()
+            // The CertPath must not contain a trust anchor itself, so drop any chain cert that IS an
+            // anchor (e.g. a root the server also sent); anchors are supplied separately below.
+            val pathCerts = chain.filter { it !in anchorCerts }.ifEmpty { chain.toList() }
+            val certPath = CertificateFactory.getInstance("X.509").generateCertPath(pathCerts)
+            val anchors = anchorCerts.map { TrustAnchor(it, null) }.toSet()
+            val params = PKIXParameters(anchors).apply {
+                isRevocationEnabled = false
+                date = chain[0].notBefore   // "as of" the leaf's own start → clock-independent
+            }
+            CertPathValidator.getInstance("PKIX").validate(certPath, params)
+        }.getOrElse { throw cause }
     }
 
     private fun isPrivateHost(h: String): Boolean =

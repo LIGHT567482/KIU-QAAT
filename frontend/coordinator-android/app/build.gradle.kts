@@ -1,9 +1,21 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     id("com.google.devtools.ksp") version "2.0.21-1.0.25"
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Release signing secrets live OUTSIDE git (keystore.properties + qaat-release.keystore, both
+// .gitignored). If the file is absent (fresh clone / CI), release falls back to debug signing so
+// the build never breaks — it just isn't the distributable release key.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) FileInputStream(keystorePropsFile).use { load(it) }
+}
+val hasReleaseKeystore = keystorePropsFile.exists()
 
 android {
     namespace = "ug.qaat.coordinator"
@@ -26,6 +38,27 @@ android {
         // a wrong/unreachable value just means no pre-warm, login still works via the gateway.
         val authWarm = (project.findProperty("qaat.authWarmUrl") as String?) ?: "https://qaat-auth.onrender.com/health"
         buildConfigField("String", "AUTH_WARM_URL", "\"$authWarm\"")
+    }
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            // Shrinking OFF for this launch: guarantees the embedded qaat_ca cert (res/raw) and the
+            // OkHttp/Ktor trust code are NOT stripped/obfuscated by R8 — TLS must never break in
+            // release. (If shrinking is wanted later, add keep-rules for OkHttp/Ktor and R$raw.)
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = if (hasReleaseKeystore) signingConfigs.getByName("release")
+                            else signingConfigs.getByName("debug")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {

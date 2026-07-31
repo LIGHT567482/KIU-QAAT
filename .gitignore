@@ -50,3 +50,9 @@ HowItWorks.mdinfra/render/secrets.generated.env
 frontend/*/.gradle/
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+
+# Android release signing secrets — never commit
+frontend/coordinator-android/keystore.properties
+frontend/coordinator-android/qaat-release.keystore
+*.keystore
+*.jks
