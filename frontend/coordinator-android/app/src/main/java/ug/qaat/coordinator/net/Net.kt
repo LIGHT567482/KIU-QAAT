@@ -99,6 +99,9 @@ object Net {
     /** Turn a raw network exception into a calm, human message — no "Socket timeout has
      *  expired […socket_timeout=unknown] ms" jargon leaking to coordinators. */
     fun friendly(t: Throwable): String {
+        // Log the FULL cause (class + stack) so a field failure is diagnosable over `adb logcat`
+        // (filter: QAAT_NET) even though the user only sees the calm message below.
+        android.util.Log.w("QAAT_NET", "network call failed: ${t.javaClass.simpleName}: ${t.message}", t)
         val m = (t.message ?: "").lowercase()
         return when {
             "timeout" in m || "timed out" in m ->
@@ -167,6 +170,18 @@ object Net {
             config {
                 val (ssl, tm) = trust
                 sslSocketFactory(ssl.socketFactory, tm)
+                // Broaden TLS negotiation for cheap/old phones. OkHttp's default MODERN_TLS enables
+                // only a curated cipher list; on some phones that doesn't intersect what the device
+                // AND the cloud (ECDSA cert → ECDHE-ECDSA suites) both support, which shows as
+                // "Secure connection failed" even though the URL opens in Chrome (own TLS engine).
+                // COMPATIBLE_TLS lets the handshake use the suites the device actually enables. (A
+                // more aggressive "enable every supported cipher" variant was tried and REGRESSED
+                // some phones, so we stay with the platform's own enabled set here.)
+                connectionSpecs(listOf(
+                    okhttp3.ConnectionSpec.MODERN_TLS,
+                    okhttp3.ConnectionSpec.COMPATIBLE_TLS,
+                    okhttp3.ConnectionSpec.CLEARTEXT,   // the in-room hub is plain HTTP over the hotspot
+                ))
                 val strict = HttpsURLConnection.getDefaultHostnameVerifier()
                 // Strict for public domains (cloud); relaxed only for private LAN IPs (local).
                 hostnameVerifier { host, session -> strict.verify(host, session) || isPrivateHost(host) }

@@ -1,20 +1,20 @@
 <!DOCTYPE html>
-<!-- Lecturer gate page served by the embedded hub over the hotspot. The lecturer scans the
-     coordinator's ROTATING gate QR, which opens /gate?rc=<code>. The rotating code is taken
-     straight from the URL (the lecturer never types it) — scanning the LIVE on-screen QR while
-     on the hotspot is the presence proof. First valid scan = START, second = END (needs a
-     student quorum). We POST {staff_id, room_code, fingerprint, biometric_verified} to /gate. -->
+<!-- Lecturer gate page served by the embedded hub over the hotspot. NO QR: presence proof is
+     simply being on the coordinator's hotspot LAN (this server is only reachable there). The page
+     pulls the live rotating room code itself from GET /status — the lecturer never scans or types
+     it. They enter only their staff ID. First confirm = START, second = END. We POST
+     {staff_id, room_code, fingerprint, biometric_verified} to /gate. -->
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QAAT — Lecturer gate</title>
 <style>body{font-family:system-ui;max-width:380px;margin:auto;padding:24px;text-align:center}
 input{font-size:22px;text-align:center;width:100%;padding:14px;border:2px solid #cbd5e1;border-radius:12px;box-sizing:border-box}
 button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#7c3aed;border:0;border-radius:12px}
-#done{display:none}.big{background:#f5f3ff;border:2px solid #7c3aed;border-radius:14px;padding:16px;margin-top:16px}
+button:disabled{opacity:.5}#done{display:none}.big{background:#f5f3ff;border:2px solid #7c3aed;border-radius:14px;padding:16px;margin-top:16px}
 .t{font-size:18px;font-weight:800;color:#5b21b6}.muted{color:#64748b;font-size:13px}</style></head>
 <body>
 <div id="form">
   <h2 id="title">Lecturer gate</h2>
-  <p class="muted" id="rcnote"></p>
+  <p class="muted" id="rcnote">You're on the class Wi-Fi. Enter your staff ID to start/end the session.</p>
   <input id="staff" inputmode="text" placeholder="Your staff ID (e.g. KIU/STAFF/001)" autofocus>
   <button id="go" onclick="submit()">Confirm</button>
   <p id="err" style="color:#b91c1c"></p>
@@ -24,13 +24,7 @@ button{margin-top:16px;width:100%;padding:14px;font-size:16px;font-weight:700;co
   <div class="big"><div class="t" id="doneMsg"></div></div>
 </div>
 <script>
-var qs=new URLSearchParams(location.search);
-var rc=qs.get('rc')||'';               // rotating code, carried by the scanned QR
-document.getElementById('rcnote').textContent = rc
-  ? 'Live code detected from the QR — just enter your staff ID.'
-  : 'No live code — re-scan the rotating gate QR on the coordinator screen.';
-// Ask the hub whether the session is already running, so this scan is clearly labelled as
-// STARTING vs ENDING (the lecturer just clicks the one button; the END button ends the session).
+// Label START vs END from the live session; being on the hotspot is the presence proof (no QR).
 (async function(){ try{
   var s=await (await fetch('/session')).json();
   var started = s && s.lecturer_started==='true';
@@ -42,21 +36,27 @@ async function fingerprint(){var raw=[navigator.userAgent,navigator.language,scr
   var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');}
 async function submit(){
   var staff=document.getElementById('staff').value.trim();
-  if(!staff){document.getElementById('err').textContent='Enter your staff ID.';return;}
-  if(!rc){document.getElementById('err').textContent='No live code — re-scan the rotating gate QR.';return;}
-  var fp=await fingerprint();
-  var body=new URLSearchParams({staff_id:staff,room_code:rc,fingerprint:fp,biometric_verified:'false'});
-  var r=await fetch('/gate',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
-  var d=await r.json();
-  if(d.status==='STARTED'||d.status==='ENDED'){
-    document.getElementById('form').style.display='none';
-    var done=document.getElementById('done');done.style.display='block';
-    document.getElementById('doneTitle').textContent = d.status==='STARTED' ? 'Session started' : 'Session ended';
-    document.getElementById('doneMsg').textContent = d.status==='STARTED'
-      ? 'Students can now check in.' : 'Attendance is sealed for this session.';
-  } else {
-    var reason=(d.reason||'try again').replace(/_/g,' ').toLowerCase();
-    document.getElementById('err').textContent='Rejected: '+reason+'. The code rotates — re-scan the QR and retry.';
-  }
+  var err=document.getElementById('err'), go=document.getElementById('go');
+  if(!staff){err.textContent='Enter your staff ID.';return;}
+  go.disabled=true; err.textContent='';
+  try{
+    // Pull the current rotating code straight from the hub — the lecturer never sees or types it.
+    var st=await (await fetch('/status')).json();
+    var rc=(st&&st.room_code)||'';
+    if(!rc){ err.textContent='No live session on this hotspot yet — ask the coordinator to open the session, then retry.'; go.disabled=false; return; }
+    var fp=await fingerprint();
+    var body=new URLSearchParams({staff_id:staff,room_code:rc,fingerprint:fp,biometric_verified:'false'});
+    var d=await (await fetch('/gate',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})).json();
+    if(d.status==='STARTED'||d.status==='ENDED'){
+      document.getElementById('form').style.display='none';
+      var done=document.getElementById('done');done.style.display='block';
+      document.getElementById('doneTitle').textContent = d.status==='STARTED' ? 'Session started' : 'Session ended';
+      document.getElementById('doneMsg').textContent = d.status==='STARTED'
+        ? 'Students can now check in.' : 'Attendance is sealed for this session.';
+    } else {
+      var reason=(d.reason||'try again').replace(/_/g,' ').toLowerCase();
+      err.textContent='Rejected: '+reason+'. Please retry.'; go.disabled=false;
+    }
+  }catch(e){ err.textContent='Couldn’t reach the class server — make sure Mobile Data is OFF and you are on the class Wi-Fi, then retry.'; go.disabled=false; }
 }
 </script></body></html>

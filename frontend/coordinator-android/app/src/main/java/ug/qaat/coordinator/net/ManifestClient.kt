@@ -28,6 +28,11 @@ class ManifestClient(private val dao: AppDao) {
         val dayOfWeek: Int = 0,         // 1=Mon…7=Sun, 0 = unscheduled / any day
         val startTime: String = "",     // "HH:MM" scheduled start
         val venueId: String = "",       // room / venue label
+        // Multi-coordinator authorization codes (only set when the lecturer is shared today). To
+        // start a room where the lecturer isn't present, the coordinator enters BOTH the lecturer's
+        // daily code AND this unit's session code.
+        val lecturerDailyCode: String = "",
+        val sessionCode: String = "",
     )
     data class Parsed(
         val academicYear: String,
@@ -62,6 +67,7 @@ class ManifestClient(private val dao: AppDao) {
                 s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
                 s.optInt("session_duration_minutes", 0),
                 s.optInt("day_of_week", 0), s.optString("scheduled_start", ""), s.optString("venue_id", ""),
+                s.optString("lecturer_daily_code", ""), s.optString("session_code", ""),
             ))
         }
 
@@ -77,7 +83,8 @@ class ManifestClient(private val dao: AppDao) {
                 val e = arr.optJSONObject(i) ?: continue
                 val hash = e.optString("student_id_hash", "")
                 if (hash.isBlank()) continue
-                rows.add(RosterEntity(unitId, hash, e.optString("qr_serial_number", "")))
+                rows.add(RosterEntity(unitId, hash, e.optString("qr_serial_number", ""),
+                    e.optString("student_id", ""), e.optString("full_name", "")))
             }
             rosterByUnit[unitId] = rows
             if (rows.isNotEmpty()) dao.upsertRoster(rows)   // cache for offline validation

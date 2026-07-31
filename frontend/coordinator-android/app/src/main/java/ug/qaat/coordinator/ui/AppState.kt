@@ -17,6 +17,11 @@ object AppState {
     // LocalOnlyHotspot 192.168.49.x subnet, so serving on .49.1 there is unreachable ("can't be
     // reached"). detectApIp() refines it; a manual override still wins.
     const val SYSTEM_HOTSPOT_IP = "192.168.43.1"
+    // TESTING SWITCH: one-student-one-phone + no-phone-switching are OFF while the system is being
+    // tested with few handsets (so one phone can mark many students and switching is allowed). Set
+    // back to true to re-enable that anti-cheat before going live. Consumed by CheckinValidator
+    // (coordinator hub) and the student "attendance paused after switching phones" gate.
+    const val ENFORCE_DEVICE_LOCK = false
     // Auth (set after login; binding key feeds the Sealer — never logged).
     var token by mutableStateOf<String?>(null)
     var userId by mutableStateOf<String?>(null)
@@ -72,6 +77,15 @@ object AppState {
     // Active session.
     var currentSessionId by mutableStateOf<String?>(null)
     var currentUnitId by mutableStateOf<String?>(null)
+    // Multi-coordinator lecturer code: true when the open session's unit has a daily code (the
+    // lecturer is shared today), so the coordinator screen shows the "enter lecturer's daily code"
+    // field. lecturerStartedHere flips true once the lecturer has STARTed here (gate or code).
+    var currentLecturerHasCode by mutableStateOf(false)
+    var lecturerStartedHere by mutableStateOf(false)
+    // Revealed ONLY after the lecturer STARTs in person at THIS hub (physical presence proof). The
+    // lecturer reads BOTH out to the other coordinators sharing them today so they can start too.
+    var currentLecturerCode by mutableStateOf<String?>(null)
+    var currentSessionCode by mutableStateOf<String?>(null)
     var lecturerCode by mutableStateOf("------")  // ROTATING lecturer code (changes every 10s)
     var secondsLeft by mutableStateOf(10)
     var hotspotSsid by mutableStateOf<String?>(null)   // the ACTIVE name students must join

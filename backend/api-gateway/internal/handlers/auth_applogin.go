@@ -129,9 +129,12 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 	// auth-service with "no account". Provision lazily — default password "Student", force change on
 	// first sign-in — so any ACTIVE student whose reg-number exists can always sign in.
 	var sName string
+	// Match the reg-number case-insensitively and ignoring stray whitespace: IDs imported from
+	// spreadsheets frequently differ in case/trailing spaces from what the student types, which
+	// used to make a perfectly valid ID resolve to nothing ("no account found").
 	if adminPool.QueryRow(ctx,
 		`SELECT email, student_id, COALESCE(full_name,'') FROM students_extended
-		  WHERE tenant_id = $1 AND student_id = $2 AND enrollment_status = 'ACTIVE' LIMIT 1`,
+		  WHERE tenant_id = $1 AND lower(btrim(student_id)) = lower($2) AND enrollment_status = 'ACTIVE' LIMIT 1`,
 		tenantID, id).Scan(&email, &studentID, &sName) == nil && email != "" {
 		ensureStudentLogin(ctx, adminPool, tenantID, email, sName)
 		return email, studentID, ""
@@ -143,9 +146,12 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 	// force change on first sign-in — exactly like the passwordless portal (ensureLecturerLogin),
 	// so any lecturer whose staff ID exists can sign in with the default and be sent to change it.
 	var lecturerID string
+	// Match the staff ID case-insensitively and ignoring stray whitespace. A lecturer's staff ID
+	// imported from a spreadsheet often differs in case/trailing spaces from what they type, so an
+	// exact match wrongly reported "no account found" even though the ID (and lecturer) exists.
 	if adminPool.QueryRow(ctx,
 		`SELECT lecturer_id::text, staff_id FROM lecturers
-		  WHERE tenant_id = $1 AND staff_id = $2 LIMIT 1`,
+		  WHERE tenant_id = $1 AND lower(btrim(staff_id)) = lower($2) LIMIT 1`,
 		tenantID, id).Scan(&lecturerID, &staffID) == nil && lecturerID != "" {
 		if userID, err := ensureLecturerLogin(ctx, adminPool, tenantID, lecturerID); err == nil && userID != "" {
 			var e string

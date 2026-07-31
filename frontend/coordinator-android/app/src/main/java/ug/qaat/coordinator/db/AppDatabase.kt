@@ -32,6 +32,10 @@ data class RosterEntity(
     val unitId: String,
     val studentIdHash: String,
     val qrSerialNumber: String,
+    // Display fields so chronic absentees (incl. never-present students) show a real reg-no/name
+    // OFFLINE instead of the privacy hash. Default "" for rows cached before this column existed.
+    val studentId: String = "",
+    val fullName: String = "",
 )
 
 /** Closed-session history (per unit) so absentee/trend analytics can run offline. */
@@ -115,6 +119,15 @@ interface AppDao {
     @Query("SELECT * FROM sessions ORDER BY sessionDate DESC LIMIT 50")
     fun recentSessions(): kotlinx.coroutines.flow.Flow<List<SessionEntity>>
 
+    // Sync audit shows only COMPLETE logs: a session that is no longer OPEN (it was closed) AND
+    // actually captured at least one check-in. Merely-attempted sessions (opened, or closed with
+    // nobody marked) are excluded so the audit lists real attendance runs, not every attempt.
+    @Query("""SELECT * FROM sessions
+              WHERE status != 'OPEN'
+                AND sessionId IN (SELECT DISTINCT sessionId FROM attendance_logs)
+              ORDER BY sessionDate DESC LIMIT 50""")
+    fun completedSessions(): kotlinx.coroutines.flow.Flow<List<SessionEntity>>
+
     @Query("SELECT sessionId, studentIdHash FROM attendance_logs WHERE sessionId IN (:sessionIds)")
     fun attendanceForSessions(sessionIds: List<String>): List<SessionStudent>
 
@@ -135,7 +148,7 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
 @Database(
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
         SessionEntity::class, PresentDisplayEntity::class],
-    version = 2,
+    version = 3,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -146,5 +159,13 @@ abstract class AppDatabase : RoomDatabase() {
 val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE sessions ADD COLUMN closedReason TEXT")
+    }
+}
+
+/** v2→v3: adds roster.studentId + roster.fullName (reg-no/name for offline absentee display). */
+val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE roster ADD COLUMN studentId TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE roster ADD COLUMN fullName TEXT NOT NULL DEFAULT ''")
     }
 }

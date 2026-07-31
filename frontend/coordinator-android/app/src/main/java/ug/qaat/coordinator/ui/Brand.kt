@@ -77,20 +77,11 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
     }
 }
 
-/** Bottom-nav tab icon: the app logo rendered beside the tab's own glyph, so every tab link in
- *  every role window (student / lecturer / coordinator) visibly bears the KIU QAAT logo. */
+/** Bottom-nav tab icon: just the tab's own glyph. (The app logo used to be drawn beside every
+ *  glyph; that was removed so the nav bar shows only the clean per-tab icon.) */
 @Composable
 fun TabGlyph(glyph: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Image(
-            painter = painterResource(R.drawable.qaat_logo),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(3.dp))
-        Text(glyph, fontSize = 13.sp)
-    }
+    Text(glyph, fontSize = 15.sp)
 }
 
 /** A faint, centered institution-logo watermark for EVERY app screen. It's a plain Image with

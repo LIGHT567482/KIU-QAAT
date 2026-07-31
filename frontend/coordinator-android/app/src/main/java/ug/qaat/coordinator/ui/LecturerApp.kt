@@ -10,10 +10,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import ug.qaat.coordinator.net.LecturerClient
 import ug.qaat.coordinator.net.NotificationClient
@@ -108,14 +111,22 @@ private fun LecturerSessionTab() {
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    suspend fun refresh() {
-        searching = true; msg = null
+    suspend fun refresh(showSpinner: Boolean = true) {
+        if (showSpinner) { searching = true; msg = null }
         val url = Discovery(ctx).find(); baseUrl = url
         session = url?.let { CheckinClient(it).session() }
         searching = false
-        if (url == null) msg = "Couldn't find the coordinator. Join their class Wi-Fi (mobile data OFF), then retry."
+        if (url == null) msg = "Couldn't find the coordinator's hotspot. Connect to their class Wi-Fi (mobile data OFF)."
     }
     LaunchedEffect(Unit) { refresh() }
+    // Poll every ~4s so the tab clears itself when the coordinator's hotspot drops and re-arms for
+    // the next session/unit — the lecturer never has to hit refresh between rounds.
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(4000)
+            if (!busy && !searching) runCatching { refresh(showSpinner = false) }
+        }
+    }
 
     fun gate() {
         val url = baseUrl ?: return
@@ -172,6 +183,9 @@ private fun LecturerRosterTab() {
     var rows by remember { mutableStateOf<List<LecturerClient.RosterRow>?>(null) }
     var sessions by remember { mutableStateOf<List<LecturerClient.Session>>(emptyList()) }
     var openSession by remember { mutableStateOf<LecturerClient.Session?>(null) }
+    // Daily shift: default to TODAY's sessions only (the whole day's records are kept server-side,
+    // but the roster shows today's shift and rolls over each day). Toggle off to see history.
+    var todayOnly by remember { mutableStateOf(true) }
 
     fun reload() {
         rows = null
@@ -232,9 +246,24 @@ private fun LecturerRosterTab() {
                         }
                     }
                 }
-                if (sessions.isNotEmpty()) {
-                    item { Spacer(Modifier.height(10.dp)); Text("Sessions", fontWeight = FontWeight.Bold) }
-                    items(sessions) { s ->
+                val today = java.time.LocalDate.now().toString()
+                val shownSessions = sessions
+                    .filter { !todayOnly || it.date == today }
+                    .sortedWith(compareBy({ it.unitName }, { it.date }))   // grouped by unit, never mixed
+                item {
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sessions", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        FilterChip(todayOnly, { todayOnly = true }, { Text("Today") }, modifier = Modifier.padding(end = 6.dp))
+                        FilterChip(!todayOnly, { todayOnly = false }, { Text("All days") })
+                    }
+                    if (unitFilter == null && units.size > 1)
+                        Text("Tip: pick a unit above to see just that unit's sessions.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (shownSessions.isEmpty()) item { Text(if (todayOnly) "No sessions today yet." else "No sessions.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp)) }
+                if (shownSessions.isNotEmpty()) {
+                    items(shownSessions) { s ->
                         Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small, onClick = { openSession = s }) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
@@ -251,44 +280,69 @@ private fun LecturerRosterTab() {
     }
 }
 
-/** Dialog: for one session, toggle present / absent / all. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Full-screen, Excel-style roster for ONE session: three columns (Reg no · Student name · Status),
+ *  a green ✓ for present and a red ✗ for absent, present/absent/all filtering, and PDF/CSV export.
+ *  It always loads the FULL list (so present + absent are both shown and exportable); the chips only
+ *  change what's displayed. */
 @Composable
 private fun SessionAttendanceDialog(session: LecturerClient.Session, onClose: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf("present") }
-    var students by remember { mutableStateOf<List<LecturerClient.SessStudent>?>(null) }
-    fun load() { students = null; scope.launch { students = LecturerClient().sessionStudents(session.sessionId, status) } }
-    LaunchedEffect(status) { load() }
+    var view by remember { mutableStateOf("all") }   // present | absent | all (display filter)
+    var all by remember { mutableStateOf<List<LecturerClient.SessStudent>?>(null) }
+    LaunchedEffect(session.sessionId) { all = LecturerClient().sessionStudents(session.sessionId, "all") }
 
-    AlertDialog(
-        onDismissRequest = onClose,
-        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
-        title = { Text("${session.unitName} · ${session.date}") },
-        text = {
-            Column {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(session.unitName.ifBlank { session.unitId }, fontWeight = FontWeight.Bold)
+                        Text(listOf(session.cohort, session.date).filter { it.isNotBlank() }.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    ExportRosterButton(
+                        baseName = "roster_${session.unitName.ifBlank { session.unitId }}_${session.date}".replace(Regex("[^A-Za-z0-9_-]"), "_"),
+                        title = "${session.unitName.ifBlank { session.unitId }} — ${session.date}",
+                    ) { (all ?: emptyList()).map { RosterLine(it.studentId, it.fullName, it.present) } }
+                    TextButton(onClick = onClose) { Text("Close") }
+                }
+                Spacer(Modifier.height(4.dp))
                 Row {
-                    listOf("present" to "Present", "absent" to "Absent", "all" to "All").forEach { (k, lbl) ->
-                        FilterChip(selected = status == k, onClick = { status = k }, label = { Text(lbl) }, modifier = Modifier.padding(end = 6.dp))
+                    listOf("all" to "All", "present" to "Present", "absent" to "Absent").forEach { (k, lbl) ->
+                        FilterChip(view == k, { view = k }, { Text(lbl) }, modifier = Modifier.padding(end = 6.dp))
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                val rows = (all ?: emptyList()).filter { when (view) { "present" -> it.present; "absent" -> !it.present; else -> true } }
+                    .sortedWith(compareBy({ !it.present }, { it.fullName }))
+                Text("${(all ?: emptyList()).count { it.present }} present · ${(all ?: emptyList()).count { !it.present }} absent",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp))
+                // Header row (the three Excel columns).
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Reg no", Modifier.weight(1.1f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Student name", Modifier.weight(1.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Status", Modifier.weight(0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+                HorizontalDivider()
                 when {
-                    students == null -> CircularProgressIndicator()
-                    students!!.isEmpty() -> Text("None.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                        students!!.forEach { s ->
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (s.present) "✓" else "•", color = if (s.present) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                                Spacer(Modifier.width(8.dp))
-                                Column { Text(s.fullName); Text(s.studentId, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    all == null -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
+                    rows.isEmpty() -> Text("No students.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                    else -> LazyColumn(Modifier.weight(1f)) {
+                        items(rows) { s ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(s.studentId, Modifier.weight(1.1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                Text(s.fullName, Modifier.weight(1.5f), fontSize = 13.sp)
+                                Box(Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
+                                    if (s.present) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    else Text("✗", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                }
                             }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         }
                     }
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 /** Inbox from the coordinator, and a composer to notify his students or the coordinator. */

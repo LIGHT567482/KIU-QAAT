@@ -519,10 +519,15 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 	}
 
 	for _, rec := range pkg.AttendanceRecords {
-		// Skip attendance for any session the lecturer never scanned (unverified lecture).
+		// TESTING PHASE: the lecturer-scan verification gate is RELAXED. Previously, attendance for a
+		// session with no lecturer scan was DROPPED here (continue), which is why a student who
+		// attended could still see 0% — their record never reached the summary. We now RECORD every
+		// captured attendance so it counts toward progress; lecturer presence is still seeded into
+		// lecturer_attendance_logs above when the package carries it. The counter is kept for
+		// telemetry only. Re-tighten (restore `continue`) alongside re-enabling the device-lock
+		// anti-cheat (AppState.ENFORCE_DEVICE_LOCK) before go-live.
 		if !verified[rec.SessionID] {
 			rejectedNoLecturer++
-			continue
 		}
 		studentID := hashToReg[rec.StudentIDHash]
 		if studentID == "" {

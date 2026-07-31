@@ -151,6 +151,9 @@ class InRoomServer(
                 call.json(mapOf(
                     "active" to (cur != null).toString(),
                     "lecturer_started" to (cur?.lecturerStarted?.invoke() == true).toString(),
+                    // The session id lets a student device remember it already attended THIS session
+                    // (one-per-session) and reset for the next one — it changes each session.
+                    "session_id" to (cur?.session?.sessionId ?: ""),
                     "unit_id" to (cur?.unitId ?: ""),
                     "unit_name" to (cur?.unitName ?: ""),
                     "cohort" to (cur?.cohort ?: ""),

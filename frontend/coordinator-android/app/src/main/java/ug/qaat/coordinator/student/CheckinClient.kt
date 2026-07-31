@@ -12,7 +12,7 @@ import org.json.JSONObject
 class CheckinClient(private val baseUrl: String) {
     private val http = StudentNet.lanClient()
 
-    data class Session(val active: Boolean, val lecturerStarted: Boolean, val unitName: String, val cohort: String)
+    data class Session(val active: Boolean, val lecturerStarted: Boolean, val unitName: String, val cohort: String, val sessionId: String = "")
     data class CheckinResult(val present: Boolean, val alreadyPresent: Boolean, val reason: String?)
 
     suspend fun session(): Session? = withContext(Dispatchers.IO) {
@@ -25,6 +25,7 @@ class CheckinClient(private val baseUrl: String) {
                 lecturerStarted = j.optString("lecturer_started") == "true",
                 unitName = j.optString("unit_name", ""),
                 cohort = j.optString("cohort", ""),
+                sessionId = j.optString("session_id", ""),
             )
         }.getOrNull()
     }

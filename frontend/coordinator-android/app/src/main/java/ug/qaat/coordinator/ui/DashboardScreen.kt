@@ -115,8 +115,15 @@ fun DashboardScreen() {
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
 
-        // Cohort details moved into the profile popup; only flag the unassigned case here.
-        if (overview?.offering == null && loaded) {
+        // Cohort details moved into the profile popup; only flag the GENUINELY unassigned case.
+        // A coordinator IS assigned if we have any cohort signal — units (online or cached), a
+        // cohort label, or a cached manifest with units. Only then is the banner suppressed, so an
+        // admin-assigned session that the overview call didn't return (e.g. offline / server waking)
+        // no longer shows a misleading "not assigned".
+        val hasCohort = (overview?.units?.isNotEmpty() == true) ||
+            (AppState.manifest?.units?.isNotEmpty() == true) ||
+            !AppState.cohortLabel.isNullOrBlank()
+        if (overview?.offering == null && loaded && !hasCohort) {
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                 Text("You are not yet assigned to a session. Ask your administrator to add you as a coordinator of a session.",
                     Modifier.padding(14.dp), fontSize = 13.sp)

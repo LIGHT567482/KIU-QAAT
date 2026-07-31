@@ -31,6 +31,9 @@ object SyncManager {
                 AttendanceRecord(it.logId, it.sessionId, it.studentIdHash, it.deviceFingerprintHash,
                     it.sequenceNumber, it.checkinTimestamp, it.entryMethod)
             }
+            // Only COMPLETE logs are synced: a closed session with NO check-ins has nothing to
+            // report, so we don't upload it. Mark it SYNCED so it stops re-queuing every pass.
+            if (records.isEmpty()) { dao.upsertSession(s.copy(status = "SYNCED")); continue }
             val pkg = SessionPackage.build(
                 s.sessionId, userId, records, sealedAt = Instant.now().toString(),
                 unitId = s.unitId, sessionDate = s.sessionDate,

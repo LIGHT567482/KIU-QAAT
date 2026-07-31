@@ -19,10 +19,11 @@ import ug.qaat.coordinator.di.Graph
  */
 @Composable
 fun SyncAuditScreen() {
-    val sessions by Graph.db.dao().recentSessions().collectAsStateWithLifecycle(emptyList())
+    // Only COMPLETE logs (closed + at least one check-in) — not every attempted/empty session.
+    val sessions by Graph.db.dao().completedSessions().collectAsStateWithLifecycle(emptyList())
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Sync audit", style = MaterialTheme.typography.titleLarge)
-        if (sessions.isEmpty()) { Text("No sessions yet."); return }
+        if (sessions.isEmpty()) { Text("No completed attendance to sync yet."); return }
         LazyColumn {
             items(sessions) { s: SessionEntity ->
                 val synced = s.status.equals("SYNCED", ignoreCase = true)

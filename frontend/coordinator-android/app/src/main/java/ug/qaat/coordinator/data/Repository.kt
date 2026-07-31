@@ -29,11 +29,18 @@ class Repository(private val dao: AppDao) {
             val sessions = dao.sessionsForUnit(unitId)
             val sessionIds = sessions.map { it.sessionId }
             if (sessionIds.isEmpty()) return@withContext emptyList()
-            val students = dao.rosterHashes(unitId)
+            val roster = dao.roster(unitId)
+            val students = roster.map { it.studentIdHash }
             val attendedBy = dao.attendanceForSessions(sessionIds)
                 .groupBy({ it.studentIdHash }, { it.sessionId })
                 .mapValues { it.value.toSet() }
-            ChronicAbsentee().evaluate(sessionIds, attendedBy, students)
+            val flagged = ChronicAbsentee().evaluate(sessionIds, attendedBy, students)
+            // Resolve the privacy hash → a human label (reg-no · name) so absentees are clearly
+            // visible offline, not shown as an opaque hash. Falls back to the hash if unknown.
+            val label = roster.associate { r ->
+                r.studentIdHash to listOf(r.studentId, r.fullName).filter { it.isNotBlank() }.joinToString(" · ")
+            }
+            flagged.map { f -> label[f.studentId]?.takeIf { it.isNotBlank() }?.let { f.copy(studentId = it) } ?: f }
         }
 
     // ── Attendance trend (per ISO week) ──────────────────────────────────────────

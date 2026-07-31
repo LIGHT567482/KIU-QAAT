@@ -83,7 +83,7 @@ class SessionService : Service() {
             ug.qaat.coordinator.di.Graph.init(this)
             stage = "build-validator"
             val store = RoomStore(ug.qaat.coordinator.di.Graph.db.dao())
-            val validator = CheckinValidator(store)
+            val validator = CheckinValidator(store, enforceDeviceLock = ug.qaat.coordinator.ui.AppState.ENFORCE_DEVICE_LOCK)
 
             stage = "read-assets"
             val attend = runCatching { assets.open("attend.html").bufferedReader().use { it.readText() } }.getOrDefault("")

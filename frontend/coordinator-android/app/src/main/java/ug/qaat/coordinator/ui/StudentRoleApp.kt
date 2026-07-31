@@ -182,20 +182,39 @@ private fun StudentAttend() {
     var status by remember { mutableStateOf<String?>(null) }
     var success by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    // True once this device has attended the CURRENT session (persisted for the day). Drives the
+    // greyed, disabled ATTEND button + the "already attended, turn Wi-Fi off" message.
+    var alreadyAttended by remember { mutableStateOf(false) }
 
-    suspend fun discover() {
-        searching = true; status = null; success = false; session = null
+    suspend fun discover(showSpinner: Boolean = true) {
+        if (showSpinner) { searching = true; status = null }
         val url = Discovery(ctx).find()
+        val newSession = url?.let { CheckinClient(it).session() }
+        // Reset the local "attended" view when the session changes (new sessionId = next round) or
+        // the hotspot dropped, so the student is prompted to reconnect / can attend the next session.
+        val newId = newSession?.sessionId ?: ""
+        val oldId = session?.sessionId ?: ""
+        if (newId != oldId) { success = false }
         baseUrl = url
-        session = url?.let { CheckinClient(it).session() }
+        session = newSession
+        alreadyAttended = newSession?.sessionId?.let { SessionStore.hasAttended(it) } == true
+        if (alreadyAttended) success = true
         searching = false
         status = when {
-            url == null -> "Couldn't find your coordinator. Join their Wi-Fi (mobile data OFF), then retry."
-            session?.active != true -> "Connected, but no session is active yet."
+            url == null -> "Couldn't find your coordinator. Connect to their class Wi-Fi (mobile data OFF)."
+            newSession?.active != true -> "Connected, but no session is active yet — wait for it to start."
             else -> null
         }
     }
     LaunchedEffect(Unit) { discover() }
+    // Poll every ~4s so the page reacts on its own: clears to "reconnect" when the hotspot drops,
+    // and re-enables for the next session — no manual refresh needed.
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(4000)
+            if (!busy && !searching) runCatching { discover(showSpinner = false) }
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(12.dp))
@@ -203,14 +222,26 @@ private fun StudentAttend() {
         AppState.studentId?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
         Spacer(Modifier.weight(1f))
 
-        val blocked = System.currentTimeMillis() < AppState.attendBlockUntil
+        // Device-switch cooldown only applies when the anti-cheat is enabled (off during testing).
+        val blocked = AppState.ENFORCE_DEVICE_LOCK && System.currentTimeMillis() < AppState.attendBlockUntil
         when {
             searching -> { CircularProgressIndicator(); Text("Finding your coordinator…", Modifier.padding(top = 12.dp)) }
             success -> {
                 Text("✓", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
-                Text("You're marked present", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text(if (alreadyAttended) "You already attended" else "You're marked present",
+                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 session?.let { Text("${it.unitName} · ${it.cohort}", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Text("You can turn Wi-Fi off now so a classmate can connect.", Modifier.padding(top = 8.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                // Greyed, disabled button reinforces that they're done and must free the Wi-Fi slot.
+                Button(enabled = false, modifier = Modifier.fillMaxWidth().height(64.dp), onClick = {}) {
+                    Text("ATTENDED ✓", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                    Text("📴 Turn your Wi-Fi OFF now so a classmate can connect and check in.",
+                        Modifier.padding(14.dp), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer)
+                }
             }
             session?.active == true && blocked -> {
                 val until = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(AppState.attendBlockUntil))
@@ -233,8 +264,11 @@ private fun StudentAttend() {
                             val fp = Fingerprint.get(ctx)
                             runCatching { CheckinClient(baseUrl!!).attend(AppState.studentId ?: "", fp) }
                                 .onSuccess { r ->
-                                    if (r.present || r.alreadyPresent) success = true
-                                    else status = REASONS[r.reason] ?: "Not marked: ${r.reason ?: "try again"}"
+                                    if (r.present || r.alreadyPresent) {
+                                        success = true
+                                        // Remember THIS session so the button stays greyed on reconnect (one per session).
+                                        session?.sessionId?.let { SessionStore.markAttended(it); alreadyAttended = true }
+                                    } else status = REASONS[r.reason] ?: "Not marked: ${r.reason ?: "try again"}"
                                     busy = false
                                 }
                                 .onFailure { status = "Couldn't reach the class server — make sure mobile data is OFF and you're on the coordinator's Wi-Fi."; busy = false }

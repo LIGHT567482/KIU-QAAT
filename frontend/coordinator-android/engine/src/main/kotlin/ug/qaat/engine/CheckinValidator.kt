@@ -13,6 +13,11 @@ import java.time.ZoneOffset
  */
 class CheckinValidator(
     private val store: Store,
+    // TESTING SWITCH: when false, the device anti-cheat is relaxed so ONE phone can check in MANY
+    // students and a student can switch phones freely — needed to test with few handsets. The
+    // roster check + one-attendance-per-student-per-session (DUPLICATE_SCAN) always stay on. Flip
+    // back to true (via the caller) to re-enable one-student-one-phone before going live.
+    private val enforceDeviceLock: Boolean = true,
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
     private val nowIso: () -> String = { java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString() },
     private val newUuid: () -> String = { java.util.UUID.randomUUID().toString() },
@@ -68,8 +73,10 @@ class CheckinValidator(
 
     /** Step 6a (a device is bound to a DIFFERENT student) + Step 4 (on the roster). Null = OK. */
     private fun rosterAndDeviceLock(studentIdHash: String, session: ActiveSession, device: DeviceContext): RejectionReason? {
-        store.bindingByFingerprint(device.fingerprintHash)?.let {
-            if (it.studentIdHash != studentIdHash) return RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT
+        if (enforceDeviceLock) {
+            store.bindingByFingerprint(device.fingerprintHash)?.let {
+                if (it.studentIdHash != studentIdHash) return RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT
+            }
         }
         if (studentIdHash !in session.rosterHashes) return RejectionReason.NOT_ON_ROSTER
         return null
@@ -79,14 +86,14 @@ class CheckinValidator(
     private fun bindAndRecord(studentIdHash: String, session: ActiveSession, device: DeviceContext): ValidationResult {
         val stored = store.bindingByStudent(studentIdHash)
         if (stored != null) {
-            if (stored.fingerprintHash != device.fingerprintHash)
+            if (enforceDeviceLock && stored.fingerprintHash != device.fingerprintHash)
                 return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_MISMATCH, auditFlag = "DEVICE_MISMATCH")
         } else {
             store.putBinding(DeviceBinding(studentIdHash, device.fingerprintHash, session.academicYear, nowIso()))
         }
         if (store.hasAttendance(session.sessionId, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DUPLICATE_SCAN)
-        if (store.deviceUsedByOther(session.sessionId, device.fingerprintHash, studentIdHash))
+        if (enforceDeviceLock && store.deviceUsedByOther(session.sessionId, device.fingerprintHash, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_ALREADY_USED)
         store.addAttendance(
             AttendanceRecord(

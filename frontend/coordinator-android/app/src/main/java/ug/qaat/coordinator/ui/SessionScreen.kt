@@ -115,6 +115,68 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 Modifier.padding(12.dp), textAlign = TextAlign.Center)
         }
 
+        // Multi-coordinator daily code: if THIS unit's lecturer is shared across coordinators today
+        // and hasn't STARTed here in person (they're in another coordinator's room), the coordinator
+        // enters the lecturer's daily 4-digit code (read out by the lecturer) to unlock check-in here.
+        if (AppState.currentLecturerHasCode && !AppState.lecturerStartedHere) {
+            Spacer(Modifier.height(8.dp))
+            var lecCode by remember { mutableStateOf("") }
+            var sesCode by remember { mutableStateOf("") }
+            var codeErr by remember { mutableStateOf<String?>(null) }
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text("Lecturer teaching several rooms at once? Enter BOTH codes they read out to start attendance here.",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            lecCode, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { lecCode = v; codeErr = null } },
+                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer code") },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedTextField(
+                            sesCode, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { sesCode = v; codeErr = null } },
+                            Modifier.weight(1f), singleLine = true, label = { Text("Session code") },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Button(enabled = lecCode.length == 4 && sesCode.length == 4, onClick = {
+                        if (ug.qaat.coordinator.session.SessionController.startLecturerByCode(lecCode, sesCode)) codeErr = null
+                        else codeErr = "Those codes aren't right for this lecturer/session today."
+                    }) { Text("Start attendance") }
+                    codeErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
+        // Revealed only after the lecturer STARTs in person here: the daily code they read out to
+        // the OTHER coordinators teaching them at the same time so those rooms can start too.
+        AppState.currentLecturerCode?.let { lc ->
+            Spacer(Modifier.height(8.dp))
+            Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text("Codes for other rooms teaching this lecturer now:", style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Row {
+                        Column(Modifier.weight(1f)) {
+                            Text("Lecturer code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text(lc, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text("Session code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text(AppState.currentSessionCode ?: "----", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    Text("Read BOTH out — the other coordinator enters them to start their room.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                }
+            }
+        }
+        if (AppState.currentLecturerHasCode && AppState.lecturerStartedHere && AppState.currentLecturerCode == null) {
+            Spacer(Modifier.height(8.dp))
+            Text("✓ Lecturer marked present via daily code — students can check in.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        }
+
         // No QR codes at all — the system is hotspot-driven. Students tap ATTEND and lecturers tap
         // START/END inside the app; both talk to this hub over the LAN (the app pulls the live gate
         // code itself from GET /status, so the lecturer never scans anything).

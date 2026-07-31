@@ -3,11 +3,15 @@ package ug.qaat.coordinator.ui
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.view.View
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -53,12 +57,28 @@ fun StudentPortalScreen(regNo: String?, onClose: () -> Unit) {
             )
         },
     ) { pad ->
+        var progress by remember { mutableStateOf(0) }
+        Box(Modifier.padding(pad).fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.padding(pad).fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             factory = { c ->
                 WebView(c).apply {
+                    // Hardware-accelerated rendering + caching so the portal paints faster and
+                    // repeat opens are near-instant (the external site is the slow part; we cache
+                    // what we can and stop re-fetching unchanged assets).
+                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.cacheMode = WebSettings.LOAD_DEFAULT
+                    settings.loadsImagesAutomatically = true
+                    settings.blockNetworkImage = false
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                    @Suppress("DEPRECATION") settings.setRenderPriority(WebSettings.RenderPriority.HIGH)
+                    // Drive the top progress bar so the load never looks frozen.
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) { progress = newProgress }
+                    }
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             val reg = regNo?.takeIf { it.isNotBlank() } ?: return
@@ -78,6 +98,12 @@ fun StudentPortalScreen(regNo: String?, onClose: () -> Unit) {
                 }
             },
         )
+        if (progress in 1..99)
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+            )
+        }
     }
 }
 

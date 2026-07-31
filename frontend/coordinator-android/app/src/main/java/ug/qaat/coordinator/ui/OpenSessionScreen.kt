@@ -24,7 +24,12 @@ import ug.qaat.coordinator.store.SessionStore
 @Composable
 fun OpenSessionScreen(onOpened: () -> Unit) {
     val ctx = LocalContext.current
-    val units = AppState.manifest?.units.orEmpty()
+    // The manifest carries the FULL cohort unit list (so the Timetable stays populated). For the
+    // attendance picker, prefer the units timetabled for TODAY; if none are timetabled for today,
+    // fall back to the full list so the picker is NEVER empty (units must not "disappear" here).
+    val allUnits = AppState.manifest?.units.orEmpty()
+    val todayDow = java.time.LocalDate.now().dayOfWeek.value   // 1=Mon … 7=Sun
+    val units = allUnits.filter { it.dayOfWeek == todayDow }.ifEmpty { allUnits }
     var selectedUnit by remember { mutableStateOf(units.firstOrNull()?.unitId) }
     var manualStaffId by remember { mutableStateOf("") }
 
@@ -87,6 +92,11 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Text("① In Android hotspot settings, set the name & a password (suggested name: ${AppState.suggestedSsid()}), then turn the hotspot ON.",
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("‼ If students can't SEE your hotspot in their Wi-Fi list: in hotspot settings set the " +
+                        "AP Band to 2.4 GHz (not 5 GHz — cheaper phones can't see 5 GHz), and make sure " +
+                        "“Hidden network” is OFF. These two settings are the usual reason a named hotspot is invisible.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     Spacer(Modifier.height(6.dp))
                     OutlinedButton(onClick = {
                         runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)) }

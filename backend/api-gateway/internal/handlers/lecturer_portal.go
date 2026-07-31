@@ -27,8 +27,11 @@ func portalResolveTenant(ctx context.Context, pool *pgxpool.Pool, org string) (s
 
 // portalResolveLecturer resolves (tenant, staff_id) → lecturer.
 func portalResolveLecturer(ctx context.Context, pool *pgxpool.Pool, tenantID, staffID string) (id, name string, ok bool) {
+	// Case-insensitive + whitespace-tolerant match: staff IDs imported from spreadsheets often
+	// differ in case/trailing spaces from what a lecturer types, and an exact match wrongly
+	// reported "no lecturer with that staff ID" even though the ID exists.
 	err := pool.QueryRow(ctx,
-		`SELECT lecturer_id::text, full_name FROM lecturers WHERE tenant_id = $1 AND staff_id = $2 LIMIT 1`,
+		`SELECT lecturer_id::text, full_name FROM lecturers WHERE tenant_id = $1 AND lower(btrim(staff_id)) = lower($2) LIMIT 1`,
 		tenantID, strings.TrimSpace(staffID)).Scan(&id, &name)
 	return id, name, err == nil && id != ""
 }

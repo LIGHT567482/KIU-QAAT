@@ -26,16 +26,25 @@ object SessionStore {
 
     fun init(context: Context) {
         if (::prefs.isInitialized) return
-        prefs = runCatching { create(context) }.getOrElse {
+        prefs = runCatching { create(context) }.getOrElse { first ->
             // The encrypted keyset can end up unreadable (e.g. after a reinstall or a keystore
             // change), which would otherwise SILENTLY break auto-login + offline caching. Wipe the
             // corrupt store and recreate it so persistence keeps working.
-            android.util.Log.w("QAAT_STORE", "encrypted prefs unreadable — recreating", it)
+            android.util.Log.w("QAAT_STORE", "encrypted prefs unreadable — recreating", first)
             runCatching {
                 context.getSharedPreferences("qaat_session", Context.MODE_PRIVATE).edit().clear().commit()
                 context.deleteSharedPreferences("qaat_session")
             }
-            create(context)
+            runCatching { create(context) }.getOrElse { second ->
+                // Some devices can't back EncryptedSharedPreferences at all — most commonly when the
+                // phone's CLOCK IS WRONG: the AndroidKeyStore key's certificate is "not valid yet",
+                // so key creation throws. That is the SAME wrong-clock state that breaks TLS on
+                // SIM-less phones. Rather than let this crash onCreate (app installs but "won't
+                // run"), fall back to PLAIN prefs so the app still opens and works. At-rest
+                // encryption is lost until the clock is corrected and the app reopened.
+                android.util.Log.e("QAAT_STORE", "EncryptedSharedPreferences unavailable — using plain prefs", second)
+                context.getSharedPreferences("qaat_session_plain", Context.MODE_PRIVATE)
+            }
         }
     }
 
@@ -86,6 +95,23 @@ object SessionStore {
     /** Student attendance-cooldown deadline (epoch millis) after a device switch. */
     fun saveAttendBlockUntil(ms: Long) { if (::prefs.isInitialized) prefs.edit().putLong("block_until", ms).apply() }
     fun attendBlockUntil(): Long = if (::prefs.isInitialized) prefs.getLong("block_until", 0L) else 0L
+
+    // Sessions this device has already attended TODAY (one-attendance-per-session). Stored as a set
+    // of session ids stamped with today's date; the whole set resets when the calendar day rolls over
+    // (a new day = a fresh shift), so the student can attend the next day's sessions normally.
+    private fun today(): String = java.time.LocalDate.now().toString()
+    private fun attendedSet(): MutableSet<String> {
+        if (!::prefs.isInitialized) return mutableSetOf()
+        if (prefs.getString("attended_day", "") != today()) return mutableSetOf()   // stale → empty
+        return prefs.getStringSet("attended_sessions", emptySet())!!.toMutableSet()
+    }
+    fun markAttended(sessionId: String) {
+        if (!::prefs.isInitialized || sessionId.isBlank()) return
+        val set = attendedSet().apply { add(sessionId) }
+        prefs.edit().putString("attended_day", today()).putStringSet("attended_sessions", set).apply()
+    }
+    fun hasAttended(sessionId: String): Boolean =
+        sessionId.isNotBlank() && attendedSet().contains(sessionId)
 
     // Light/dark preference — persisted so the chosen theme survives restarts.
     fun saveTheme(dark: Boolean) { if (::prefs.isInitialized) prefs.edit().putBoolean("dark", dark).apply() }
@@ -172,7 +198,8 @@ object SessionStore {
                 put(JSONObject().put("unit_id", it.unitId).put("unit_name", it.unitName)
                     .put("lecturer_staff_id", it.lecturerStaffId).put("lecturer_name", it.lecturerName)
                     .put("lecturer_phone", it.lecturerPhone).put("duration_minutes", it.durationMinutes)
-                    .put("day_of_week", it.dayOfWeek).put("start_time", it.startTime).put("venue_id", it.venueId))
+                    .put("day_of_week", it.dayOfWeek).put("start_time", it.startTime).put("venue_id", it.venueId)
+                    .put("lecturer_daily_code", it.lecturerDailyCode).put("session_code", it.sessionCode))
             }
         }
         prefs.edit().apply {
@@ -200,7 +227,8 @@ object SessionStore {
                 units.add(ManifestClient.UnitInfo(id, u.optString("unit_name", id),
                     u.optString("lecturer_staff_id", ""), u.optString("lecturer_name", ""), u.optString("lecturer_phone", ""),
                     u.optInt("duration_minutes", 0),
-                    u.optInt("day_of_week", 0), u.optString("start_time", ""), u.optString("venue_id", "")))
+                    u.optInt("day_of_week", 0), u.optString("start_time", ""), u.optString("venue_id", ""),
+                    u.optString("lecturer_daily_code", ""), u.optString("session_code", "")))
                 roster[id] = dao.roster(id)   // roster cached in Room survives offline
             }
         }

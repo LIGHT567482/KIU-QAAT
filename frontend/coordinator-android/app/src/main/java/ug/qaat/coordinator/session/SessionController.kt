@@ -37,6 +37,8 @@ object SessionController {
     private var lecturerStartFp: String = ""
     private var lecturerEndAt: String = ""
     private var lecturerEndFp: String = ""
+    private var lecturerDailyCode: String = ""   // the shared lecturer's daily code for this unit (or "")
+    private var sessionCode: String = ""         // this unit's daily session code (multi-coordinator case)
     private var enrolled: Int = 0
     private var current: SessionEntity? = null
     // Wall-clock deadline after which a forgotten session auto-closes (scheduled duration + 5m grace).
@@ -73,6 +75,14 @@ object SessionController {
         gateState = GateState.NOT_STARTED
         lecturerStartAt = ""; lecturerStartFp = ""; lecturerEndAt = ""; lecturerEndFp = ""
         this@SessionController.lecturerStaffId = lecturerStaffId
+        m.units.firstOrNull { it.unitId == unitId }.let {
+            lecturerDailyCode = it?.lecturerDailyCode ?: ""
+            sessionCode = it?.sessionCode ?: ""
+        }
+        AppState.currentLecturerHasCode = lecturerDailyCode.isNotBlank()
+        AppState.lecturerStartedHere = false
+        AppState.currentLecturerCode = null
+        AppState.currentSessionCode = null
         enrolled = roster.size
 
         val entity = SessionEntity(session.sessionId, unitId, LocalDate.now().toString(), "OPEN", enrolled)
@@ -111,7 +121,7 @@ object SessionController {
                 onGate = { action, fingerprint ->
                     val at = Instant.now().toString()
                     when (action) {
-                        GateAction.START -> { gateState = GateState.STARTED; lecturerStartAt = at; lecturerStartFp = fingerprint; runCatching { sm?.lecturerStarted() } }
+                        GateAction.START -> { gateState = GateState.STARTED; lecturerStartAt = at; lecturerStartFp = fingerprint; AppState.lecturerStartedHere = true; AppState.currentLecturerCode = lecturerDailyCode.takeIf { it.isNotBlank() }; AppState.currentSessionCode = sessionCode.takeIf { it.isNotBlank() }; runCatching { sm?.lecturerStarted() } }
                         GateAction.END -> { gateState = GateState.ENDED; lecturerEndAt = at; lecturerEndFp = fingerprint }
                     }
                 },
@@ -138,6 +148,23 @@ object SessionController {
         startTicker()
     }
 
+    /** Multi-coordinator case: mark the assigned lecturer present when the lecturer is physically on
+     *  ANOTHER coordinator's hotspot and can't START here in person. Requires BOTH the lecturer's
+     *  daily code AND this unit's session code (both delivered offline in the manifest). Returns true
+     *  only if BOTH match — students may then check in exactly as if the lecturer had STARTed. */
+    fun startLecturerByCode(lecturerCode: String, sessionCodeEntered: String): Boolean {
+        if (lecturerDailyCode.isBlank() || sessionCode.isBlank()) return false
+        if (lecturerCode.trim() != lecturerDailyCode || sessionCodeEntered.trim() != sessionCode) return false
+        if (gateState != GateState.STARTED) {
+            gateState = GateState.STARTED
+            lecturerStartAt = Instant.now().toString()
+            lecturerStartFp = "daily-code:$lecturerDailyCode/$sessionCode"   // presence proof into the sealed package
+            AppState.lecturerStartedHere = true
+            runCatching { sm?.lecturerStarted() }
+        }
+        return true
+    }
+
     /** Close the session: tear the room down IMMEDIATELY (stop the server + hotspot), then seal +
      *  upload in the background. Teardown must NOT wait on the (possibly slow) network upload. */
     fun close(auto: Boolean = false) = scope.launch {
@@ -162,6 +189,10 @@ object SessionController {
         current = null
         AppState.currentSessionId = null
         AppState.currentUnitId = null
+        AppState.currentLecturerHasCode = false
+        AppState.lecturerStartedHere = false
+        AppState.currentLecturerCode = null
+        AppState.currentSessionCode = null
         AppState.hotspotSsid = null
         AppState.hotspotPass = null
         AppState.hotspotUp = false
