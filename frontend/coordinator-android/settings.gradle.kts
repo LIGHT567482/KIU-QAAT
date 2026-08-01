@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "coordinator-android"
-include(":app", ":engine", ":crypto-core")
+include(":app", ":engine", ":crypto-core", ":patroller")

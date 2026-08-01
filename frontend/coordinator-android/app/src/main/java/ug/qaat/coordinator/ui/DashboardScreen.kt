@@ -60,7 +60,7 @@ fun DashboardScreen() {
         if (ov != null) {
             overview = ov
             ov.offering?.let {
-                AppState.cohortLabel = listOf(it.courseName, it.sessionType, "Year ${it.studyYear}", "Sem ${it.semester}", it.level, it.intake)
+                AppState.cohortLabel = listOf(it.school, it.department, it.courseName, it.sessionType, "Year ${it.studyYear}", "Sem ${it.semester}", it.level, it.intake)
                     .filter { s -> s.isNotBlank() }.joinToString(" · ")
             }
         } else if (m != null) {

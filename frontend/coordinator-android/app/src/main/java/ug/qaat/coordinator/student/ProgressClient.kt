@@ -14,7 +14,8 @@ class ProgressClient {
 
     data class UnitRow(val unitId: String, val unitName: String, val held: Int, val attended: Int,
                        val pct: Double, val threshold: Int, val status: String, val deficit: Int?)
-    data class Progress(val fullName: String, val institution: String, val units: List<UnitRow>)
+    data class Progress(val fullName: String, val institution: String, val units: List<UnitRow>,
+                        val school: String = "", val department: String = "")
 
     suspend fun fetch(reg: String): Progress = withContext(Dispatchers.IO) {
         val r = http.get("$base/api/v1/student/progress") {
@@ -38,6 +39,7 @@ class ProgressClient {
                 ))
             }
         }
-        Progress(j.optString("full_name", ""), j.optString("institution", ""), units)
+        Progress(j.optString("full_name", ""), j.optString("institution", ""), units,
+            j.optString("school", ""), j.optString("department", ""))
     }
 }

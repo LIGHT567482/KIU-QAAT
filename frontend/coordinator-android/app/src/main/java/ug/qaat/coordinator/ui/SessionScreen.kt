@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -84,31 +86,8 @@ fun SessionScreen(onOpenSession: () -> Unit) {
             }
         }
 
-        // "Can't be reached" rescue: if a device has joined but none has reached the server, the served
-        // gateway IP is probably wrong for this phone's hotspot. Let the coordinator read the real
-        // Gateway off a joined phone (Wi-Fi → the network → Gateway) and set it live.
-        if (AppState.hotspotUp && AppState.clientsReached == 0) {
-            var ip by remember { mutableStateOf(AppState.manualHotspotIp ?: "") }
-            Spacer(Modifier.height(8.dp))
-            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {
-                Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Students see “can't be reached”? On a JOINED phone open Wi-Fi → this network → Gateway, and type that IP here.",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer)
-                    AppState.hotspotDiag?.let { Text("This phone's addresses: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer) }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(ip, { ip = it }, Modifier.weight(1f), singleLine = true,
-                            placeholder = { Text(AppState.SYSTEM_HOTSPOT_IP) }, label = { Text("Gateway IP") })
-                        Spacer(Modifier.width(8.dp))
-                        TextButton(onClick = {
-                            val v = ip.trim().ifBlank { null }
-                            AppState.manualHotspotIp = v
-                            v?.let { AppState.inRoomIp = it; AppState.hotspotUp = true }
-                            ug.qaat.coordinator.store.SessionStore.saveHotspotIp(v)
-                        }) { Text("Set") }
-                    }
-                }
-            }
-        }
+        // (The manual "Gateway IP" rescue field was removed — student/lecturer phones now auto-discover
+        // the hub via the DHCP gateway + NSD, so it's no longer needed.)
         Spacer(Modifier.height(8.dp))
         Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
             Text("📴 Tell students to turn Wi-Fi OFF the moment they see ✓ — only ~10 fit at once.",
@@ -120,58 +99,42 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         // enters the lecturer's daily 4-digit code (read out by the lecturer) to unlock check-in here.
         if (AppState.currentLecturerHasCode && !AppState.lecturerStartedHere) {
             Spacer(Modifier.height(8.dp))
-            var lecCode by remember { mutableStateOf("") }
-            var sesCode by remember { mutableStateOf("") }
+            var code by remember { mutableStateOf("") }
             var codeErr by remember { mutableStateOf<String?>(null) }
             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Lecturer teaching several rooms at once? Enter BOTH codes they read out to start attendance here.",
+                    Text("Lecturer teaching several rooms at once? Enter the code they read out to start attendance here.",
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
-                            lecCode, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { lecCode = v; codeErr = null } },
-                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer code") },
+                            code, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { code = v; codeErr = null } },
+                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer/session code") },
                         )
                         Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(
-                            sesCode, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { sesCode = v; codeErr = null } },
-                            Modifier.weight(1f), singleLine = true, label = { Text("Session code") },
-                        )
+                        Button(enabled = code.length == 4, onClick = {
+                            if (ug.qaat.coordinator.session.SessionController.startLecturerByCode(code)) codeErr = null
+                            else codeErr = "That code isn't right for this lecturer/session today."
+                        }) { Text("Start") }
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Button(enabled = lecCode.length == 4 && sesCode.length == 4, onClick = {
-                        if (ug.qaat.coordinator.session.SessionController.startLecturerByCode(lecCode, sesCode)) codeErr = null
-                        else codeErr = "Those codes aren't right for this lecturer/session today."
-                    }) { Text("Start attendance") }
                     codeErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
                 }
             }
         }
         // Revealed only after the lecturer STARTs in person here: the daily code they read out to
         // the OTHER coordinators teaching them at the same time so those rooms can start too.
-        AppState.currentLecturerCode?.let { lc ->
+        AppState.currentSessionCode?.let { c ->
             Spacer(Modifier.height(8.dp))
             Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Codes for other rooms teaching this lecturer now:", style = MaterialTheme.typography.labelSmall)
-                    Spacer(Modifier.height(4.dp))
-                    Row {
-                        Column(Modifier.weight(1f)) {
-                            Text("Lecturer code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                            Text(lc, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text("Session code", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                            Text(AppState.currentSessionCode ?: "----", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                        }
-                    }
-                    Text("Read BOTH out — the other coordinator enters them to start their room.",
+                    Text("Code for other rooms teaching this lecturer now:", style = MaterialTheme.typography.labelSmall)
+                    Text(c, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                    Text("Read this out — the other coordinator enters it to start their room.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                 }
             }
         }
-        if (AppState.currentLecturerHasCode && AppState.lecturerStartedHere && AppState.currentLecturerCode == null) {
+        if (AppState.currentLecturerHasCode && AppState.lecturerStartedHere && AppState.currentSessionCode == null) {
             Spacer(Modifier.height(8.dp))
             Text("✓ Lecturer marked present via daily code — students can check in.",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -181,22 +144,13 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         // START/END inside the app; both talk to this hub over the LAN (the app pulls the live gate
         // code itself from GET /status, so the lecturer never scans anything).
         Spacer(Modifier.height(12.dp))
-        Text("Present: $present", style = MaterialTheme.typography.titleMedium)
-
-        // Live feed
-        LazyColumn(Modifier.weight(1f)) {
-            items(roster) { r: PresentDisplayEntity ->
-                ListItem(
-                    headlineContent = { Text(r.fullName.ifBlank { r.studentId }) },
-                    supportingContent = { Text("${r.studentId} · ${r.checkinTimestamp.takeLast(8)}") },
-                    trailingContent = {
-                        val ok = r.status == "PRESENT"
-                        Text(if (ok) "✓" else r.status, color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    },
-                )
-                HorizontalDivider()
-            }
+        // The live roster is now behind a button that opens a dedicated page (keeps this screen tidy).
+        var showRoster by remember { mutableStateOf(false) }
+        Button(onClick = { showRoster = true }, Modifier.fillMaxWidth()) {
+            Text("View live roster — $present present", fontWeight = FontWeight.Bold)
         }
+        if (showRoster) LiveRosterDialog(roster, present) { showRoster = false }
+        Spacer(Modifier.weight(1f))
 
         // Announce
         var msg by remember { mutableStateOf("") }
@@ -215,6 +169,42 @@ fun SessionScreen(onOpenSession: () -> Unit) {
             onClick = { ug.qaat.coordinator.session.SessionController.close() },
             Modifier.fillMaxWidth(),
         ) { Text("End session + sync") }
+    }
+}
+
+/** The live roster on its own page (opened from the "View live roster" button): who is present now,
+ *  newest first, updating live as students check in. */
+@Composable
+private fun LiveRosterDialog(roster: List<PresentDisplayEntity>, present: Int, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Live roster — $present present", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onClose) { Text("Close") }
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Reg no", Modifier.weight(1.1f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Student name", Modifier.weight(1.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Status", Modifier.weight(0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                }
+                HorizontalDivider()
+                if (roster.isEmpty()) Text("No one has checked in yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                else LazyColumn(Modifier.weight(1f)) {
+                    items(roster) { r: PresentDisplayEntity ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(r.studentId, Modifier.weight(1.1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            Text(r.fullName.ifBlank { "—" }, Modifier.weight(1.5f), fontSize = 13.sp)
+                            Box(Modifier.weight(0.5f), contentAlignment = Alignment.Center) {
+                                val ok = r.status == "PRESENT"
+                                Text(if (ok) "✓" else "✗", color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    }
+                }
+            }
+        }
     }
 }
 

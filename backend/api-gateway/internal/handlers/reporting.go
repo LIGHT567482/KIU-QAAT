@@ -673,14 +673,17 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		var tenantID, fullName, academicYear, institution string
+		var tenantID, fullName, academicYear, institution, school, department string
 		var semester int
 		err := adminPool.QueryRow(r.Context(), `
 			SELECT se.tenant_id::text, se.full_name, COALESCE(se.academic_year,''),
-			       COALESCE(se.semester,1), COALESCE(t.name,'')
-			FROM students_extended se JOIN tenants t ON t.tenant_id = se.tenant_id
+			       COALESCE(se.semester,1), COALESCE(t.name,''),
+			       COALESCE(c.school,''), COALESCE(c.department,'')
+			FROM students_extended se
+			JOIN tenants t ON t.tenant_id = se.tenant_id
+			LEFT JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
 			WHERE se.student_id = $1 AND se.tenant_id = $2 LIMIT 1`,
-			reg, scopeTenant).Scan(&tenantID, &fullName, &academicYear, &semester, &institution)
+			reg, scopeTenant).Scan(&tenantID, &fullName, &academicYear, &semester, &institution, &school, &department)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "no student with that registration number at this institution"))
 			return
@@ -734,6 +737,8 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			"institution":   institution,
 			"academic_year": academicYear,
 			"semester":      semester,
+			"school":        school,
+			"department":    department,
 			"units":         units,
 		})
 	}

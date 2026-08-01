@@ -39,13 +39,12 @@ type manifestSession struct {
 	LecturerStaffID string `json:"lecturer_staff_id,omitempty"`
 	LecturerName    string `json:"lecturer_name,omitempty"`
 	LecturerPhone   string `json:"lecturer_phone,omitempty"`
-	// Multi-coordinator authorization codes, set ONLY when this unit's lecturer is shared across
-	// several coordinators' concurrent sessions today. To mark the lecturer present on a hub where
-	// the lecturer isn't physically present, the coordinator enters BOTH: the LecturerDailyCode
-	// (proves the lecturer — one per lecturer per day) AND the SessionCode (proves this specific
-	// session/unit — one per unit per day). Both empty otherwise.
-	LecturerDailyCode string `json:"lecturer_daily_code,omitempty"`
-	SessionCode       string `json:"session_code,omitempty"`
+	// SessionCode is ONE code that covers BOTH the lecturer and the session: it is generated per
+	// lecturer per day (unique across the tenant that day) and delivered on each of that lecturer's
+	// sessions, and is set ONLY when the lecturer is shared across several coordinators' concurrent
+	// sessions today. A coordinator whose lecturer is physically in another room enters this single
+	// code to mark the lecturer present and start attendance. Empty otherwise.
+	SessionCode string `json:"session_code,omitempty"`
 }
 
 type rosterEntry struct {
@@ -269,23 +268,20 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	}
 	// Multi-coordinator daily codes: for each unit whose lecturer is shared across 2+ coordinators'
 	// offerings, attach that lecturer's unique daily 4-digit code (get-or-create). Cached per staff id.
+	// ONE code covering both lecturer + session: generated per lecturer per day, attached to each of
+	// that lecturer's sessions, only in the multi-coordinator case.
 	codeByStaff := map[string]string{}
 	for i := range sessions {
 		sid := sessions[i].LecturerStaffID
 		if sid == "" {
 			continue
 		}
-		lc, seen := codeByStaff[sid]
+		c, seen := codeByStaff[sid]
 		if !seen {
-			lc = lecturerDailyCode(ctx, conn, tenantID, sid)
-			codeByStaff[sid] = lc
+			c = lecturerDailyCode(ctx, conn, tenantID, sid)
+			codeByStaff[sid] = c
 		}
-		sessions[i].LecturerDailyCode = lc
-		// The SESSION code accompanies the lecturer code (only in the multi-coordinator case) and is
-		// unique per UNIT per day, so authorizing a remote room needs BOTH codes.
-		if lc != "" {
-			sessions[i].SessionCode = getOrCreateDailyCode(ctx, conn, tenantID, "unit:"+sessions[i].UnitID)
-		}
+		sessions[i].SessionCode = c
 	}
 	// NB: the daily session-window gate is applied at the ManifestDaily handler
 	// (live, post-cache) so the cached body always carries the full session list;

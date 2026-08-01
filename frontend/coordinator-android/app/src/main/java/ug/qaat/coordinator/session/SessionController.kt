@@ -37,8 +37,7 @@ object SessionController {
     private var lecturerStartFp: String = ""
     private var lecturerEndAt: String = ""
     private var lecturerEndFp: String = ""
-    private var lecturerDailyCode: String = ""   // the shared lecturer's daily code for this unit (or "")
-    private var sessionCode: String = ""         // this unit's daily session code (multi-coordinator case)
+    private var sessionCode: String = ""   // the ONE daily code (lecturer+session) for this unit, or ""
     private var enrolled: Int = 0
     private var current: SessionEntity? = null
     // Wall-clock deadline after which a forgotten session auto-closes (scheduled duration + 5m grace).
@@ -75,13 +74,9 @@ object SessionController {
         gateState = GateState.NOT_STARTED
         lecturerStartAt = ""; lecturerStartFp = ""; lecturerEndAt = ""; lecturerEndFp = ""
         this@SessionController.lecturerStaffId = lecturerStaffId
-        m.units.firstOrNull { it.unitId == unitId }.let {
-            lecturerDailyCode = it?.lecturerDailyCode ?: ""
-            sessionCode = it?.sessionCode ?: ""
-        }
-        AppState.currentLecturerHasCode = lecturerDailyCode.isNotBlank()
+        sessionCode = m.units.firstOrNull { it.unitId == unitId }?.sessionCode ?: ""
+        AppState.currentLecturerHasCode = sessionCode.isNotBlank()
         AppState.lecturerStartedHere = false
-        AppState.currentLecturerCode = null
         AppState.currentSessionCode = null
         enrolled = roster.size
 
@@ -121,7 +116,7 @@ object SessionController {
                 onGate = { action, fingerprint ->
                     val at = Instant.now().toString()
                     when (action) {
-                        GateAction.START -> { gateState = GateState.STARTED; lecturerStartAt = at; lecturerStartFp = fingerprint; AppState.lecturerStartedHere = true; AppState.currentLecturerCode = lecturerDailyCode.takeIf { it.isNotBlank() }; AppState.currentSessionCode = sessionCode.takeIf { it.isNotBlank() }; runCatching { sm?.lecturerStarted() } }
+                        GateAction.START -> { gateState = GateState.STARTED; lecturerStartAt = at; lecturerStartFp = fingerprint; AppState.lecturerStartedHere = true; AppState.currentSessionCode = sessionCode.takeIf { it.isNotBlank() }; runCatching { sm?.lecturerStarted() } }
                         GateAction.END -> { gateState = GateState.ENDED; lecturerEndAt = at; lecturerEndFp = fingerprint }
                     }
                 },
@@ -149,16 +144,15 @@ object SessionController {
     }
 
     /** Multi-coordinator case: mark the assigned lecturer present when the lecturer is physically on
-     *  ANOTHER coordinator's hotspot and can't START here in person. Requires BOTH the lecturer's
-     *  daily code AND this unit's session code (both delivered offline in the manifest). Returns true
-     *  only if BOTH match — students may then check in exactly as if the lecturer had STARTed. */
-    fun startLecturerByCode(lecturerCode: String, sessionCodeEntered: String): Boolean {
-        if (lecturerDailyCode.isBlank() || sessionCode.isBlank()) return false
-        if (lecturerCode.trim() != lecturerDailyCode || sessionCodeEntered.trim() != sessionCode) return false
+     *  ANOTHER coordinator's hotspot and can't START here in person. Takes the ONE daily code (which
+     *  covers both the lecturer and the session), delivered offline in this unit's manifest. Returns
+     *  true if it matches — students may then check in exactly as if the lecturer had STARTed. */
+    fun startLecturerByCode(entered: String): Boolean {
+        if (sessionCode.isBlank() || entered.trim() != sessionCode) return false
         if (gateState != GateState.STARTED) {
             gateState = GateState.STARTED
             lecturerStartAt = Instant.now().toString()
-            lecturerStartFp = "daily-code:$lecturerDailyCode/$sessionCode"   // presence proof into the sealed package
+            lecturerStartFp = "daily-code:$sessionCode"   // presence proof carried into the sealed package
             AppState.lecturerStartedHere = true
             runCatching { sm?.lecturerStarted() }
         }
@@ -191,7 +185,6 @@ object SessionController {
         AppState.currentUnitId = null
         AppState.currentLecturerHasCode = false
         AppState.lecturerStartedHere = false
-        AppState.currentLecturerCode = null
         AppState.currentSessionCode = null
         AppState.hotspotSsid = null
         AppState.hotspotPass = null

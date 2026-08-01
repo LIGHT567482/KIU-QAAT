@@ -153,6 +153,12 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Get("/api/v1/manifest/daily", handlers.ManifestDaily(pool, rdb))
 
+		// ── QA Patroller (offline-first lecturer-presence patrol) ─────────────
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Get("/api/v1/patrol/manifest", handlers.PatrolManifest(pool))
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
+
 		// ── QR Management (→ qr-generator) ────────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleAdmin)).
 			Post("/api/v1/qr/generate/batch", qrProxy)
@@ -283,6 +289,20 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/admin/tenants/{tenant_id}/users", handlers.ListTenantUsers(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/users", handlers.CreateUser(adminPool))
+		// ── Schools/colleges + departments (org foundation) ───────────────────
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/schools", handlers.ListSchools(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/schools", handlers.CreateSchool(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Delete("/api/v1/admin/tenants/{tenant_id}/schools/{school_id}", handlers.DeleteSchool(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/departments", handlers.ListDepartments(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/departments", handlers.CreateDepartment(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+			Delete("/api/v1/admin/tenants/{tenant_id}/departments/{department_id}", handlers.DeleteDepartment(adminPool))
+
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/courses", handlers.ListCourses(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).

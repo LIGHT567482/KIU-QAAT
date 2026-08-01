@@ -24,6 +24,7 @@ import AdminCourses from './pages/admin/AdminCourses'
 import AdminCourseUnits from './pages/admin/AdminCourseUnits'
 import AdminStudents from './pages/admin/AdminStudents'
 import AdminVenues from './pages/admin/AdminVenues'
+import AdminSchools from './pages/admin/AdminSchools'
 import AdminLecturers from './pages/admin/AdminLecturers'
 import LecturerDashboard from './pages/lecturer/LecturerDashboard'
 import AdminLecturerAssignments from './pages/admin/AdminLecturerAssignments'
@@ -88,6 +89,7 @@ export default function App() {
             <Route path="/admin"                                      element={<AdminHome />} />
             <Route path="/admin/settings"                             element={<AdminSettings />} />
             <Route path="/admin/tenants/:tenantId/users"              element={<AdminUsers />} />
+            <Route path="/admin/tenants/:tenantId/schools"            element={<AdminSchools />} />
             <Route path="/admin/tenants/:tenantId/courses"            element={<AdminCourses />} />
             <Route path="/admin/tenants/:tenantId/students"           element={<AdminStudents />} />
             <Route path="/admin/timetable"                            element={<Timetable />} />

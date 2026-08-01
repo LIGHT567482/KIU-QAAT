@@ -185,6 +185,10 @@ private fun StudentAttend() {
     // True once this device has attended the CURRENT session (persisted for the day). Drives the
     // greyed, disabled ATTEND button + the "already attended, turn Wi-Fi off" message.
     var alreadyAttended by remember { mutableStateOf(false) }
+    // The student's latest notification, surfaced HERE on the attendance page right after a
+    // successful check-in (so they see any message from their lecturer/coordinator immediately).
+    var latestNotif by remember { mutableStateOf<NotificationClient.Notif?>(null) }
+    LaunchedEffect(success) { if (success) runCatching { latestNotif = NotificationClient().inbox().firstOrNull() } }
 
     suspend fun discover(showSpinner: Boolean = true) {
         if (showSpinner) { searching = true; status = null }
@@ -241,6 +245,17 @@ private fun StudentAttend() {
                     Text("📴 Turn your Wi-Fi OFF now so a classmate can connect and check in.",
                         Modifier.padding(14.dp), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+                // Latest notification, shown right after checking in.
+                latestNotif?.let { n ->
+                    Spacer(Modifier.height(12.dp))
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("🔔 ${n.subject}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text("from ${n.senderName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            if (n.body.isNotBlank()) { Spacer(Modifier.height(4.dp)); Text(n.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer) }
+                        }
+                    }
                 }
             }
             session?.active == true && blocked -> {
@@ -310,6 +325,10 @@ private fun StudentProgress() {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("My attendance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         data?.let { Text(it.fullName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        data?.let { p ->
+            val org = listOf(p.school, p.department).filter { it.isNotBlank() }.joinToString(" · ")
+            if (org.isNotBlank()) Text(org, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Spacer(Modifier.height(12.dp))
         when {
             loading -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }

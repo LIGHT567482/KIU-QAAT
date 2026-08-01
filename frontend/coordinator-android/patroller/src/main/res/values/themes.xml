@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Minimal Activity theme; the UI itself is Compose Material3. -->
+    <style name="Theme.Patroller" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -25,12 +25,21 @@ import ug.qaat.coordinator.store.SessionStore
 fun OpenSessionScreen(onOpened: () -> Unit) {
     val ctx = LocalContext.current
     // The manifest carries the FULL cohort unit list (so the Timetable stays populated). For the
-    // attendance picker, prefer the units timetabled for TODAY; if none are timetabled for today,
-    // fall back to the full list so the picker is NEVER empty (units must not "disappear" here).
+    // ATTENDANCE picker, a coordinator may only start a unit that is actually TIMETABLED for today
+    // (has a day + start time) AND whose slot is due — the unit appears 10 minutes before its
+    // scheduled start. Un-timetabled units are never startable here. No fall-back to "all units".
     val allUnits = AppState.manifest?.units.orEmpty()
     val todayDow = java.time.LocalDate.now().dayOfWeek.value   // 1=Mon … 7=Sun
-    val units = allUnits.filter { it.dayOfWeek == todayDow }.ifEmpty { allUnits }
-    var selectedUnit by remember { mutableStateOf(units.firstOrNull()?.unitId) }
+    val nowMin = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+    fun startMinutes(hhmm: String): Int? {
+        val p = hhmm.split(":"); val h = p.getOrNull(0)?.toIntOrNull(); val m = p.getOrNull(1)?.toIntOrNull()
+        return if (h != null && m != null) h * 60 + m else null
+    }
+    val units = allUnits.filter { u ->
+        val start = u.startTime.takeIf { it.isNotBlank() }?.let(::startMinutes)
+        u.dayOfWeek == todayDow && start != null && nowMin >= start - 10
+    }
+    var selectedUnit by remember(units.size) { mutableStateOf(units.firstOrNull()?.unitId) }
     var manualStaffId by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -52,7 +61,12 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
             }
             return
         }
-        if (units.isEmpty()) { Text("No units scheduled for today in the manifest."); return }
+        if (units.isEmpty()) {
+            Text("No unit is due to start right now. A unit becomes available 10 minutes before its " +
+                "timetabled time — units that aren't timetabled for today can't start attendance here.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return
+        }
 
         Spacer(Modifier.height(12.dp))
         Text("1. Start the room Wi-Fi + server", style = MaterialTheme.typography.titleSmall)

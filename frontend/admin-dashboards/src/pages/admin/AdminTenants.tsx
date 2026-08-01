@@ -20,6 +20,7 @@ export default function AdminHome() {
   const info = status === 'ok' ? data : undefined
 
   const links: { label: string; href: string; desc: string }[] = [
+    { label: 'Schools & Departments', href: `/admin/tenants/${tenantId}/schools`, desc: 'Add schools/colleges and their departments' },
     { label: 'Courses',     href: `/admin/tenants/${tenantId}/courses`,      desc: 'Courses, levels & cohorts' },
     { label: 'Students',    href: `/admin/tenants/${tenantId}/students`,     desc: 'Enrolment records' },
     { label: 'Lecturers',   href: `/admin/tenants/${tenantId}/lecturers`,    desc: 'Lecturer directory' },

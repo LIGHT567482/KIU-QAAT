@@ -80,20 +80,24 @@ func CreateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 		// a property of the LEVEL (Degree 3y, Masters 2y…), set in the level list —
 		// not the course. The coordinator belongs to a cohort (course + session + …).
 		var req struct {
-			CourseID   string `json:"course_id"`
-			Name       string `json:"name"`
-			Department string `json:"department"`
-			School     string `json:"school"`
+			CourseID     string `json:"course_id"`
+			Name         string `json:"name"`
+			Department   string `json:"department"`
+			School       string `json:"school"`
+			SchoolID     string `json:"school_id"`     // optional: chosen from the managed schools list
+			DepartmentID string `json:"department_id"` // optional: chosen from the managed departments list
 		}
 		if err := decodeJSON(r, &req); err != nil || req.CourseID == "" || req.Name == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "course_id and name are required"))
 			return
 		}
 
+		// Store the structured FKs (when picked from the managed lists) AND the display names, so all
+		// existing queries that read courses.school/department keep working.
 		_, err := adminPool.Exec(r.Context(), `
-			INSERT INTO courses (course_id, tenant_id, name, department, school)
-			VALUES ($1, $2, $3, $4, $5)`,
-			req.CourseID, tenantID, req.Name, req.Department, req.School)
+			INSERT INTO courses (course_id, tenant_id, name, department, school, school_id, department_id)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid)`,
+			req.CourseID, tenantID, req.Name, req.Department, req.School, req.SchoolID, req.DepartmentID)
 		if err != nil {
 			writeJSON(w, http.StatusConflict, errBody("CONFLICT", "course_id already exists: "+err.Error()))
 			return

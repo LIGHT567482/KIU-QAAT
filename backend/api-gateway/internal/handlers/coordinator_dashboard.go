@@ -33,19 +33,20 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		var offeringID, courseID, courseName, level, intake, sessionType string
+		var offeringID, courseID, courseName, level, intake, sessionType, school, department string
 		var studyYear, semester int
 		// One coordinator = ONE cohort. If a coordinator is (wrongly) attached to more than one
 		// offering, deterministically take the most recent so the dashboard shows exactly one
 		// cohort — never a mix of two cohorts that share the same course.
 		err = conn.QueryRow(r.Context(), `
 			SELECT o.offering_id::text, o.course_id, c.name,
-			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''), o.session_type
+			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''), o.session_type,
+			       COALESCE(c.school,''), COALESCE(c.department,'')
 			FROM course_offerings o
 			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
 			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
 			ORDER BY o.created_at DESC LIMIT 1`,
-			coordID, tenantID).Scan(&offeringID, &courseID, &courseName, &studyYear, &semester, &level, &intake, &sessionType)
+			coordID, tenantID).Scan(&offeringID, &courseID, &courseName, &studyYear, &semester, &level, &intake, &sessionType, &school, &department)
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, map[string]interface{}{"offering": nil, "units": []any{}})
 			return
@@ -139,6 +140,7 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 				"offering_id": offeringID, "course_id": courseID, "course_name": courseName,
 				"session_type": sessionType, "study_year": studyYear, "semester": semester,
 				"level": level, "intake": intake,
+				"school": school, "department": department,
 			},
 			"units": units,
 			"slots": slots,

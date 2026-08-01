@@ -44,6 +44,11 @@ export default function AdminCourses() {
   const usersQ = useQuery<User[]>(
     () => api.get(`/api/v1/admin/tenants/${tenantId}/users`), [tenantId])
   const users = usersQ.data
+  // Managed org lists so a course inherits its school → department (cascading selects below).
+  const schoolsQ = useQuery<{ school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
+  const deptsQ = useQuery<{ department_id: string; school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/departments`), [tenantId])
+  const orgSchools = schoolsQ.data ?? []
+  const orgDepts = deptsQ.data ?? []
   const brandQ = useQuery<{ domain: string }>(() => api.get('/api/v1/branding'))
   const domain = brandQ.status === 'ok' ? (brandQ.data?.domain ?? '') : ''
   const sessionsQ = useQuery<{ study_sessions: string[] }>(() => api.get('/api/v1/admin/settings/study-sessions'), [tenantId])
@@ -79,7 +84,7 @@ export default function AdminCourses() {
     (!filters.department || c.department === filters.department) &&
     (!filters.school || c.school === filters.school) &&
     (!filters.level || courseLevels.get(c.course_id)?.has(filters.level)))
-  const [form, setForm] = useState({ course_id: '', name: '', department: '', school: '' })
+  const [form, setForm] = useState({ course_id: '', name: '', department: '', school: '', school_id: '', department_id: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -92,7 +97,7 @@ export default function AdminCourses() {
     try {
       await api.post(`/api/v1/admin/tenants/${tenantId}/courses`, form)
       setCreating(false)
-      setForm({ course_id: '', name: '', department: '', school: '' })
+      setForm({ course_id: '', name: '', department: '', school: '', school_id: '', department_id: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setSaving(false) }
@@ -175,8 +180,22 @@ export default function AdminCourses() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Input label="Course ID *" value={form.course_id} onChange={v => setForm(f => ({ ...f, course_id: v }))} placeholder="e.g. SWE" />
             <Input label="Course Name *" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="e.g. Software Engineering" />
-            <Input label="Department" value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))} />
-            <Input label="School / Faculty" value={form.school} onChange={v => setForm(f => ({ ...f, school: v }))} />
+            <label style={{ display: 'block' }}>
+              <div style={labelStyle}>School / College</div>
+              <select value={form.school_id} style={selectStyle}
+                onChange={e => { const s = orgSchools.find(x => x.school_id === e.target.value); setForm(f => ({ ...f, school_id: e.target.value, school: s?.name ?? '', department_id: '', department: '' })) }}>
+                <option value="">{orgSchools.length ? 'Select a school…' : 'Add schools first (Schools & Departments)'}</option>
+                {orgSchools.map(s => <option key={s.school_id} value={s.school_id}>{s.name}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'block' }}>
+              <div style={labelStyle}>Department</div>
+              <select value={form.department_id} disabled={!form.school_id} style={selectStyle}
+                onChange={e => { const d = orgDepts.find(x => x.department_id === e.target.value); setForm(f => ({ ...f, department_id: e.target.value, department: d?.name ?? '' })) }}>
+                <option value="">{form.school_id ? 'Select a department…' : 'Pick a school first'}</option>
+                {orgDepts.filter(d => d.school_id === form.school_id).map(d => <option key={d.department_id} value={d.department_id}>{d.name}</option>)}
+              </select>
+            </label>
           </div>
           <button onClick={handleCreate} disabled={saving || !form.course_id || !form.name} style={{ ...btnPrimary, marginTop: 16, opacity: (!form.course_id || !form.name) ? 0.5 : 1 }}>
             {saving ? 'Creating…' : 'Create Course'}

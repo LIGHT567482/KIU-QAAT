@@ -94,7 +94,10 @@ fun LecturerApp() {
 @Composable
 private fun LecturerHeader() {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-        AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let { Text(it, fontWeight = FontWeight.Bold, fontSize = 17.sp) }
+        // Show the lecturer's academic title(s) with their name, e.g. "Dr. Jane Yuma".
+        val name = AppState.coordinatorName?.takeIf { it.isNotBlank() }
+        val title = AppState.coordinatorTitle?.takeIf { it.isNotBlank() }
+        if (name != null) Text(listOfNotNull(title, name).joinToString(" "), fontWeight = FontWeight.Bold, fontSize = 17.sp)
         AppState.staffId?.let { Text("Staff ID: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

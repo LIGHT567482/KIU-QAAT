@@ -199,7 +199,7 @@ object SessionStore {
                     .put("lecturer_staff_id", it.lecturerStaffId).put("lecturer_name", it.lecturerName)
                     .put("lecturer_phone", it.lecturerPhone).put("duration_minutes", it.durationMinutes)
                     .put("day_of_week", it.dayOfWeek).put("start_time", it.startTime).put("venue_id", it.venueId)
-                    .put("lecturer_daily_code", it.lecturerDailyCode).put("session_code", it.sessionCode))
+                    .put("session_code", it.sessionCode))
             }
         }
         prefs.edit().apply {
@@ -228,7 +228,7 @@ object SessionStore {
                     u.optString("lecturer_staff_id", ""), u.optString("lecturer_name", ""), u.optString("lecturer_phone", ""),
                     u.optInt("duration_minutes", 0),
                     u.optInt("day_of_week", 0), u.optString("start_time", ""), u.optString("venue_id", ""),
-                    u.optString("lecturer_daily_code", ""), u.optString("session_code", "")))
+                    u.optString("session_code", "")))
                 roster[id] = dao.roster(id)   // roster cached in Room survives offline
             }
         }

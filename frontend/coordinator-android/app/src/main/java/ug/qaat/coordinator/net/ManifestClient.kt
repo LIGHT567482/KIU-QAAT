@@ -28,10 +28,9 @@ class ManifestClient(private val dao: AppDao) {
         val dayOfWeek: Int = 0,         // 1=Mon…7=Sun, 0 = unscheduled / any day
         val startTime: String = "",     // "HH:MM" scheduled start
         val venueId: String = "",       // room / venue label
-        // Multi-coordinator authorization codes (only set when the lecturer is shared today). To
-        // start a room where the lecturer isn't present, the coordinator enters BOTH the lecturer's
-        // daily code AND this unit's session code.
-        val lecturerDailyCode: String = "",
+        // ONE code covering both lecturer + session (only set when the lecturer is shared across
+        // coordinators today). A coordinator whose lecturer is in another room enters this single
+        // code to mark the lecturer present and start attendance here.
         val sessionCode: String = "",
     )
     data class Parsed(
@@ -67,7 +66,7 @@ class ManifestClient(private val dao: AppDao) {
                 s.optString("lecturer_staff_id", ""), s.optString("lecturer_name", ""), s.optString("lecturer_phone", ""),
                 s.optInt("session_duration_minutes", 0),
                 s.optInt("day_of_week", 0), s.optString("scheduled_start", ""), s.optString("venue_id", ""),
-                s.optString("lecturer_daily_code", ""), s.optString("session_code", ""),
+                s.optString("session_code", ""),
             ))
         }
 

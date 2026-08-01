@@ -22,6 +22,7 @@ class DashboardClient {
     data class Offering(
         val courseName: String, val sessionType: String, val studyYear: Int,
         val semester: Int, val level: String, val intake: String,
+        val school: String = "", val department: String = "",
     )
     data class Unit(
         val unitId: String, val name: String, val year: Int, val semester: Int,
@@ -47,7 +48,8 @@ class DashboardClient {
         val offJson = j.optJSONObject("offering")
         val off = offJson?.let {
             Offering(it.optString("course_name"), it.optString("session_type"), it.optInt("study_year"),
-                it.optInt("semester"), it.optString("level"), it.optString("intake"))
+                it.optInt("semester"), it.optString("level"), it.optString("intake"),
+                it.optString("school"), it.optString("department"))
         }
         // Prefer the richer per-unit timetable slots when present (like the PWA does).
         val slots = j.optJSONArray("slots")

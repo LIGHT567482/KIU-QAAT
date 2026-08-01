@@ -77,14 +77,13 @@ object AppState {
     // Active session.
     var currentSessionId by mutableStateOf<String?>(null)
     var currentUnitId by mutableStateOf<String?>(null)
-    // Multi-coordinator lecturer code: true when the open session's unit has a daily code (the
-    // lecturer is shared today), so the coordinator screen shows the "enter lecturer's daily code"
-    // field. lecturerStartedHere flips true once the lecturer has STARTed here (gate or code).
+    // Multi-coordinator single code: true when the open session's unit has a daily code (the lecturer
+    // is shared today), so the coordinator screen shows the code-entry field. lecturerStartedHere
+    // flips true once the lecturer has STARTed here (in-person gate, or by entering the code).
     var currentLecturerHasCode by mutableStateOf(false)
     var lecturerStartedHere by mutableStateOf(false)
-    // Revealed ONLY after the lecturer STARTs in person at THIS hub (physical presence proof). The
-    // lecturer reads BOTH out to the other coordinators sharing them today so they can start too.
-    var currentLecturerCode by mutableStateOf<String?>(null)
+    // Revealed ONLY after the lecturer STARTs in person at THIS hub (physical presence proof); the
+    // lecturer reads it out to the other coordinators sharing them today so they can start too.
     var currentSessionCode by mutableStateOf<String?>(null)
     var lecturerCode by mutableStateOf("------")  // ROTATING lecturer code (changes every 10s)
     var secondsLeft by mutableStateOf(10)
