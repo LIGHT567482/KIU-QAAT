@@ -113,6 +113,7 @@ function adminNav(tenantId: string): NavLink[] {
   return [
     { label: 'Home',                path: '/admin' },
     { label: 'Administration',      path: `${t}/users` },
+    { label: 'Schools & Departments', path: `${t}/schools` },
     { label: 'Courses & Sessions',  path: `${t}/courses` },
     { label: 'Timetable',           path: '/admin/timetable' },
     { label: 'Students',            path: `${t}/students` },
