@@ -31,10 +31,13 @@ ALTER TABLE courses ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES depar
 
 CREATE INDEX IF NOT EXISTS idx_departments_school ON departments(tenant_id, school_id);
 
+-- ENABLE (not FORCE), matching courses/venues in practice: the qaat_app data plane is tenant-isolated
+-- by RLS, while the owner/superuser admin connection manages them by explicit tenant_id. FORCE would
+-- also block the owner (see 060) — deliberately omitted.
 ALTER TABLE schools     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE schools     FORCE  ROW LEVEL SECURITY;
 ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE departments FORCE  ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "tenant_isolation" ON schools;
+DROP POLICY IF EXISTS "tenant_isolation" ON departments;
 CREATE POLICY "tenant_isolation" ON schools
     FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 CREATE POLICY "tenant_isolation" ON departments

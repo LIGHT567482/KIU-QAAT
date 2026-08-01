@@ -1,6 +1,12 @@
 -- 060: Backfill the managed schools/departments from existing free-text course.school/department,
--- and link existing courses to them. One-time + idempotent (safe to re-run). After this, existing
--- courses "inherit" a structured school/department instead of only free text.
+-- and link existing courses to them. One-time + idempotent (safe to re-run).
+--
+-- FIX: migration 059 set FORCE ROW LEVEL SECURITY on schools/departments, which blocks even the
+-- table OWNER (the connection running these migrations) from inserting — and would also block the
+-- admin dashboard's owner/superuser reads. courses/venues are ENABLE-only in practice, so match them:
+-- drop FORCE here (ENABLE stays, so the non-owner qaat_app data plane is still tenant-isolated).
+ALTER TABLE schools     NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE departments NO FORCE ROW LEVEL SECURITY;
 
 -- 1) Seed schools from every distinct non-empty course.school.
 INSERT INTO schools (tenant_id, name)
