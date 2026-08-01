@@ -25,6 +25,7 @@ import AdminCourseUnits from './pages/admin/AdminCourseUnits'
 import AdminStudents from './pages/admin/AdminStudents'
 import AdminVenues from './pages/admin/AdminVenues'
 import AdminSchools from './pages/admin/AdminSchools'
+import OrgLecturers from './pages/OrgLecturers'
 import AdminLecturers from './pages/admin/AdminLecturers'
 import LecturerDashboard from './pages/lecturer/LecturerDashboard'
 import AdminLecturerAssignments from './pages/admin/AdminLecturerAssignments'
@@ -35,6 +36,7 @@ import AdminEmployeeAttendance from './pages/admin/AdminEmployeeAttendance'
 import AdminReports from './pages/admin/AdminReports'
 import DashLecturerAttendance from './pages/shared/DashLecturerAttendance'
 import QAStudentAttendance from './pages/qa/QAStudentAttendance'
+import QAReports from './pages/qa/QAReports'
 import Timetable from './pages/shared/Timetable'
 import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
@@ -75,6 +77,7 @@ export default function App() {
           {/* ── QA Officer ─────────────────────────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['QA_OFFICER']} />}>
             <Route path="/qa/live"              element={<QALiveSessions />} />
+            <Route path="/qa/reports"           element={<QAReports />} />
             <Route path="/qa/device-reset"      element={<QADeviceReset />} />
             <Route path="/qa/correction"        element={<QAManualCorrection />} />
             <Route path="/qa/coordinator-health" element={<QACoordinatorHealth />} />
@@ -108,6 +111,14 @@ export default function App() {
           {/* ── Lecturer (own assigned units) ──────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['LECTURER']} />}>
             <Route path="/lecturer" element={<LecturerDashboard />} />
+          </Route>
+
+          {/* ── HOD (own department) / Dean (own school) ───────────────── */}
+          <Route element={<RoleLayout allowedRoles={['HOD']} />}>
+            <Route path="/hod" element={<OrgLecturers level="hod" />} />
+          </Route>
+          <Route element={<RoleLayout allowedRoles={['DEAN']} />}>
+            <Route path="/dean" element={<OrgLecturers level="dean" />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />

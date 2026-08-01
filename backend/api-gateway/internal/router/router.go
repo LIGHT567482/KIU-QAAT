@@ -52,6 +52,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	// ─── Public routes (no auth) ──────────────────────────────────────────────
 	r.Get("/health", handlers.Health)
 	r.Get("/api/v1/health", handlers.Health)
+
+	// Scheduled cron (Render Cron Job) → notify employee no-shows across all tenants. Public route,
+	// but gated by the X-Cron-Secret header (== CRON_SECRET env), so it's not openly callable.
+	r.Post("/internal/cron/notify-no-shows", handlers.CronNotifyNoShows(adminPool))
 	r.Get("/metrics", promhttp.Handler().ServeHTTP) // Prometheus scrape endpoint
 
 	// Student check-in is public: students have no JWT. It is authenticated by
@@ -158,6 +162,38 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/patrol/manifest", handlers.PatrolManifest(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
+
+		// ── HOD + Dean (org-scoped lecturer oversight) ────────────────────────
+		r.With(middleware.RequireRole(middleware.RoleHOD)).
+			Get("/api/v1/hod/lecturers", handlers.HODLecturers(pool))
+		r.With(middleware.RequireRole(middleware.RoleDean)).
+			Get("/api/v1/dean/lecturers", handlers.DeanLecturers(pool))
+
+		// ── QA reps (dept rep / school handler) ───────────────────────────────
+		// Their scope comes from the JWT role + their own user row, never the request.
+		qaRep := middleware.RequireRole(middleware.RoleQADeptRep, middleware.RoleQASchool)
+		// The oversight roles read submissions across the whole institution.
+		qaRepOrOversight := middleware.RequireRole(middleware.RoleQADeptRep, middleware.RoleQASchool,
+			middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin)
+
+		r.With(qaRep).Get("/api/v1/qa-rep/scope", handlers.QARepScope(pool))
+		r.With(qaRep).Get("/api/v1/qa-rep/lecturers", handlers.QARepLecturers(pool))
+		r.With(qaRepOrOversight).Get("/api/v1/qa-rep/departments", handlers.QARepDepartments(pool))
+		r.With(qaRepOrOversight).Get("/api/v1/qa-rep/submissions", handlers.QAListSubmissions(pool))
+		r.With(qaRep).Post("/api/v1/qa-rep/submissions", handlers.QASubmitReport(pool))
+		r.With(qaRepOrOversight).Get("/api/v1/qa-rep/submissions/{id}/file", handlers.QASubmissionFile(pool))
+		r.With(qaRepOrOversight).Delete("/api/v1/qa-rep/submissions/{id}", handlers.QADeleteSubmission(pool))
+		r.With(qaRep).Get("/api/v1/qa-rep/template.xlsx", handlers.QARepTemplate(pool))
+
+		// ── Cross-dimension lecturer-teaching report (QA oversight) ───────────
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			Get("/api/v1/reports/lecturer-teaching", handlers.LecturerTeachingReport(pool))
+
+		// ── Employee biometric no-shows (detect + notify by email + WhatsApp) ─
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleAdmin)).
+			Get("/api/v1/qa/employee-no-shows", handlers.EmployeeNoShows(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleAdmin)).
+			Post("/api/v1/qa/notify-no-shows", handlers.NotifyNoShows(adminPool))
 
 		// ── QR Management (→ qr-generator) ────────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleAdmin)).
@@ -335,10 +371,17 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id}/download", handlers.DownloadSemesterArchive(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id}", handlers.DeleteSemesterArchive(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-			Get("/api/v1/admin/tenants/{tenant_id}/venues", handlers.ListVenues(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-			Post("/api/v1/admin/tenants/{tenant_id}/venues", handlers.CreateVenue(adminPool))
+		// ── Rooms / room codes (the venues registry) ──────────────────────────
+		// /venues stays as the legacy alias of /rooms so older clients keep working.
+		adminOwn := chi.Middlewares{middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant}
+		for _, base := range []string{"/api/v1/admin/tenants/{tenant_id}/rooms", "/api/v1/admin/tenants/{tenant_id}/venues"} {
+			r.With(adminOwn...).Get(base, handlers.ListRooms(adminPool))
+			r.With(adminOwn...).Post(base, handlers.CreateRoom(adminPool))
+			r.With(adminOwn...).Patch(base+"/{room_code}", handlers.UpdateRoom(adminPool))
+			r.With(adminOwn...).Delete(base+"/{room_code}", handlers.DeleteRoom(adminPool))
+			r.With(adminOwn...).Post(base+"/import", handlers.ImportRooms(adminPool))
+			r.With(adminOwn...).Get(base+"/export.xlsx", handlers.ExportRoomsXLSX(adminPool))
+		}
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/students", handlers.ListStudents(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
@@ -496,13 +539,13 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// ── Cross-role in-app notifications ──────────────────────────────────
 		// Lecturer → his students / the coordinator; Coordinator → his students / the
 		// lecturers. Students, coordinators and lecturers all read their own inbox.
-		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator)).
+		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean)).
 			Post("/api/v1/app-notifications", handlers.SendAppNotification(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
 			Get("/api/v1/app-notifications", handlers.ListAppNotifications(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
 			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
 			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
 		// Lecturers of the coordinator's course units (for the "notify a specific lecturer" picker).
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
@@ -556,6 +599,13 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/dashboard/timetable", handlers.TimetableOverview(pool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable", handlers.SetTimetableSchedule(pool, rdb))
+		// The tenant's active rooms, for the timetable grid's room picker — read-only and
+		// RLS-scoped, so every dashboard role that shows a room can ask for the list.
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector,
+			middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean,
+			middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			Get("/api/v1/dashboard/rooms", handlers.DashboardRooms(pool))
+
 		// Multi-slot weekly timetable grid (one slot per unit per day, with room).
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Get("/api/v1/dashboard/timetable/slots", handlers.GetTimetableSlots(pool))

@@ -45,12 +45,7 @@ tidy:
 
 ## install: Install all frontend dependencies via pnpm
 install:
-	cd apps/coordinator-pwa && pnpm install
 	cd apps/admin-dashboards && pnpm install
-
-## dev-pwa: Start Coordinator PWA dev server
-dev-pwa:
-	cd apps/coordinator-pwa && pnpm dev
 
 ## dev-dashboards: Start Admin Dashboards dev server
 dev-dashboards:
@@ -63,10 +58,6 @@ test-auth:
 ## test-gateway: Run api-gateway unit tests
 test-gateway:
 	cd services/api-gateway && go test ./... -v -race -count=1
-
-## test-pwa: Run PWA unit tests
-test-pwa:
-	cd apps/coordinator-pwa && pnpm test
 
 ## lint: Run golangci-lint on all Go services
 lint:

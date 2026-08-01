@@ -48,6 +48,7 @@ type slotRow struct {
 	StartTime    string `json:"start_time"`
 	Duration     int    `json:"duration_minutes"`
 	Room         string `json:"room"`
+	RoomCode     string `json:"room_code"` // the managed room this slot resolved to, "" if unmatched
 	LecturerID   string `json:"lecturer_id"`
 	LecturerName string `json:"lecturer_name"`
 }
@@ -91,7 +92,8 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 		sRows, err := conn.Query(r.Context(), `
 			SELECT s.slot_id::text, s.offering_id::text, s.unit_id, COALESCE(cu.name, s.unit_id),
 			       s.day_of_week, to_char(s.start_time,'HH24:MI'), s.duration_minutes,
-			       COALESCE(s.room,''), COALESCE(s.lecturer_id::text,''), COALESCE(l.full_name,'')
+			       COALESCE(s.room,''), COALESCE(s.venue_id,''),
+			       COALESCE(s.lecturer_id::text,''), COALESCE(l.full_name,'')
 			FROM timetable_slots s
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
 			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
@@ -105,7 +107,7 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 		slots := []slotRow{}
 		for sRows.Next() {
 			var s slotRow
-			sRows.Scan(&s.SlotID, &s.OfferingID, &s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.LecturerID, &s.LecturerName) //nolint:errcheck
+			sRows.Scan(&s.SlotID, &s.OfferingID, &s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.RoomCode, &s.LecturerID, &s.LecturerName) //nolint:errcheck
 			slots = append(slots, s)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"offerings": offerings, "slots": slots})
@@ -180,14 +182,18 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			return
 		}
 
+		// The typed room is also resolved against the managed room registry, so the slot carries a
+		// structured venue_id wherever the text names a real room. The free text stays as written —
+		// it is what the grid displays, and an unrecognised room must not be silently dropped.
 		var slotID string
 		err = conn.QueryRow(r.Context(), `
-			INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room, lecturer_id)
-			VALUES ($1, $2::uuid, $3, $4, $5::time, $6, NULLIF($7,''), NULLIF($8,'')::uuid)
+			INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room, lecturer_id, venue_id)
+			VALUES ($1, $2::uuid, $3, $4, $5::time, $6, NULLIF($7,''), NULLIF($8,'')::uuid, `+resolveVenueSQL+`)
 			ON CONFLICT (offering_id, unit_id, day_of_week, start_time) DO UPDATE
 			   SET duration_minutes = EXCLUDED.duration_minutes,
 			       room             = EXCLUDED.room,
-			       lecturer_id      = EXCLUDED.lecturer_id
+			       lecturer_id      = EXCLUDED.lecturer_id,
+			       venue_id         = EXCLUDED.venue_id
 			RETURNING slot_id::text`,
 			tenantID, req.OfferingID, req.UnitID, req.DayOfWeek, req.StartTime, req.Duration, req.Room, req.LecturerID).Scan(&slotID)
 		if err != nil {
@@ -384,10 +390,11 @@ func processTimetableCSV(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 		}
 
 		_, err = pool.Exec(ctx, `
-			INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room, lecturer_id)
-			VALUES ($1,$2::uuid,$3,$4,$5::time,$6,NULLIF($7,''),NULLIF($8,'')::uuid)
+			INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room, lecturer_id, venue_id)
+			VALUES ($1,$2::uuid,$3,$4,$5::time,$6,NULLIF($7,''),NULLIF($8,'')::uuid,`+resolveVenueSQL+`)
 			ON CONFLICT (offering_id, unit_id, day_of_week, start_time) DO UPDATE
 			   SET duration_minutes=EXCLUDED.duration_minutes, room=EXCLUDED.room,
+			       venue_id=EXCLUDED.venue_id,
 			       lecturer_id=COALESCE(EXCLUDED.lecturer_id, timetable_slots.lecturer_id)`,
 			tenantID, offeringID, unitID, day, start, dur, get("room"), lecturerID)
 		if err != nil {

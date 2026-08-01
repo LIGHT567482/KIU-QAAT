@@ -99,6 +99,39 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		default:
 			return nil, nil
 		}
+	case middleware.RoleHOD, middleware.RoleDean:
+		// Scope = the sender's own department (HOD) or school (Dean), from their user account.
+		var dept, school string
+		_ = pool.QueryRow(r.Context(),
+			`SELECT COALESCE(department,''), COALESCE(school,'') FROM users WHERE user_id = $1::uuid AND tenant_id = $2`,
+			senderID, tenantID).Scan(&dept, &school)
+		scopeCol := "c.department"
+		scopeVal := dept
+		if senderRole == middleware.RoleDean {
+			scopeCol = "c.school"
+			scopeVal = school
+		}
+		lecturersInScope := `
+			FROM lecturers l
+			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
+			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL AND btrim(lower(` + scopeCol + `)) = btrim(lower($2))`
+		switch audience {
+		case "LECTURERS": // bulk — every lecturer in scope
+			args = append(args, scopeVal)
+			sql = `SELECT DISTINCT l.user_id::text ` + lecturersInScope
+		case "LECTURER": // one specific lecturer (by staff id), if in scope
+			args = append(args, scopeVal, targetID)
+			sql = `SELECT DISTINCT l.user_id::text ` + lecturersInScope + ` AND l.staff_id = $3`
+		case "DQA": // message the DQA directors
+			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'DQA_DIRECTOR'`
+		case "ADMIN": // message the admins
+			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role IN ('ADMIN','SUPER_ADMIN')`
+		default:
+			return nil, nil
+		}
+
 	default:
 		return nil, nil
 	}
@@ -187,6 +220,8 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 		valid := map[string]map[string]bool{
 			middleware.RoleLecturer:    {"STUDENTS": true, "COORDINATOR": true},
 			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true, "STUDENT": true, "LECTURER": true},
+			middleware.RoleHOD:         {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
+			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))

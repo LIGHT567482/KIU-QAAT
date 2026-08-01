@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
-export type Role = 'VC' | 'DQA_DIRECTOR' | 'QA_OFFICER' | 'COORDINATOR' | 'ADMIN' | 'LECTURER'
+export type Role = 'VC' | 'DQA_DIRECTOR' | 'QA_OFFICER' | 'COORDINATOR' | 'ADMIN' | 'LECTURER' | 'HOD' | 'DEAN'
 
 interface AuthUser {
   userId: string

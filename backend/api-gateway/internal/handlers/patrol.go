@@ -10,6 +10,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ type patrolSlot struct {
 	LecturerStaffID string `json:"lecturer_staff_id"`
 	LecturerName    string `json:"lecturer_name"`
 	Room            string `json:"room"`
+	RoomCode        string `json:"room_code"` // managed room this slot resolved to, "" if free text only
 	DayOfWeek       int    `json:"day_of_week"`
 	StartTime       string `json:"start_time"` // "HH:MM"
 	DurationMinutes int    `json:"duration_minutes"`
@@ -52,7 +54,7 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := conn.Query(r.Context(), `
 			SELECT ts.unit_id, COALESCE(cu.name, ts.unit_id), COALESCE(cu.course_id, ''),
 			       COALESCE(lec.staff_id, ''), COALESCE(lec.full_name, ''),
-			       COALESCE(ts.room, ''), ts.day_of_week,
+			       COALESCE(NULLIF(ts.room,''), ts.venue_id, ''), COALESCE(ts.venue_id,''), ts.day_of_week,
 			       to_char(ts.start_time, 'HH24:MI'), COALESCE(ts.duration_minutes, 60)
 			FROM timetable_slots ts
 			JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
@@ -79,7 +81,7 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var s patrolSlot
 			if err := rows.Scan(&s.UnitID, &s.UnitName, &s.CourseCode, &s.LecturerStaffID,
-				&s.LecturerName, &s.Room, &s.DayOfWeek, &s.StartTime, &s.DurationMinutes); err != nil {
+				&s.LecturerName, &s.Room, &s.RoomCode, &s.DayOfWeek, &s.StartTime, &s.DurationMinutes); err != nil {
 				continue
 			}
 			slots = append(slots, s)
@@ -158,6 +160,34 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				l.SessionDate, l.ScheduledTime, l.Taught, userID, patrollerName, patrollerStaffID, l.TakenAt)
 			if execErr == nil {
 				written++
+				// Persistent lecturer alert (stays in their inbox until they delete it): the patroller
+				// recorded whether they were teaching. Best-effort — a failure never fails the sync.
+				var lecUser string
+				_ = conn.QueryRow(r.Context(),
+					`SELECT user_id::text FROM lecturers
+					 WHERE tenant_id = $1 AND btrim(lower(staff_id)) = btrim(lower($2)) AND user_id IS NOT NULL`,
+					tenantID, l.LecturerID).Scan(&lecUser)
+				if lecUser != "" {
+					verdict := "NOT TAUGHT"
+					if l.Taught {
+						verdict = "TAUGHT"
+					}
+					subject := fmt.Sprintf("Patrol: %s", l.UnitName)
+					bodyTxt := fmt.Sprintf("You were recorded as %s for %s%s%s by patroller %s.",
+						verdict, l.UnitName,
+						map[bool]string{true: " (" + l.CourseCode + ")", false: ""}[l.CourseCode != ""],
+						map[bool]string{true: " in " + l.Room, false: ""}[l.Room != ""],
+						patrollerName)
+					var nid string
+					if conn.QueryRow(r.Context(), `
+						INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, subject, body)
+						VALUES ($1, $2, $3, 'QA_PATROLLER', 'DIRECT', $4, $5) RETURNING notification_id::text`,
+						tenantID, userID, patrollerName, subject, bodyTxt).Scan(&nid) == nil {
+						_, _ = conn.Exec(r.Context(),
+							`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)
+							 VALUES ($1, $2, $3::uuid) ON CONFLICT DO NOTHING`, nid, tenantID, lecUser)
+					}
+				}
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "SYNCED", "records_written": written})

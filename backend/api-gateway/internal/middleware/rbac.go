@@ -41,4 +41,8 @@ const (
 	RoleStudent     = "STUDENT"
 	RoleLecturer    = "LECTURER"     // logs into the lecturer dashboard (read-only attendance)
 	RolePatroller   = "QA_PATROLLER" // QA field patroller — records whether the lecturer is teaching
+	RoleHOD         = "HOD"          // Head of Department — oversees lecturers in ONE department
+	RoleDean        = "DEAN"         // Dean — oversees departments/lecturers in ONE school/college
+	RoleQASchool    = "QA_SCHOOL_HANDLER"
+	RoleQADeptRep   = "QA_DEPT_REP"
 )

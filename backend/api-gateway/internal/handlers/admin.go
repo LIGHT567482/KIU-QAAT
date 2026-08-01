@@ -327,21 +327,36 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "email, password, role, full_name required"))
 			return
 		}
-		// QA officers act as ambassadors under a department, so it is mandatory for them
-		// (the school/college stays optional). Other roles may leave both blank.
-		if req.Role == "QA_OFFICER" && req.Department == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "department is required for a QA officer"))
-			return
-		}
-
 		validRoles := map[string]bool{
 			"COORDINATOR": true, "QA_OFFICER": true,
 			"DQA_DIRECTOR": true, "VC": true, "DVC": true, "ADMIN": true,
 			"LECTURER": true,
+			// Org-scoped oversight. Each one's dashboard is bounded by the department or school
+			// set on the account below, so the org unit is not optional for them.
+			"HOD": true, "DEAN": true, "QA_SCHOOL_HANDLER": true, "QA_DEPT_REP": true,
+			"QA_PATROLLER": true,
 		}
 		if !validRoles[req.Role] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_ROLE", "invalid role"))
 			return
+		}
+
+		// The department/school on the account IS the scope of these roles' dashboards — an HOD
+		// with no department sees an empty page and a QA dept rep cannot file a report at all, so
+		// the requirement is enforced here rather than discovered later.
+		switch req.Role {
+		case "QA_OFFICER", "HOD", "QA_DEPT_REP":
+			if req.Department == "" {
+				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+					"a department is required for "+humanRole(req.Role)+" — it is the scope of everything they see"))
+				return
+			}
+		case "DEAN", "QA_SCHOOL_HANDLER":
+			if req.School == "" {
+				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+					"a college/school is required for "+humanRole(req.Role)+" — it is the scope of everything they see"))
+				return
+			}
 		}
 		if len(req.Password) < 8 {
 			writeJSON(w, http.StatusBadRequest, errBody("WEAK_PASSWORD", "password must be ≥ 8 characters"))

@@ -2,6 +2,7 @@ import express from 'express'
 import nodemailer from 'nodemailer'
 import { syncOverdueEmail, qrReissuedEmail, wardenDataReceivedEmail } from './email/templates.js'
 import { sendSyncOverduePush, sendWardenDataPush } from './push/web-push.js'
+import { sendWhatsApp } from './whatsapp/whatsapp.js'
 
 const app = express()
 app.use(express.json())
@@ -18,6 +19,30 @@ const transporter = nodemailer.createTransport({
 // ─── Internal endpoints — called by other services, not the API Gateway ───────
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'notification-service' }))
+
+// POST /notify/absentees — multi-channel fan-out (email + WhatsApp) for absentees: lecturers who
+// didn't teach, or employees who didn't check in. recipients: [{ name, email, phone }]. WhatsApp is
+// a no-op-with-log until provider creds are set (see whatsapp.ts). Called by a scheduler ~10 minutes
+// after a session/shift ends.
+app.post('/notify/absentees', async (req, res) => {
+  const { recipients = [], subject, message, branding } = req.body ?? {}
+  let emailed = 0, whatsapped = 0
+  for (const rcpt of recipients as { name?: string; email?: string; phone?: string }[]) {
+    if (rcpt.email) {
+      try {
+        await transporter.sendMail({
+          from: `noreply@${branding?.domain ?? 'qaat.local'}`,
+          to: rcpt.email,
+          subject: subject ?? 'QAAT notification',
+          text: message ?? '',
+        })
+        emailed++
+      } catch (e) { console.warn('absentee email failed', e) }
+    }
+    if (rcpt.phone && await sendWhatsApp(rcpt.phone, message ?? '')) whatsapped++
+  }
+  res.json({ status: 'SENT', total: recipients.length, emailed, whatsapped })
+})
 
 // POST /notify/sync-overdue
 app.post('/notify/sync-overdue', async (req, res) => {

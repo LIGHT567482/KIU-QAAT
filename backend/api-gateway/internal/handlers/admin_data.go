@@ -195,69 +195,11 @@ func CreateCourseUnit(adminPool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // ─── Venues ───────────────────────────────────────────────────────────────────
-
-// GET /api/v1/admin/tenants/{tenant_id}/venues
-func ListVenues(adminPool *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
-
-		rows, err := adminPool.Query(r.Context(), `
-			SELECT venue_id, name, COALESCE(building,''), COALESCE(floor,0)::int, COALESCE(capacity,0)::int
-			FROM venues WHERE tenant_id = $1 ORDER BY name`, tenantID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
-			return
-		}
-		defer rows.Close()
-
-		type venue struct {
-			VenueID  string `json:"venue_id"`
-			Name     string `json:"name"`
-			Building string `json:"building"`
-			Floor    int    `json:"floor"`
-			Capacity int    `json:"capacity"`
-		}
-		var list []venue
-		for rows.Next() {
-			var v venue
-			rows.Scan(&v.VenueID, &v.Name, &v.Building, &v.Floor, &v.Capacity) //nolint:errcheck
-			list = append(list, v)
-		}
-		if list == nil {
-			list = []venue{}
-		}
-		writeJSON(w, http.StatusOK, list)
-	}
-}
-
-// POST /api/v1/admin/tenants/{tenant_id}/venues
-func CreateVenue(adminPool *pgxpool.Pool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
-
-		var req struct {
-			VenueID  string `json:"venue_id"`
-			Name     string `json:"name"`
-			Building string `json:"building"`
-			Floor    int    `json:"floor"`
-			Capacity int    `json:"capacity"`
-		}
-		if err := decodeJSON(r, &req); err != nil || req.VenueID == "" || req.Name == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "venue_id and name are required"))
-			return
-		}
-
-		_, err := adminPool.Exec(r.Context(), `
-			INSERT INTO venues (venue_id, tenant_id, name, building, floor, capacity)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			req.VenueID, tenantID, req.Name, req.Building, req.Floor, req.Capacity)
-		if err != nil {
-			writeJSON(w, http.StatusConflict, errBody("CONFLICT", "venue_id already exists: "+err.Error()))
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{"venue_id": req.VenueID, "status": "CREATED"})
-	}
-}
+//
+// Venues are rooms, and their management now lives in rooms.go — the registry gained a school /
+// department link, a type, an active flag and bulk import/export, which the two thin handlers that
+// used to sit here could not express. The old GET/POST /venues routes remain, served by ListRooms
+// and CreateRoom, so nothing that called them breaks.
 
 // ─── Course Update ────────────────────────────────────────────────────────────
 
