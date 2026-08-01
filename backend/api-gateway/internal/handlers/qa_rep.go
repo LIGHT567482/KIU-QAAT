@@ -551,6 +551,11 @@ func QASubmitReport(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+// qaMaxReportedErrors caps the per-row complaints kept from one upload. A workbook with the wrong
+// columns produces one error per row, and neither the stored array nor the response should grow
+// with the file — the first couple of hundred already tell the rep what is wrong.
+const qaMaxReportedErrors = 200
+
 // qaIngestResult counts what became of each data row in the workbook.
 type qaIngestResult struct {
 	Total    int
@@ -558,6 +563,25 @@ type qaIngestResult struct {
 	Updated  int // corrections to this rep's earlier upload
 	Skipped  int
 	Errors   []string
+	// suppressed counts the complaints dropped once the cap was reached, so the rep is told the
+	// list is partial rather than being left to assume the rest of the file was fine.
+	suppressed int
+}
+
+// note records one per-row complaint, up to the cap.
+func (r *qaIngestResult) note(format string, args ...interface{}) {
+	if len(r.Errors) >= qaMaxReportedErrors {
+		r.suppressed++
+		return
+	}
+	r.Errors = append(r.Errors, fmt.Sprintf(format, args...))
+}
+
+// sealErrors appends the "and N more" line once every row has been seen.
+func (r *qaIngestResult) sealErrors() {
+	if r.suppressed > 0 {
+		r.Errors = append(r.Errors, fmt.Sprintf("…and %d more row(s) with problems, not listed.", r.suppressed))
+	}
 }
 
 func (r qaIngestResult) summary() string {
@@ -576,7 +600,7 @@ func (r qaIngestResult) summary() string {
 // more importantly, to prove the row belongs to the rep's own department/school.
 type qaUnit struct {
 	Name, CourseCode, Department, School string
-	StaffID, LecturerName               string
+	StaffID, LecturerName                string
 }
 
 // ingestQAObservations turns parsed spreadsheet rows into `lecturer_patrol_logs` entries.
@@ -597,7 +621,7 @@ func ingestQAObservations(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 		col[normalizeHeader(h)] = i
 	}
 	if _, ok := col["unit_id"]; !ok {
-		res.Errors = append(res.Errors, "missing required column 'unit_id' in the header row — download the template and use its columns")
+		res.note("missing required column 'unit_id' in the header row — download the template and use its columns")
 		return res
 	}
 
@@ -622,37 +646,37 @@ func ingestQAObservations(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 
 		if unitID == "" {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: unit_id is blank", ln+1))
+			res.note("row %d: unit_id is blank", ln+1)
 			continue
 		}
 		u, known := units[strings.ToLower(unitID)]
 		if !known {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: unit %q is not a unit in this institution", ln+1, unitID))
+			res.note("row %d: unit %q is not a unit in this institution", ln+1, unitID)
 			continue
 		}
 		// Scope guard — a dept rep files for their department only, a handler for their school.
 		if scope.ScopeKind == "DEPARTMENT" && !strings.EqualFold(strings.TrimSpace(u.Department), strings.TrimSpace(scope.Department)) {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: unit %s belongs to %s, not your department", ln+1, unitID, orDash(u.Department)))
+			res.note("row %d: unit %s belongs to %s, not your department", ln+1, unitID, orDash(u.Department))
 			continue
 		}
 		if scope.ScopeKind == "SCHOOL" && !strings.EqualFold(strings.TrimSpace(u.School), strings.TrimSpace(scope.School)) {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: unit %s belongs to %s, not your school", ln+1, unitID, orDash(u.School)))
+			res.note("row %d: unit %s belongs to %s, not your school", ln+1, unitID, orDash(u.School))
 			continue
 		}
 
 		taught, ok := parseTaught(taughtRaw)
 		if !ok {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: 'taught' must say YES or NO (got %q)", ln+1, taughtRaw))
+			res.note("row %d: 'taught' must say YES or NO (got %q)", ln+1, taughtRaw)
 			continue
 		}
 		date, ok := parseSheetDate(get("date"))
 		if !ok {
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: 'date' must be a date like %s (got %q)", ln+1, time.Now().Format("2006-01-02"), get("date")))
+			res.note("row %d: 'date' must be a date like %s (got %q)", ln+1, time.Now().Format("2006-01-02"), get("date"))
 			continue
 		}
 		// The scheduled time completes the observation's identity (unit + date + time), so two
@@ -692,18 +716,19 @@ func ingestQAObservations(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 		case err == pgx.ErrNoRows:
 			// The DO UPDATE guard rejected it: a patroller already logged this slot in the field.
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf(
+			res.note(
 				"row %d: %s on %s is already recorded by a QA patroller in the field — the field record stands",
-				ln+1, unitID, date.Format("2006-01-02")))
+				ln+1, unitID, date.Format("2006-01-02"))
 		case err != nil:
 			res.Skipped++
-			res.Errors = append(res.Errors, fmt.Sprintf("row %d: %s", ln+1, err.Error()))
+			res.note("row %d: %s", ln+1, err.Error())
 		case inserted:
 			res.Recorded++
 		default:
 			res.Updated++
 		}
 	}
+	res.sealErrors()
 	return res
 }
 
@@ -758,6 +783,9 @@ func readQAWorkbook(data []byte) ([][]string, error) {
 	rows, err := cr.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("could not read that file as Excel or CSV: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("that file has no rows at all — it needs at least the header row from the template")
 	}
 	return rows, nil
 }

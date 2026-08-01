@@ -87,6 +87,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Punctuality',         path: '/dqa/punctuality' },
     { label: 'Lecturer Attendance', path: '/dqa/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/dqa/student-attendance' },
+    { label: 'QA Reports',          path: '/dqa/qa-reports' },
     { label: 'Messages',            path: '/dqa/messages' },
   ],
   QA_OFFICER: [
@@ -111,6 +112,17 @@ const NAV: Record<Role, NavLink[]> = {
   DEAN: [
     { label: 'School Lecturers', path: '/dean' },
   ],
+  QA_DEPT_REP: [
+    { label: 'My Department',  path: '/qa-dept' },
+    { label: 'File QA Report', path: '/qa-dept/report' },
+    { label: 'Messages',       path: '/qa-dept/messages' },
+  ],
+  QA_SCHOOL_HANDLER: [
+    { label: 'School Overview', path: '/qa-school' },
+    { label: 'Lecturers',       path: '/qa-school/lecturers' },
+    { label: 'QA Reports',      path: '/qa-school/reports' },
+    { label: 'Messages',        path: '/qa-school/messages' },
+  ],
 }
 
 // The ADMIN sidebar lists EVERY management page so nothing is buried behind the
@@ -130,7 +142,7 @@ function adminNav(tenantId: string): NavLink[] {
     { label: 'Lecturer Attendance', path: `${t}/lecturer-attendance` },
     { label: 'Employees',           path: `${t}/employees` },
     { label: 'Reports',             path: '/admin/reports' },
-    { label: 'Venues',              path: `${t}/venues` },
+    { label: 'Rooms & Codes',       path: `${t}/rooms` },
     { label: 'Settings',            path: '/admin/settings' },
   ]
 }
@@ -146,7 +158,10 @@ function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
   // on navigation (so it clears after the user reads their inbox).
   const [unread, setUnread] = useState(0)
   useEffect(() => {
-    if (role !== 'DQA_DIRECTOR' && role !== 'QA_OFFICER') return
+    // Every role with a Messages inbox polls the badge — the three QA field roles share the
+    // DQA channel, so they all have one.
+    const withInbox: Role[] = ['DQA_DIRECTOR', 'QA_OFFICER', 'QA_DEPT_REP', 'QA_SCHOOL_HANDLER']
+    if (!withInbox.includes(role)) return
     let alive = true
     const fetchUnread = () => api.get<{ unread: number }>('/api/v1/messages/unread-count')
       .then(r => { if (alive) setUnread(r.unread || 0) }).catch(() => {})
@@ -275,7 +290,7 @@ const pwBtn: React.CSSProperties = { padding: '10px 16px', background: 'var(--br
 // A back-button shown on every sub-page so the user can always go back to the
 // previous page. Hidden on the base role route (e.g. /vc, /qa/live, /admin).
 function GoBack({ navigate: nav, location: loc }: { navigate: ReturnType<typeof useNavigate>; location: ReturnType<typeof useLocation> }) {
-  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/live', '/admin', '/lecturer']
+  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/live', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school']
   const isBase = baseRoutes.some(b => loc.pathname === b || loc.pathname === b + '/')
   if (isBase) return null
   return (

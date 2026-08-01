@@ -6,8 +6,24 @@ import { useQuery } from '../../lib/useApi'
 
 // The Users page manages the oversight roles only — coordinators have their own
 // directory (Coordinators) and students their own page.
-const ROLES = ['ADMIN', 'VC', 'DVC', 'QA_OFFICER', 'DQA_DIRECTOR'] as const
+const ROLES = [
+  'ADMIN', 'VC', 'DVC', 'QA_OFFICER', 'DQA_DIRECTOR',
+  'DEAN', 'HOD', 'QA_SCHOOL_HANDLER', 'QA_DEPT_REP', 'QA_PATROLLER',
+] as const
 const MANAGED_ROLES = new Set<string>(ROLES)
+
+// The department/school on the account IS the scope of these roles' dashboards, so it is not
+// optional for them — the backend rejects the account without it, and the form says so up front.
+const NEEDS_DEPARTMENT = new Set(['QA_OFFICER', 'HOD', 'QA_DEPT_REP'])
+const NEEDS_SCHOOL = new Set(['DEAN', 'QA_SCHOOL_HANDLER'])
+
+const SCOPE_HINT: Record<string, string> = {
+  QA_OFFICER:        'QA officers are placed under a department — required.',
+  HOD:               'A head of department sees exactly one department — required.',
+  QA_DEPT_REP:       'A QA department rep files reports for one department — required.',
+  DEAN:              'A dean oversees exactly one college/school — required.',
+  QA_SCHOOL_HANDLER: 'A QA school handler files reports for one college/school — required.',
+}
 
 interface User {
   user_id: string; email: string; role: string
@@ -47,7 +63,12 @@ function UsersInner() {
     setSaving(true); setError(null)
     try {
       if (!form.local.trim()) throw new Error('Email username is required.')
-      if (form.role === 'QA_OFFICER' && !form.department.trim()) throw new Error('Department is required for a QA officer.')
+      if (NEEDS_DEPARTMENT.has(form.role) && !form.department.trim()) {
+        throw new Error(`A department is required for ${form.role.replace(/_/g, ' ').toLowerCase()} — it is the scope of everything they see.`)
+      }
+      if (NEEDS_SCHOOL.has(form.role) && !form.school.trim()) {
+        throw new Error(`A college/school is required for ${form.role.replace(/_/g, ' ').toLowerCase()} — it is the scope of everything they see.`)
+      }
       const email = `${form.local.trim().toLowerCase()}@${domain}`
       const res = await api.post(`/api/v1/admin/tenants/${tenantId}/users`, {
         email, password: form.password, role: form.role, full_name: form.full_name,
@@ -79,7 +100,9 @@ function UsersInner() {
   // Datalist suggestions from departments/schools already in use (free-text, but guided).
   const deptSuggestions = [...new Set((data ?? []).map(u => u.department).filter((d): d is string => !!d && d.trim() !== ''))].sort()
   const schoolSuggestions = [...new Set((data ?? []).map(u => u.school).filter((s): s is string => !!s && s.trim() !== ''))].sort()
-  const qaMissingDept = form.role === 'QA_OFFICER' && !form.department.trim()
+  const missingDept = NEEDS_DEPARTMENT.has(form.role) && !form.department.trim()
+  const missingSchool = NEEDS_SCHOOL.has(form.role) && !form.school.trim()
+  const scopeIncomplete = missingDept || missingSchool
 
   return (
     <div>
@@ -133,25 +156,26 @@ function UsersInner() {
               </select>
             </label>
             <label>
-              <div style={labelStyle}>Department {form.role === 'QA_OFFICER' ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
+              <div style={labelStyle}>Department {NEEDS_DEPARTMENT.has(form.role) ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
               <input list="dept-suggestions" value={form.department} placeholder="e.g. Computer Science"
                 onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${form.role === 'QA_OFFICER' && !form.department.trim() ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${missingDept ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
               <datalist id="dept-suggestions">{deptSuggestions.map(d => <option key={d} value={d} />)}</datalist>
-              {form.role === 'QA_OFFICER' && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>QA officers are placed under a department — required.</div>}
+              {NEEDS_DEPARTMENT.has(form.role) && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{SCOPE_HINT[form.role]}</div>}
             </label>
             <label>
-              <div style={labelStyle}>College / School (optional)</div>
+              <div style={labelStyle}>College / School {NEEDS_SCHOOL.has(form.role) ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
               <input list="school-suggestions" value={form.school} placeholder="e.g. SOMAC"
                 onChange={e => setForm(f => ({ ...f, school: e.target.value }))}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${missingSchool ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
               <datalist id="school-suggestions">{schoolSuggestions.map(s => <option key={s} value={s} />)}</datalist>
+              {NEEDS_SCHOOL.has(form.role) && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{SCOPE_HINT[form.role]}</div>}
             </label>
             <Field label="Phone (optional)"        value={form.phone}    onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <Field label="WhatsApp (optional)"      value={form.whatsapp} onChange={v => setForm(f => ({ ...f, whatsapp: v }))} />
             <Field label="Registration No. (optional)" value={form.registration_number} onChange={v => setForm(f => ({ ...f, registration_number: v }))} />
           </div>
-          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || !form.password || qaMissingDept} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || !form.password || qaMissingDept) ? 0.5 : 1 }}>
+          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || !form.password || scopeIncomplete} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || !form.password || scopeIncomplete) ? 0.5 : 1 }}>
             {saving ? 'Creating…' : 'Create User'}
           </button>
         </div>
@@ -443,6 +467,11 @@ function roleColor(role: string) {
     QA_OFFICER:  { bg: '#f0fdf4', text: '#166534' },
     COORDINATOR: { bg: '#f0f9ff', text: '#0369a1' },
     ADMIN:       { bg: '#fce7f3', text: '#9d174d' },
+    DEAN:              { bg: '#ede9fe', text: '#5b21b6' },
+    HOD:               { bg: '#f3e8ff', text: '#6b21a8' },
+    QA_SCHOOL_HANDLER: { bg: '#ecfeff', text: '#155e75' },
+    QA_DEPT_REP:       { bg: '#f0fdfa', text: '#115e59' },
+    QA_PATROLLER:      { bg: '#fef2f2', text: '#991b1b' },
   }
   return map[role] ?? { bg: '#f1f5f9', text: '#475569' }
 }

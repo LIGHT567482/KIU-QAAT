@@ -39,6 +39,23 @@ func LecturerTeachingReport(pool *pgxpool.Pool) http.HandlerFunc {
 				where = append(where, strings.Replace(clause, "$?", "$"+strconv.Itoa(len(args)), 1))
 			}
 		}
+
+		// Org-scoped callers see only their own unit. This report takes its dimensions from the
+		// query string, so without this an HOD, dean or QA rep could simply ask for another
+		// department by name — their whole dashboard is scoped, and this must match it. The
+		// oversight roles (QA officer, DQA, VC, DVC, admin) stay unscoped by design.
+		scope, err := resolveQAScope(r.Context(), conn, middleware.GetUserID(r.Context()), middleware.GetRole(r.Context()))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "could not resolve your org unit"))
+			return
+		}
+		if clause, val, hasVal := scope.scopeSQL("c.department", "c.school", len(args)+1); clause != "" {
+			if hasVal {
+				args = append(args, val)
+			}
+			where = append(where, strings.TrimPrefix(clause, " AND "))
+		}
+
 		add("p.session_date >= $?::date", q.Get("from"))
 		add("p.session_date <= $?::date", q.Get("to"))
 		add("btrim(lower(c.school)) = btrim(lower($?))", q.Get("school"))

@@ -16,6 +16,8 @@ const ROLE_REDIRECT: Record<Role, string> = {
   LECTURER:     '/lecturer',
   HOD:          '/hod',
   DEAN:         '/dean',
+  QA_SCHOOL_HANDLER: '/qa-school',
+  QA_DEPT_REP:       '/qa-dept',
 }
 
 export default function Login() {

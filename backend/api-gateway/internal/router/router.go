@@ -249,17 +249,17 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// The DQA director shares reports/notifications to QA officers (all / by
 		// department / by college-school); QA officers reply to the DQA. Optional
 		// file attachment. adminPool + explicit tenant scoping in the handlers.
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/messages", handlers.SendQAMessage(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/messages", handlers.ListQAMessages(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/messages/unread-count", handlers.UnreadQAMessageCount(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleDQADirector)).
 			Get("/api/v1/messages/audiences", handlers.QAAudiences(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/messages/{id}/read", handlers.MarkQAMessageRead(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/messages/{id}/attachment", handlers.QAMessageAttachment(adminPool))
 
 		// ── Branding (any authenticated role: own tenant's logo + motto) ─────
@@ -539,13 +539,13 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// ── Cross-role in-app notifications ──────────────────────────────────
 		// Lecturer → his students / the coordinator; Coordinator → his students / the
 		// lecturers. Students, coordinators and lecturers all read their own inbox.
-		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean)).
+		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/app-notifications", handlers.SendAppNotification(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/app-notifications", handlers.ListAppNotifications(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean)).
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
 		// Lecturers of the coordinator's course units (for the "notify a specific lecturer" picker).
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).

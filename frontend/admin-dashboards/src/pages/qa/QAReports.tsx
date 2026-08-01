@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
+import { QASubmissionsPanel } from './QAOrgDashboard'
 
 // QA reports: (1) cross-dimension lecturer-teaching report from patrol data (filterable), and
 // (2) today's employee biometric no-shows with a one-click email + WhatsApp notify.
@@ -84,6 +85,11 @@ export default function QAReports() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* ── QA rep submissions ───────────────────────────────────────────── */}
+      <div style={{ marginTop: 28 }}>
+        <QASubmissionsPanel heading="QA rep submissions" />
       </div>
     </div>
   )

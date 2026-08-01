@@ -99,17 +99,25 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		default:
 			return nil, nil
 		}
-	case middleware.RoleHOD, middleware.RoleDean:
-		// Scope = the sender's own department (HOD) or school (Dean), from their user account.
+	case middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool:
+		// Scope = the sender's own org unit, from their user account. Which of the two columns
+		// applies is decided by the role, not by anything in the request: a head of department and
+		// a QA department rep are both bounded by users.department, a dean and a QA school handler
+		// by users.school.
 		var dept, school string
 		_ = pool.QueryRow(r.Context(),
 			`SELECT COALESCE(department,''), COALESCE(school,'') FROM users WHERE user_id = $1::uuid AND tenant_id = $2`,
 			senderID, tenantID).Scan(&dept, &school)
 		scopeCol := "c.department"
 		scopeVal := dept
-		if senderRole == middleware.RoleDean {
+		if senderRole == middleware.RoleDean || senderRole == middleware.RoleQASchool {
 			scopeCol = "c.school"
 			scopeVal = school
+		}
+		// An org unit that was never set must reach nobody — otherwise a blank scope would match
+		// every lecturer whose course also has a blank department.
+		if strings.TrimSpace(scopeVal) == "" {
+			return nil, nil
 		}
 		lecturersInScope := `
 			FROM lecturers l
@@ -222,6 +230,8 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true, "STUDENT": true, "LECTURER": true},
 			middleware.RoleHOD:         {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
 			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
+			middleware.RoleQADeptRep:   {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
+			middleware.RoleQASchool:    {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))

@@ -22,7 +22,13 @@ interface Offering {
 interface Slot {
   slot_id: string; offering_id: string; unit_id: string; unit_name: string
   day_of_week: number; start_time: string; duration_minutes: number; room: string
+  // The managed room the free text resolved to, "" when it matched nothing.
+  room_code: string
   lecturer_id: string; lecturer_name: string
+}
+// One entry of the tenant's managed room registry (Admin → Rooms & Codes).
+interface RoomOption {
+  room_code: string; name: string; building: string; capacity: number; room_type: string; school: string
 }
 interface OverviewRow { offering_id: string; unit_id: string; unit_name: string }
 
@@ -195,7 +201,11 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
                           <div style={{ fontWeight: 800, color: KIU_GREEN, fontSize: 12 }}>{s.unit_id}</div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{s.unit_name}</div>
                           {s.lecturer_name && <div style={{ fontSize: 11, color: '#475569' }}>Lecturer: {s.lecturer_name}</div>}
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{to12(s.start_time)}–{to12(endTime(s.start_time, s.duration_minutes))}{s.room ? ` · Room: ${s.room}` : ''}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{to12(s.start_time)}–{to12(endTime(s.start_time, s.duration_minutes))}{s.room ? ` · Room: ${s.room}` : ''}
+                            {s.room && !s.room_code && (
+                              <span title="This room is not in the managed room list, so it cannot be reported on. Add it under Admin → Rooms & Codes."
+                                style={{ color: '#b45309', cursor: 'help' }}> ⚠</span>
+                            )}</div>
                         </div>
                       ))}
                     </td>
@@ -229,6 +239,16 @@ function AddSlot({ offering, units, onDone, onCancel }: {
   const [room, setRoom] = useState('')
   const [saving, setSaving] = useState(false)
   const uniqUnits = Array.from(new Map(units.map(u => [u.unit_id, u])).values())
+
+  // The managed room registry, so a room is picked rather than retyped. The field stays a free-text
+  // input on purpose — a room that is not on the list yet must still be schedulable — but the hint
+  // below it says whether what was typed resolved to a real room, which is what the patrol manifest
+  // and every per-room report key off.
+  const rooms = useQuery<RoomOption[]>(() => api.get('/api/v1/dashboard/rooms'), [])
+  const roomList = rooms.data ?? []
+  const matched = roomList.find(r =>
+    r.room_code.trim().toLowerCase() === room.trim().toLowerCase() ||
+    r.name.trim().toLowerCase() === room.trim().toLowerCase())
   // The API still stores a duration; derive it from the two clock times the user enters.
   const dur = toMin(end) - toMin(start)
 
@@ -252,7 +272,22 @@ function AddSlot({ offering, units, onDone, onCancel }: {
       <Field label="Day"><select value={day} onChange={e => setDay(Number(e.target.value))} style={sel_}>{ttDays.map(d => <option key={d} value={d}>{DAYS[d]}</option>)}</select></Field>
       <Field label="Start (HH:MM)"><input type="time" value={start} onChange={e => setStart(e.target.value)} style={inp} /></Field>
       <Field label="End (HH:MM)"><input type="time" value={end} onChange={e => setEnd(e.target.value)} style={{ ...inp, borderColor: dur <= 0 ? '#dc2626' : '#e2e8f0' }} /></Field>
-      <Field label="Room"><input value={room} onChange={e => setRoom(e.target.value)} placeholder="e.g. C01 O.B." style={{ ...inp, width: 120 }} /></Field>
+      <Field label="Room">
+        <input list="tt-rooms" value={room} onChange={e => setRoom(e.target.value)}
+          placeholder={roomList.length ? 'pick or type' : 'e.g. C01 O.B.'} style={{ ...inp, width: 150 }} />
+        <datalist id="tt-rooms">
+          {roomList.map(r => (
+            <option key={r.room_code} value={r.room_code}>
+              {[r.name, r.building, r.capacity ? `${r.capacity} seats` : ''].filter(Boolean).join(' · ')}
+            </option>
+          ))}
+        </datalist>
+        <div style={{ fontSize: 10, marginTop: 2, height: 12, color: matched ? KIU_GREEN : 'var(--muted)' }}>
+          {!room.trim() ? '' : matched
+            ? `✓ ${matched.name}${matched.building ? ` · ${matched.building}` : ''}`
+            : 'not in the room list — saved as text'}
+        </div>
+      </Field>
       <button onClick={save} disabled={!unit || saving || dur <= 0} style={{ ...btnGhost, background: KIU_GREEN, color: '#fff', borderColor: KIU_GREEN, opacity: dur <= 0 ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Add'}</button>
       <button onClick={onCancel} style={btnGhost}>Cancel</button>
     </div>

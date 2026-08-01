@@ -1,6 +1,10 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
-export type Role = 'VC' | 'DQA_DIRECTOR' | 'QA_OFFICER' | 'COORDINATOR' | 'ADMIN' | 'LECTURER' | 'HOD' | 'DEAN'
+export type Role =
+  | 'VC' | 'DQA_DIRECTOR' | 'QA_OFFICER' | 'COORDINATOR' | 'ADMIN' | 'LECTURER'
+  // Org-scoped oversight. Each is bounded by the department or college/school on
+  // the account: HOD/QA_DEPT_REP by department, DEAN/QA_SCHOOL_HANDLER by school.
+  | 'HOD' | 'DEAN' | 'QA_SCHOOL_HANDLER' | 'QA_DEPT_REP'
 
 interface AuthUser {
   userId: string

@@ -15,7 +15,7 @@ Default super-admin: `superadmin@qaat.platform` / `Super1234!`
 |------|----------|
 | `backend/` | 4 Go services (auth-service, api-gateway, session-manager, sync-receiver) + 2 Node.js services (qr-generator, notification-service) |
 | `frontend/` | 4 apps (admin-dashboards, coordinator-pwa, student-portal, coordinator-android) |
-| `db/migrations/` | 48 SQL files (001–049, no 045). Auto-run on empty PG volume |
+| `db/migrations/` | 60 SQL files (001–062, no 045 or 051). Auto-run on empty PG volume |
 | `db/seeds/` | `001_test_tenants.sql`, `002_test_users.sql`, `003_e2e_test_data.sql` |
 | `tests/security/` | Go RLS isolation tests (must connect as `qaat_app`) |
 | `tests/e2e/` | Playwright + shell-based E2E |

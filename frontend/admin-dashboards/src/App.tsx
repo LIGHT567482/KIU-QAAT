@@ -23,7 +23,7 @@ import AdminUsers from './pages/admin/AdminUsers'
 import AdminCourses from './pages/admin/AdminCourses'
 import AdminCourseUnits from './pages/admin/AdminCourseUnits'
 import AdminStudents from './pages/admin/AdminStudents'
-import AdminVenues from './pages/admin/AdminVenues'
+import AdminRooms from './pages/admin/AdminRooms'
 import AdminSchools from './pages/admin/AdminSchools'
 import OrgLecturers from './pages/OrgLecturers'
 import AdminLecturers from './pages/admin/AdminLecturers'
@@ -37,6 +37,7 @@ import AdminReports from './pages/admin/AdminReports'
 import DashLecturerAttendance from './pages/shared/DashLecturerAttendance'
 import QAStudentAttendance from './pages/qa/QAStudentAttendance'
 import QAReports from './pages/qa/QAReports'
+import { QAOrgLecturers, QAOrgDepartments, QAOrgReports } from './pages/qa/QAOrgDashboard'
 import Timetable from './pages/shared/Timetable'
 import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/dqa/punctuality"  element={<DQAPunctuality />} />
             <Route path="/dqa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/dqa/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/dqa/qa-reports"          element={<QAReports />} />
             <Route path="/dqa/messages"            element={<Messages />} />
           </Route>
 
@@ -96,7 +98,9 @@ export default function App() {
             <Route path="/admin/tenants/:tenantId/courses"            element={<AdminCourses />} />
             <Route path="/admin/tenants/:tenantId/students"           element={<AdminStudents />} />
             <Route path="/admin/timetable"                            element={<Timetable />} />
-            <Route path="/admin/tenants/:tenantId/venues"             element={<AdminVenues />} />
+            <Route path="/admin/tenants/:tenantId/rooms"              element={<AdminRooms />} />
+            {/* /venues is the old path for the same page — kept so existing links resolve. */}
+            <Route path="/admin/tenants/:tenantId/venues"             element={<AdminRooms />} />
             <Route path="/admin/courses/:courseId/units"              element={<AdminCourseUnits />} />
             <Route path="/admin/tenants/:tenantId/coordinators"          element={<AdminCoordinators />} />
             <Route path="/admin/tenants/:tenantId/lecturers"              element={<AdminLecturers />} />
@@ -119,6 +123,19 @@ export default function App() {
           </Route>
           <Route element={<RoleLayout allowedRoles={['DEAN']} />}>
             <Route path="/dean" element={<OrgLecturers level="dean" />} />
+          </Route>
+
+          {/* ── QA reps: department rep / school handler ────────────────── */}
+          <Route element={<RoleLayout allowedRoles={['QA_DEPT_REP']} />}>
+            <Route path="/qa-dept"          element={<QAOrgLecturers />} />
+            <Route path="/qa-dept/report"   element={<QAOrgReports />} />
+            <Route path="/qa-dept/messages" element={<Messages />} />
+          </Route>
+          <Route element={<RoleLayout allowedRoles={['QA_SCHOOL_HANDLER']} />}>
+            <Route path="/qa-school"           element={<QAOrgDepartments />} />
+            <Route path="/qa-school/lecturers" element={<QAOrgLecturers />} />
+            <Route path="/qa-school/reports"   element={<QAOrgReports />} />
+            <Route path="/qa-school/messages"  element={<Messages />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />

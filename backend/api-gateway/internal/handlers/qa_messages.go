@@ -17,6 +17,21 @@ import (
 
 const maxAttachmentBytes = 8 << 20 // 8 MiB
 
+// isQAFieldRole reports whether the role is one of the QA people in the field, below the DQA. All
+// three carry a department and/or a school on their account and are targeted the same way, so the
+// DQA's DEPARTMENT/SCHOOL broadcasts reach the reps of that unit exactly as they reach its QA
+// officer, and all three reply up the same channel.
+func isQAFieldRole(role string) bool {
+	switch role {
+	case middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool:
+		return true
+	}
+	return false
+}
+
+// qaFieldRolesSQL is the same set as a SQL list, for the audience lookup.
+const qaFieldRolesSQL = `('QA_OFFICER','QA_DEPT_REP','QA_SCHOOL_HANDLER')`
+
 // SendQAMessage — POST /api/v1/messages
 func SendQAMessage(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -71,12 +86,14 @@ func SendQAMessage(pool *pgxpool.Pool) http.HandlerFunc {
 			if req.Audience == "ALL_QA" {
 				req.AudienceValue = ""
 			}
-		case middleware.RoleQAOfficer:
-			req.Audience = "DQA" // QA officers can only message the DQA director
-			req.AudienceValue = ""
 		default:
-			writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "only the DQA director and QA officers can send messages"))
-			return
+			if !isQAFieldRole(role) {
+				writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "only the DQA director and the QA field roles can send messages"))
+				return
+			}
+			// QA officers and the department/school reps can only message the DQA director.
+			req.Audience = "DQA"
+			req.AudienceValue = ""
 		}
 
 		// Optional attachment.
@@ -179,15 +196,16 @@ func ListQAMessages(pool *pgxpool.Pool) http.HandlerFunc {
 		case role == middleware.RoleDQADirector:
 			// DQA inbox = replies from QA officers.
 			cond = "AND m.audience = 'DQA' "
-		case role == middleware.RoleQAOfficer:
+		case isQAFieldRole(role):
 			// QA inbox = broadcasts that target them: all QA, their department, or their school.
+			// Same for an officer and for a department/school rep — they are targeted identically.
 			// audience_value may hold several departments/schools joined by '||' (DQA multi-select).
 			cond = `AND ( m.audience = 'ALL_QA'
 			             OR (m.audience = 'DEPARTMENT' AND $3 = ANY(string_to_array(m.audience_value, '||')))
 			             OR (m.audience = 'SCHOOL'     AND $4 = ANY(string_to_array(m.audience_value, '||'))) ) `
 			args = append(args, dept, school)
 		default:
-			writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "not a QA officer or DQA director"))
+			writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "not a QA role or the DQA director"))
 			return
 		}
 
@@ -229,10 +247,10 @@ func UnreadQAMessageCount(pool *pgxpool.Pool) http.HandlerFunc {
 		      LEFT JOIN qa_message_reads rd ON rd.message_id = m.message_id AND rd.user_id = $2
 		      WHERE m.tenant_id = $1 AND rd.user_id IS NULL AND m.sender_id <> $2 AND `
 		args := []interface{}{tenantID, userID}
-		switch role {
-		case middleware.RoleDQADirector:
+		switch {
+		case role == middleware.RoleDQADirector:
 			q += "m.audience = 'DQA'"
-		case middleware.RoleQAOfficer:
+		case isQAFieldRole(role):
 			q += "(m.audience='ALL_QA' OR (m.audience='DEPARTMENT' AND $3=ANY(string_to_array(m.audience_value,'||'))) OR (m.audience='SCHOOL' AND $4=ANY(string_to_array(m.audience_value,'||'))))"
 			args = append(args, dept, school)
 		default:
@@ -279,7 +297,7 @@ func QAAudiences(pool *pgxpool.Pool) http.HandlerFunc {
 		schools := []string{}
 		rows, err := pool.Query(r.Context(),
 			`SELECT DISTINCT COALESCE(department,''), COALESCE(school,'')
-			 FROM users WHERE tenant_id = $1 AND role = 'QA_OFFICER'`, tenantID)
+			 FROM users WHERE tenant_id = $1 AND role IN `+qaFieldRolesSQL+``, tenantID)
 		if err == nil {
 			defer rows.Close()
 			dset, sset := map[string]bool{}, map[string]bool{}
