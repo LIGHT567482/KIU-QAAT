@@ -128,15 +128,35 @@ and syncs when a network returns.
 Oversees **one school/college**: the lecturers teaching in any of its departments and how much of
 their timetabled teaching was actually observed. Can notify those lecturers, or message the DQA/ADMIN.
 
-- **Dashboard:** `/dean` → School Lecturers
+- **Dashboard:** `/dean` → **Overview** · **Departments & HODs** · Lecturers · At-risk Students ·
+  Student Attendance · Timetable (read-only) · Alerts
 - **Account requirement:** a **college/school is mandatory.**
+
+> **A dean manages through their heads of department, so that layer is now the second page.**
+> `Departments & HODs` lists every department of the college with the head who runs it — name,
+> contact, and whether they have ever signed in — beside the four figures the department is judged
+> on: classes taught against the timetable, whether the **lecturer actually gated in** for the ones
+> that ran (the ghost-lecture measure — `sessions` alone only says a room was opened), student
+> attendance, and how many students are about to lose eligibility. Each card drills into that
+> department's lecturers.
 
 ### 4.2 Head of Department — `HOD`
 
 The same, narrowed to **one department**.
 
-- **Dashboard:** `/hod` → Department Lecturers
+- **Dashboard:** `/hod` → **Overview** · Lecturers · At-risk Students · Student Attendance ·
+  Timetable (read-only) · Alerts
 - **Account requirement:** a **department is mandatory.**
+
+> **Both used to have exactly one page** — a bare lecturer list — which left the two roles
+> accountable for a department and a college seeing less than the QA rep who visits them. The
+> Overview answers the three questions in order: how big is my unit, is teaching actually
+> happening (sessions held against the timetable, plus units with **no lecturer assigned** —
+> invisible on every other screen), and who is about to lose exam eligibility.
+>
+> **Scope is never a parameter.** It is resolved server-side from the unit on the caller's own
+> account (`resolveOrgScope`), so a dean cannot read another college by naming it, and an account
+> with a blank unit matches **nothing** rather than everything.
 
 ### 4.3 Institution IT Administrator — `ADMIN`
 
@@ -146,7 +166,17 @@ account in the institution.**
 
 - **Dashboard:** `/admin` → Home · Administration · Schools & Departments · Courses & Sessions ·
   Timetable · Students · Coordinators · Lecturers · Assignments · Lecturer Attendance · Employees ·
-  Reports · Rooms & Codes · Settings
+  **At-risk Students** · Reports · Rooms & Codes · **Audit Trail** · Settings
+- **Home** is no longer a grid of links. It carries what the institution is *doing* (sessions live
+  now, check-ins and lecturer gate-ins today) and — the point of it — **Needs attention**: units
+  with no lecturer, cohorts with no coordinator, students on no cohort, org roles with no unit,
+  accounts still on the default password, patrollers with no handset, sessions never synced. Every
+  one of those is a *silent* failure elsewhere; none of them raise an error anywhere, so the only
+  way anyone finds them is by being shown them.
+- **Audit Trail** reads `admin_audit_log`, which existed from migration 001 and which **nothing
+  ever wrote to** until now. Account deletions, student device resets, patrol handset releases and
+  patrol PIN clearances are recorded with the detail that cannot be recovered afterwards (the
+  deleted account's email and role, the reason given for a reset).
 - **Extra gate:** the Administration (Users) page sits behind a per-tenant **Users passcode** on top
   of the login, configured in Settings.
 - **Constraint:** every account they create must use the institution's email domain.
@@ -189,10 +219,13 @@ coordinator's screen displays, which is separate from the retired personal-QR lo
 use. Has a read-only dashboard of their own attendance.
 
 - **Dashboard:** `/lecturer` → My Attendance
+- **Dashboard:** `/lecturer` → **My Teaching** — their own month (taught / missed / still to come,
+  from the gate record, not from "a session existed"), then the per-unit student attendance matrix
+  split by cohort.
 - **Sign-in, either:**
   - **Passwordless:** institution + staff ID (`/api/v1/auth/lecturer-login`)
-  - Password via the unified app — **default `Lecturer`** for accounts that have never signed in
-    (migration 052), with a forced change at first login (migration 053)
+  - Password via the unified app — **default `lecturer`** for accounts that have never signed in
+    (migrations 052/070; either casing is accepted), with a forced change at first login (053)
 - **Also:** a read-only **Lecturer Portal** needing no account at all — institution + staff ID.
 - **Optional:** WebAuthn phone biometric, enrolled once, verified per gate scan.
 
@@ -210,9 +243,10 @@ students have no institutional email or password requirement.
 - **Check-in:** signed in through the KIU QAAT app, then `/api/v1/student/checkin` with the room
   code shown on the coordinator's screen. *(The public captive-portal check-in and the personal-QR
   login were removed with the QR subsystem — migration 063.)*
-- **Unified app:** password **default `Student`** for accounts that have never signed in
-  (migration 052), forced change at first login (migration 053). The device is bound once at
-  onboarding via `/api/v1/student/register-device`.
+- **Unified app:** sign in with the **registration number** and the password **default `student`**
+  for accounts that have never signed in (migrations 052/070; either casing is accepted), forced
+  change at first login (053). The device is bound once at onboarding via
+  `/api/v1/student/register-device`.
 - **One device, one student:** a hardware fingerprint prevents a phone being reused by a second
   student in the same session.
 
@@ -242,12 +276,27 @@ People who receive output without signing in:
 
 | Who | Default | Set by | Must change |
 |---|---|---|---|
-| Students (never signed in) | password `Student` | migration 052 | Forced at first login (053) |
-| Lecturers (never signed in) | password `Lecturer` | migration 052 | Forced at first login (053) |
+| Students (never signed in) | password `student` | migrations 052 + 070, `DefaultStudentPassword` | Forced at first login (053) |
+| Lecturers (never signed in) | password `lecturer` | migrations 052 + 070, `DefaultLecturerPassword` | Forced at first login (053) |
 | Test seed users (**dev only**) | `Test1234!` | `db/seeds/002_test_users.sql` | Never load in production |
 
-Migrations 052/053 only touch accounts with `last_login_at IS NULL`, so a password the user has
+Migrations 052/053/070 only touch accounts with `last_login_at IS NULL`, so a password the user has
 already changed is never clobbered.
+
+**Casing does not matter for a default.** 052 seeded `Student`/`Lecturer`; the canonical spelling is
+now lower-case. For an account still flagged `force_password_change`, auth-service accepts any
+casing of the word it was actually seeded with (`matchesSeededDefault`) — but only after verifying
+the stored hash really is that untouched default. The moment the user picks their own password the
+flag clears and matching is exact again, like every other account.
+
+**Where the default comes from.** Students and lecturers never choose a password at creation — they
+are added by registration number and staff ID — so `DefaultStudentPassword` /
+`DefaultLecturerPassword` (`backend/api-gateway/internal/handlers/default_passwords.go`) are seeded
+for them, in every path: the admin dashboard, the SIS import, and the lazy provisioning on first
+sign-in. Registering a student from the admin dashboard **used to seed a random throwaway** instead
+— a leftover from the QR era, when the password was never meant to be typed. The reg-number
+resolved, the account existed, and sign-in still failed with "invalid email or password". Migration
+070 repairs every account left stranded by that.
 
 ### Rules the system enforces
 
@@ -262,6 +311,55 @@ already changed is never clobbered.
   created without its department or school** — that field is the scope of everything they see, and
   an account without one matches nothing rather than everything.
 - Self-service **Change password** is available from every dashboard sidebar.
+
+### Org units are chosen, never typed
+
+Department and school on an account are matched **by name** against `courses.department` /
+`courses.school`. One typo — "Comp. Science" against "Computer Science" — and the account sees
+nothing at all: the scoped queries return an empty set rather than an error, so it looks like an
+empty institution rather than a mistake. Every form that takes them (Users, Lecturers, Employees)
+therefore picks from the org units the admin created, via the shared `OrgPicker`:
+
+- **Choosing a department fills in its school and locks it**, so the pair can never disagree.
+- Choosing a school first simply narrows the department list.
+- A **support department** (Finance, ICT, Library — `school_id IS NULL`, migration 066) *clears*
+  the school and says so, rather than leaving a faculty attached to a department that has none.
+
+### The patroller's second factor — a PIN
+
+Only the QA patroller is asked for more than a password, and only because of what a patrol tick is:
+an accusation that a named lecturer was or was not teaching, weighed against the coordinator's own
+log precisely because it comes from an independent observer. The password is the part that gets
+shared "to help cover the rounds", and once shared, anyone can mark any lecturer absent.
+
+- **First sign-in** lands on a *Set your patrol PIN* page (4–8 digits; repeated and running digits
+  refused). **Every sign-in after** asks for it before the round will open.
+- Verified **server-side** (`POST /api/v1/patrol/pin/verify`) — a secret a stolen handset could
+  check for itself is a delay, not a factor. So the round cannot open offline, and the screen says
+  so plainly.
+- 5 wrong attempts → a 15-minute lockout. An admin can **clear** a PIN
+  (`DELETE /api/v1/admin/patrol-pins/{user_id}`, audited) so the patroller sets a new one; nobody
+  can ever *set* or read someone else's.
+- This stacks with the handset binding (migration 069): the binding proves **which phone**, the PIN
+  proves **who is holding it**.
+
+### Signing out of the phone app
+
+One handset is passed between coordinators and lent to students, so sign-out is a full handover,
+not just "forget the token". Every role's button is the same control (`SignOutButton`), and it:
+
+1. **Refuses while a session is open.** End the session first — that is what seals the attendance
+   and uploads it. Signing out drops the device-binding key, which is the only thing able to seal a
+   closed session, so the room's check-ins would be stranded on the phone forever.
+2. **Warns when sealed sessions have not reached the server**, naming the count, before discarding
+   them. Same reason: the key goes with the sign-in.
+3. Then tears everything down — the foreground service (and with it the hotspot and the in-room
+   HTTP server on `:8080`), the pop-up notifications, the credentials (written **synchronously**, so
+   a process death cannot resurrect the session), the cached cohort roster and check-ins in Room,
+   and all in-memory state including `force_password_change`.
+
+The mandatory change-password screen carries its own sign-out, since it is the one screen with no
+navigation of its own and a user who cannot complete the change was otherwise stuck on it.
 
 ### Who creates whom
 

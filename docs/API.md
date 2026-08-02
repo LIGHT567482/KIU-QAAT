@@ -123,6 +123,27 @@ student's timetable, and reaches the patrol manifest with nobody named against i
 roadmap (`GET /api/v1/admin/courses/{course_id}/roadmap`) therefore returns `lecturer_names` and
 `slot_count` per unit, so that gap is visible on the screen that governs it.
 
+### The calendar, and the three different things it reports
+
+`timetable_slots` holds one row per cohort per **weekly** slot ("CSE 2420, Mondays, 08:00"), so the
+handler expands those slots across the requested range: a unit taught every Monday yields an entry
+on *every* Monday in the window, not one entry. Each entry then carries three facts that are
+routinely confused, and which the app renders separately:
+
+| Field | Means | Source |
+|---|---|---|
+| `held` | A session was opened for that unit and date | `sessions` |
+| `lecturer_present` (+ `contact_hours`) | **The lecturer actually gated in** | `lecturer_attendance_logs` |
+| `pct` / `cohorts[].pct` | How many *students* attended | `attendance_logs` |
+
+`held` is not presence: a coordinator can open a room around a lecturer who never arrived. Only
+`lecturer_attendance_logs` — written when the lecturer physically STARTs at the coordinator's gate —
+answers "was I there?", which is what the phone app's month grid colours each day by (taught /
+missed / partly / scheduled). A day with a timetabled slot, in the past, with no gate record, is a
+**miss**, and the grid must show it: the earlier agenda-style view listed only days that had a
+class, so a missed Monday and a Monday that was never timetabled looked identical — both absent
+from the screen.
+
 ## 6. Governance — VC / DVC / DQA_DIRECTOR / QA_OFFICER
 
 - **VC/DVC:** `GET /api/v1/dashboard/vc/{overview,lecturer-workload}`, `GET /api/v1/reports/vc/audit.pdf`
@@ -186,6 +207,118 @@ Every one of these roles is bounded by the org unit **on its own user record** �
 Withdrawing a submission removes the observations derived from it (FK cascade) and nothing else.
 
 **Messaging & notifications.** The QA rep roles share the QA officer's channels: `/api/v1/messages*` (they receive the DQA's `ALL_QA`/`DEPARTMENT`/`SCHOOL` broadcasts matching their own unit, and reply up to the DQA) and `/api/v1/app-notifications` (audiences `LECTURERS`, `LECTURER`, `DQA`, `ADMIN` — the lecturer audiences resolve **only** within the sender's org unit).
+
+### Org-scoped dashboards — scope is never a parameter
+
+| Method | Path | Roles |
+|--------|------|-------|
+| GET | `/api/v1/org/overview` | HOD · DEAN · QA_DEPT_REP · QA_SCHOOL_HANDLER · QA_OFFICER · DQA · VC · DVC · ADMIN |
+| GET | `/api/v1/org/at-risk?limit=&course=` | same |
+| GET | `/api/v1/org/departments` | same — one row per department, naming its HOD |
+| GET | `/api/v1/admin/overview` | ADMIN |
+| GET | `/api/v1/admin/audit?action=&actor=&from=&to=&limit=` | ADMIN |
+
+`resolveOrgScope` reads the caller's org unit **from their own account** — `users.department` for
+HOD/QA_DEPT_REP, `users.school` for DEAN/QA_SCHOOL_HANDLER — and there is deliberately **no query
+parameter for it**, so a dean cannot read another college by naming one. The institution-wide roles
+(DQA, QA officer, VC/DVC, ADMIN) are `Unbounded` and get the same data unfiltered, which is what
+makes the at-risk watchlist one page instead of five.
+
+A bounded role whose account carries **no unit matches nothing, not everything** — an empty scope
+that matched every department would silently hand the head of one department the whole institution.
+The same rule already governs `resolveRecipients`, and `qaFiltersScoped` applies it to
+`/api/v1/dashboard/qa/student-attendance` so HOD and DEAN read that shared endpoint scoped. Its
+`_scope_*` keys are underscored precisely because they are not, and must never become, query
+parameters.
+
+### The org tree vs the academic data — the seam everything hinges on
+
+There are **two** representations of the same hierarchy, joined only by string equality:
+
+- `schools` → `departments` — id-linked, authoritative, edited under *Schools & Departments*.
+- `courses.school` / `courses.department` — free-text **names**, and what every scoped query
+  actually filters on.
+
+`/api/v1/org/departments` is deliberately driven by the **`departments` table**, not by
+`courses.department`. Deriving the list from courses would silently omit a department that exists
+but has no course attached — precisely the one a dean most needs to ask about. Everything else
+LEFT JOINs onto that spine, which is what lets the two real failure modes be *reported* instead of
+absorbed:
+
+| Fault | What it looks like to the person affected |
+|---|---|
+| Department with **no HOD** | Nobody answerable; it appears on the dean's page as an unowned card |
+| Department **on no course** (`unlinked`) | Its HOD opens a working, blank dashboard with no clue why |
+| Course naming an **unknown department** | Its lecturers and students belong to no HOD and to no dean's college |
+
+All three are counted on `/api/v1/admin/overview` under `gaps`, because closing them is the
+administrator's job and nothing else in the system raises so much as a warning about them.
+
+### The management chain is a channel in both directions
+
+`resolveRecipients` gained three audiences so the layer between a dean and a lecturer stops being a
+dead end:
+
+| Audience | Sender | Resolves to |
+|---|---|---|
+| `HODS` | DEAN · QA_SCHOOL_HANDLER | every HOD of a department in **their** school |
+| `HOD` + `target_id` | DEAN · QA_SCHOOL_HANDLER | one HOD, **only** if their department is in that school |
+| `DEAN` | HOD · QA_DEPT_REP | the dean of the school **their own department** sits under |
+
+Scope still comes from the sender's account, never the request, so `HODS` can only ever mean the
+heads of the sender's own college. Before this a dean's only bulk option was `LECTURERS` — every
+lecturer in the college at once, routing straight past the person responsible for them.
+
+### The audit trail
+
+`admin_audit_log` has existed since migration 001 and **nothing wrote to it** until `auditAdmin`.
+Writes are best-effort by design — an audit failure must never abort the action it is recording, a
+half-done device release with a clean log being worse than a completed one with a missing line —
+but they are logged. Recorded today: `USER_DELETED`, `STUDENT_DEVICE_RESET`,
+`PATROL_DEVICE_RELEASED`, `PATROL_PIN_RESET`. The `payload` JSONB carries what cannot be recovered
+afterwards (a deleted account's email and role, the reason given for a reset); it must never carry
+credentials, a PIN, or a token.
+
+### Patroller PIN (second factor)
+
+| Method | Path | Role |
+|--------|------|------|
+| GET | `/api/v1/patrol/pin` | QA_PATROLLER — `{pin_set, locked, attempts_left}` |
+| POST | `/api/v1/patrol/pin` | QA_PATROLLER — set (first time) or change (`current_pin` required) |
+| POST | `/api/v1/patrol/pin/verify` | QA_PATROLLER — opens the round |
+| DELETE | `/api/v1/admin/patrol-pins/{user_id}` | ADMIN — clears it; audited |
+
+Verification is server-side on purpose: a secret a stolen handset can check for itself is a delay,
+not a factor. The PIN is never returned by any endpoint — `pin_set` is the only fact the app is
+told — and an administrator can clear one but never set or read it. 5 failures → a 15-minute
+lockout, counted in a single `UPDATE … RETURNING` so two racing attempts cannot both read 4.
+
+### Dismissing an alert
+
+`DELETE /api/v1/app-notifications/{id}` and `DELETE /api/v1/messages/{id}` clear an item from **the
+caller's own inbox**. Neither deletes anything: an alert fanned out to a cohort is one row with many
+recipients, so a student clearing their copy must not remove anyone else's. The sender's record and
+the audit trail are untouched.
+
+Three properties the clients depend on, and which any new inbox surface must preserve:
+
+- **Idempotent.** Dismissing something already dismissed returns `200`, not `404`. Clients restore
+  the card when a dismissal fails, so a `404` on the second press (a double-tap, a retry over a
+  flaky link, a second signed-in device) would make the alert pop back — the exact opposite of what
+  the ✕ asked for. Only an id that is not in the caller's inbox at all returns `404`.
+- **Every reader may clear.** The dismiss route carries the *same* role list as the list/read
+  routes (`inboxRoles` in the router). They were once written out separately and drifted, leaving
+  `HOD`/`DEAN`/`QA_DEPT_REP`/`QA_SCHOOL_HANDLER` able to read an inbox but not clear it: the ✕
+  returned `403`, the card vanished locally and returned on the next refresh.
+- **Dismissed is gone from the badge too.** `GET /api/v1/app-notifications/unread-count` filters
+  `dismissed_at IS NULL`, or the ✕ would leave an unread count pointing at rows that are no longer
+  listed anywhere they could be opened.
+
+**Pop-up delivery.** There is no FCM in this deployment (no Play Services; the backend is the
+institution's own and the app is offline-first), so the Android app **polls** these endpoints and
+raises the Android notification itself — every ~45s while the process is alive, and every 15 minutes
+via WorkManager after it has been closed. Dismissing an alert cancels its pop-up and blocks it for
+good on that handset.
 
 ## 7. QR management (→ qr-generator)
 
