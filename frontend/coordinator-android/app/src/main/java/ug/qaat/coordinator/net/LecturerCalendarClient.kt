@@ -24,6 +24,10 @@ class LecturerCalendarClient {
         val held: Boolean, val status: String,
         val enrolled: Int, val present: Int, val pct: Double,
         val cohorts: List<Cohort>,
+        /** Whether the LECTURER gated in for this slot, and for how long. Distinct from [held]
+         *  (a coordinator opened a room) and from [pct] (how many students came). */
+        val lecturerPresent: Boolean = false,
+        val contactHours: Double = 0.0,
     )
 
     data class UnitOption(val unitId: String, val unitName: String)
@@ -66,6 +70,7 @@ class LecturerCalendarClient {
                         e.optString("start_time"), e.optInt("duration_minutes"), e.optString("room"),
                         e.optBoolean("held"), e.optString("status"),
                         e.optInt("enrolled"), e.optInt("present"), e.optDouble("pct", 0.0), cohorts,
+                        e.optBoolean("lecturer_present"), e.optDouble("contact_hours", 0.0),
                     )
                 }
             } ?: emptyList()

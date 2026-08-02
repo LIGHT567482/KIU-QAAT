@@ -49,6 +49,13 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 		Present   int          `json:"present"`
 		Pct       float64      `json:"pct"`
 		Cohorts   []cohortStat `json:"cohorts"`
+		// THE LECTURER'S OWN presence at this slot, which is the thing their calendar is actually
+		// marking — distinct from Held (a session existed) and from Pct (how many students came).
+		// Sourced from lecturer_attendance_logs, which is only written when the lecturer physically
+		// STARTed at the coordinator's gate, so it cannot be satisfied by a session merely being
+		// opened around them.
+		LecturerPresent bool    `json:"lecturer_present"`
+		ContactHours    float64 `json:"contact_hours"`
 	}
 	type unitOpt struct {
 		UnitID   string `json:"unit_id"`
@@ -191,6 +198,30 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 			aRows.Close()
 		}
 
+		// ── Was the LECTURER there? ─────────────────────────────────────────────
+		// One row per unit+date they actually gated in on. This is what turns a day on the grid
+		// from "a class was timetabled" into "I taught it" or "I missed it", and no other table
+		// answers that: `sessions` says a coordinator opened a room, not that the lecturer came.
+		type presence struct{ hours float64 }
+		taught := map[string]presence{} // key: unit|date
+		pRows, _ := adminPool.Query(r.Context(), `
+			SELECT lal.unit_id, lal.session_date::text, COALESCE(SUM(lal.contact_hours),0)
+			FROM lecturer_attendance_logs lal
+			WHERE lal.tenant_id = $1 AND lal.lecturer_id = $2
+			  AND lal.session_date BETWEEN $3::date AND $4::date
+			GROUP BY lal.unit_id, lal.session_date`,
+			tenantID, lecturerID, from.Format("2006-01-02"), to.Format("2006-01-02"))
+		if pRows != nil {
+			for pRows.Next() {
+				var unitID, date string
+				var hours float64
+				if pRows.Scan(&unitID, &date, &hours) == nil {
+					taught[unitID+"|"+date] = presence{hours}
+				}
+			}
+			pRows.Close()
+		}
+
 		// ── Expand the weekly slots across the range, grouped by (unit, date, time) ──
 		byKey := map[string]*event{}
 		seenCohort := map[string]bool{}
@@ -213,6 +244,10 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 						Date: date, UnitID: sl.unitID, UnitName: sl.unitName,
 						StartTime: sl.start, Minutes: sl.minutes, Room: sl.room,
 						Cohorts: []cohortStat{},
+					}
+					if p, ok := taught[sl.unitID+"|"+date]; ok {
+						ev.LecturerPresent = true
+						ev.ContactHours = round1(p.hours)
 					}
 					byKey[key] = ev
 					order = append(order, key)
