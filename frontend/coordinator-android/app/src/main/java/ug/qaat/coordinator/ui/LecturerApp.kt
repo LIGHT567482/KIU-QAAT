@@ -393,6 +393,6 @@ private fun LecturerProfileTab(onChangePw: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = onChangePw, Modifier.fillMaxWidth()) { Text("🔑  Change password") }
         Spacer(Modifier.height(8.dp))
-        Button(onClick = { signOut() }, Modifier.fillMaxWidth()) { Text("Sign out") }
+        SignOutButton()
     }
 }

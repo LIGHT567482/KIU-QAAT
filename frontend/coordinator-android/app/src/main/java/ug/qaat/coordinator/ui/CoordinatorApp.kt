@@ -146,7 +146,15 @@ fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding
             AppState.forcePasswordChange -> {
                 Surface(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("Securing your account…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // A way OUT of this screen. It is the only one with no navigation of its
+                        // own, so a user who cannot complete the change — offline, or signed in as
+                        // the wrong person — was stuck here with nothing but the app switcher, and
+                        // the next launch auto-restored the same session straight back into it.
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Securing your account…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(20.dp))
+                            SignOutButton(modifier = Modifier, label = "Sign out instead")
+                        }
                     }
                 }
                 ChangePasswordDialog(onClose = { AppState.forcePasswordChange = false }, mandatory = true)
@@ -226,7 +234,6 @@ fun CoordinatorApp() {
                             onClose = { showProfile = false },
                             onChangePw = { showProfile = false; showChangePw = true },
                             onOpenPortal = { showProfile = false; showPortal = true },
-                            onSignOut = { showProfile = false; signOut() },
                         )
                     }
                 },
@@ -266,7 +273,7 @@ fun CoordinatorApp() {
 /** Corner popup: the coordinator's identity + cohort + settings (theme, change password,
  *  sign out), with an × to close. Everything that used to crowd the top bar lives here. */
 @Composable
-private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onOpenPortal: () -> Unit, onSignOut: () -> Unit) {
+private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onOpenPortal: () -> Unit) {
     Popup(alignment = Alignment.TopEnd, onDismissRequest = onClose, properties = PopupProperties(focusable = true)) {
         Surface(
             shape = RoundedCornerShape(14.dp), tonalElevation = 6.dp, shadowElevation = 8.dp,
@@ -297,9 +304,11 @@ private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onOpenPort
                     Text((if (AppState.darkTheme) "☀  Light mode" else "☾  Dark mode"), modifier = Modifier.fillMaxWidth())
                 }
                 TextButton(onClick = onChangePw, modifier = Modifier.fillMaxWidth()) { Text("🔑  Change password", modifier = Modifier.fillMaxWidth()) }
-                TextButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
-                    Text("⎋  Sign out", color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth())
-                }
+                // The shared control, not a bare callback: it is what refuses to sign out of an
+                // open session and warns about attendance still waiting to upload. Rendered INSIDE
+                // the popup so its dialogs have somewhere to live — closing the popup first would
+                // dispose them mid-decision.
+                SignOutButton(label = "⎋  Sign out")
             }
         }
     }
@@ -489,17 +498,14 @@ internal fun NoPhoneUiScreen(role: String?) {
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(28.dp))
-                Button(onClick = { signOut() }, Modifier.fillMaxWidth()) { Text("Sign out") }
+                SignOutButton()
             }
         }
     }
 }
 
-internal fun signOut() {
-    SessionStore.clear()
-    AppState.token = null; AppState.userId = null; AppState.tenantId = null
-    AppState.deviceBindingKey = null; AppState.coordinatorName = null; AppState.coordinatorTitle = null
-    AppState.coordinatorRegNo = null; AppState.coordinatorEmail = null; AppState.role = null
-    AppState.manifest = null; AppState.cohortLabel = null
-    AppState.studentId = null; AppState.staffId = null; AppState.org = null; AppState.attendBlockUntil = 0L
-}
+// signOut() used to live here: a bare "null out some AppState and clear prefs" that each role
+// screen called directly. It left the foreground service (and with it the hotspot and the in-room
+// HTTP server) running, left the cached cohort roster and check-ins in Room for whoever signed in
+// next, and silently stranded any attendance not yet uploaded. The full teardown, the checks that
+// guard it and the one shared button are now in SignOut.kt — use SignOutButton().

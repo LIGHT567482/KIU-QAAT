@@ -46,6 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem(TOKEN_KEY)
+    // The pending welcome toast carries the PREVIOUS user's name. Left behind, it greets whoever
+    // signs in next by the wrong name. The theme lives in localStorage on purpose — it is a
+    // preference of the device, not of the account, and survives sign-out.
+    sessionStorage.removeItem('qaat_welcome')
     setUser(null)
   }, [])
 

@@ -202,6 +202,14 @@ object SessionStore {
 
     fun clear() { if (::prefs.isInitialized) prefs.edit().clear().apply() }
 
+    /**
+     * Same wipe, but SYNCHRONOUS — used by sign-out. apply() hands the write to a background
+     * thread and returns; if the process dies in that window (a user swiping the app away right
+     * after signing out is exactly when it might), the token survives on disk and the next launch
+     * silently auto-logs back in as the person who just signed out.
+     */
+    fun clearNow() { if (::prefs.isInitialized) prefs.edit().clear().commit() }
+
     // ── Cached daily manifest (roster lives in Room; meta lives here) ─────────
     fun saveManifest(m: ManifestClient.Parsed) {
         val units = JSONArray().apply {

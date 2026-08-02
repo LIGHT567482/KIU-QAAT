@@ -44,7 +44,9 @@ import java.util.UUID
  *  2. **Handset binding** — the round is gated on [DeviceGate]. The gateway ties the patroller's
  *     account to the first phone that claims it and refuses patrol calls from any other, so a
  *     token lifted off this device buys an attacker nothing.
- *  3. **No silent re-login** — [PatrolRoleApp] drops the saved credentials the moment it opens.
+ *  3. **A PIN** — [PatrolPinGate], the second page after sign-in. The binding proves WHICH phone;
+ *     the PIN proves WHO is holding it, which is the half a shared password defeats.
+ *  4. **No silent re-login** — [PatrolRoleApp] drops the saved credentials the moment it opens.
  *     Every other role may resume without retyping a password; a patroller may not.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,7 +68,11 @@ fun PatrolRoleApp() {
 
     LaunchedEffect(tab, reloadKey) { runCatching { unread = NotificationClient().unread() } }
 
+    // Device first, then person. Checking the handset before asking for the PIN means a patroller
+    // on the wrong phone is told so immediately, rather than typing a PIN that was never going to
+    // be accepted.
     DeviceGate {
+      PatrolPinGate {
         Scaffold(
             containerColor = (if (!AppState.darkTheme) appBackgroundColor(AppState.branding) else null)
                 ?: MaterialTheme.colorScheme.background,
@@ -115,6 +121,7 @@ fun PatrolRoleApp() {
                 }
             }
         }
+      }
     }
 }
 
@@ -195,7 +202,7 @@ private fun PatrolLockedScreen(message: String) {
                 textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
-            Button(onClick = { patrolSignOut(ctx) }, Modifier.fillMaxWidth()) { Text("Sign out") }
+            SignOutButton()
         }
     }
 }
@@ -394,18 +401,18 @@ private fun PatrolProfileTab(ctx: android.content.Context, onChangePw: () -> Uni
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = onChangePw, Modifier.fillMaxWidth()) { Text("🔑  Change password") }
         Spacer(Modifier.height(8.dp))
-        Button(onClick = { patrolSignOut(ctx) }, Modifier.fillMaxWidth()) { Text("Sign out") }
+        // The PIN is changed from inside the round, where the patroller has already proved they
+        // know the current one — so a handset left unlocked cannot be used to replace it.
+        var changePin by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { changePin = true }, Modifier.fillMaxWidth()) { Text("🛡  Change patrol PIN") }
+        if (changePin) ChangePatrolPinDialog { changePin = false }
+        Spacer(Modifier.height(8.dp))
+        SignOutButton()
     }
 }
 
-/** Sign out AND erase the round. A patrol log names lecturers; it does not outlive the session
- *  that produced it on a shared or surrendered handset. */
-private fun patrolSignOut(@Suppress("UNUSED_PARAMETER") ctx: android.content.Context) {
-    Thread {
-        runCatching {
-            Graph.db.dao().clearPatrolLogs()
-            Graph.db.dao().clearPatrolSlots()
-        }
-    }.start()
-    signOut()
-}
+// patrolSignOut used to live here, wiping the patrol round before delegating to the old signOut().
+// Erasing the round is right — a patrol log names lecturers and must not outlive the session that
+// produced it on a shared or surrendered handset — but it was the ONLY role that cleaned up after
+// itself. That wipe is now part of the shared teardown (AppDao.clearAllForSignOut), so every role
+// gets it, and this role also gets the unsynced-attendance warning it never had.

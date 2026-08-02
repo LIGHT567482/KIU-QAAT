@@ -209,6 +209,27 @@ interface AppDao {
 
     /** Signing out of a patroller account must not leave their round on the handset. */
     @Query("DELETE FROM patrol_logs") fun clearPatrolLogs()
+
+    // ── Sign-out wipe ───────────────────────────────────────────────────────────
+    // Everything cached here belongs to the ACCOUNT that was signed in: a cohort roster, that
+    // cohort's check-ins, the session history, the patrol round. One handset is shared between
+    // coordinators and lent to students, so leaving it behind means the next person signs in and
+    // sees the previous one's cohort — and their check-ins would validate against a stale roster.
+    //
+    // Only ever called once sign-out has established there is nothing left to upload; see
+    // performSignOut, which refuses while a session is open and asks before discarding a pending
+    // sync. Room's own @Transaction keeps the wipe all-or-nothing.
+    @Query("DELETE FROM attendance_logs") fun clearAttendance()
+    @Query("DELETE FROM roster") fun clearRoster()
+    @Query("DELETE FROM sessions") fun clearSessions()
+    @Query("DELETE FROM present_display") fun clearPresentDisplay()
+    @Query("DELETE FROM device_bindings") fun clearBindings()
+
+    @androidx.room.Transaction
+    fun clearAllForSignOut() {
+        clearAttendance(); clearRoster(); clearSessions(); clearPresentDisplay(); clearBindings()
+        clearPatrolLogs(); clearPatrolSlots()
+    }
 }
 
 /** Projection for grouping attendance by session (for analytics). */
