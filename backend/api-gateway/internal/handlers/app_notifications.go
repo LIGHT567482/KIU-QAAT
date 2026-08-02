@@ -138,6 +138,41 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'DQA_DIRECTOR'`
 		case "ADMIN": // message the admins
 			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'ADMIN'`
+
+		// ── The management layer, which had no channel at all ────────────────
+		// A dean is accountable for a college THROUGH its heads of department, and a head of
+		// department answers upward to their dean — yet neither could send the other so much as a
+		// notice. The dean could only address every lecturer in the school at once, going straight
+		// past the person actually responsible for them.
+		case "HODS": // DEAN / QA_SCHOOL_HANDLER → every HOD of a department in their school
+			args = append(args, scopeVal)
+			sql = `SELECT u.user_id::text
+				FROM users u
+				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
+				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				WHERE u.tenant_id = $1 AND u.role = 'HOD'
+				  AND btrim(lower(s.name)) = btrim(lower($2))`
+		case "HOD": // one specific head of department, if they run a department of this school
+			args = append(args, scopeVal, targetID)
+			sql = `SELECT u.user_id::text
+				FROM users u
+				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
+				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				WHERE u.tenant_id = $1 AND u.role = 'HOD'
+				  AND btrim(lower(s.name)) = btrim(lower($2))
+				  AND u.user_id::text = $3`
+		case "DEAN": // HOD / QA_DEPT_REP → the dean of the school their department sits in
+			args = append(args, scopeVal)
+			sql = `SELECT u.user_id::text
+				FROM users u
+				WHERE u.tenant_id = $1 AND u.role = 'DEAN'
+				  AND btrim(lower(COALESCE(u.school,''))) = (
+				      SELECT btrim(lower(COALESCE(s.name,'')))
+				      FROM departments d
+				      LEFT JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				      WHERE d.tenant_id = $1 AND btrim(lower(d.name)) = btrim(lower($2))
+				      LIMIT 1)
+				  AND COALESCE(u.school,'') <> ''`
 		default:
 			return nil, nil
 		}
@@ -227,19 +262,23 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		// Validate audience against the sender's role.
+		// Who each role may address. The school-level roles reach DOWN to their heads of
+		// department and the department-level roles reach UP to their dean, so the management
+		// chain is a channel in both directions instead of a gap everyone routed around by
+		// notifying every lecturer at once.
 		valid := map[string]map[string]bool{
 			middleware.RoleLecturer:    {"STUDENTS": true, "COORDINATOR": true},
 			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true, "STUDENT": true, "LECTURER": true},
-			middleware.RoleHOD:         {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
-			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
-			middleware.RoleQADeptRep:   {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
-			middleware.RoleQASchool:    {"LECTURERS": true, "LECTURER": true, "DQA": true, "ADMIN": true},
+			middleware.RoleHOD:         {"LECTURERS": true, "LECTURER": true, "DEAN": true, "DQA": true, "ADMIN": true},
+			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "HODS": true, "HOD": true, "DQA": true, "ADMIN": true},
+			middleware.RoleQADeptRep:   {"LECTURERS": true, "LECTURER": true, "DEAN": true, "DQA": true, "ADMIN": true},
+			middleware.RoleQASchool:    {"LECTURERS": true, "LECTURER": true, "HODS": true, "HOD": true, "DQA": true, "ADMIN": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))
 			return
 		}
-		if (req.Audience == "STUDENT" || req.Audience == "LECTURER") && req.TargetID == "" {
+		if (req.Audience == "STUDENT" || req.Audience == "LECTURER" || req.Audience == "HOD") && req.TargetID == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick a recipient"))
 			return
 		}
@@ -360,8 +399,12 @@ func UnreadAppNotificationCount(pool *pgxpool.Pool) http.HandlerFunc {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
 		var n int
+		// Dismissed alerts are gone from the inbox, so they must be gone from the badge too —
+		// otherwise the ✕ leaves a permanent "3 unread" the reader can never clear, because the
+		// rows it counts are no longer listed anywhere they could be opened.
 		_ = pool.QueryRow(r.Context(),
-			`SELECT count(*) FROM notification_recipients WHERE tenant_id=$1 AND recipient_user_id=$2::uuid AND read_at IS NULL`,
+			`SELECT count(*) FROM notification_recipients
+			  WHERE tenant_id=$1 AND recipient_user_id=$2::uuid AND read_at IS NULL AND dismissed_at IS NULL`,
 			tenantID, userID).Scan(&n)
 		writeJSON(w, http.StatusOK, map[string]int{"unread": n})
 	}
@@ -409,16 +452,27 @@ func withTitle(title, name string) string {
 // Removes the notification from THIS recipient's inbox only. The notification itself and every
 // other recipient's copy are untouched: an alert sent to a whole cohort is one row fanned out to
 // many, and one student clearing their copy must not delete everyone else's.
+//
+// IDEMPOTENT. Dismissing something already dismissed is a success, not a 404. The clients treat a
+// failed dismiss as "the server refused" and restore the card, so a second ✕ (a double-tap, a retry
+// after a flaky connection, two devices signed into the same account) used to make the alert pop
+// back — the very thing dismissal is supposed to prevent. Only a genuinely foreign id 404s.
 func DismissAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
-		id := chi.URLParam(r, "id")
+		id := strings.TrimSpace(chi.URLParam(r, "id"))
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "missing id"))
+			return
+		}
+		// COALESCE keeps the FIRST dismissal's timestamp: re-dismissing must not rewrite history,
+		// and the row still matches so RowsAffected reports the real "is this yours?" answer.
 		ct, err := pool.Exec(r.Context(), `
 			UPDATE notification_recipients
-			   SET dismissed_at = now()
-			 WHERE notification_id = $1::uuid AND tenant_id = $2 AND recipient_user_id = $3::uuid
-			   AND dismissed_at IS NULL`, id, tenantID, userID)
+			   SET dismissed_at = COALESCE(dismissed_at, now())
+			 WHERE notification_id = $1::uuid AND tenant_id = $2 AND recipient_user_id = $3::uuid`,
+			id, tenantID, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

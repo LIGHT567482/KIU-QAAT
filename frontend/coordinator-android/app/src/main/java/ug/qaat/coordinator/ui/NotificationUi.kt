@@ -12,6 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ug.qaat.coordinator.net.NotificationClient
+import ug.qaat.coordinator.notify.AlertNotifier
 
 /** A horizontal, single-select chip row (e.g. unit filter). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,22 +65,43 @@ fun NotificationComposer(audiences: List<Pair<String, String>>, onSent: () -> Un
 @Composable
 fun NotificationInboxList(items: List<NotificationClient.Notif>?, onChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
-    // Locally dismissed ids, so the ✕ feels instant while the server call is in flight.
+    // Ids the server has ACCEPTED a dismissal for, plus the ones still in flight. Held here so the
+    // ✕ feels instant and — more importantly — so the card stays gone across the refresh that
+    // follows it. Without this the reload races the dismissal and the alert flickers back.
     val dismissed = remember { mutableStateListOf<String>() }
+    var dismissError by remember { mutableStateOf<String?>(null) }
     val visible = items?.filterNot { it.id in dismissed }
-    when {
-        items == null -> Box(Modifier.fillMaxWidth().padding(top = 30.dp), Alignment.Center) { CircularProgressIndicator() }
-        visible.isNullOrEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(visible, key = { it.id }) { n ->
-                NotificationCard(
-                    n = n,
-                    onOpen = { if (!n.read) scope.launch { NotificationClient().markRead(n.id); onChanged() } },
-                    onDismiss = {
-                        dismissed.add(n.id)
-                        scope.launch { NotificationClient().dismiss(n.id); onChanged() }
-                    },
-                )
+    Column {
+        // A dismissal that did not stick has to say why, rather than silently undoing itself.
+        dismissError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        when {
+            items == null -> Box(Modifier.fillMaxWidth().padding(top = 30.dp), Alignment.Center) { CircularProgressIndicator() }
+            visible.isNullOrEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(visible, key = { it.id }) { n ->
+                    NotificationCard(
+                        n = n,
+                        onOpen = { if (!n.read) scope.launch { NotificationClient().markRead(n.id); onChanged() } },
+                        onDismiss = {
+                            dismissed.add(n.id)
+                            dismissError = null
+                            scope.launch {
+                                // Never notify about it again, whatever the server says — the reader
+                                // has explicitly cleared it on this phone.
+                                AlertNotifier.suppress(n.id)
+                                val err = NotificationClient().dismiss(n.id)
+                                if (err != null) {
+                                    dismissed.remove(n.id)   // it is still in the inbox; say so
+                                    dismissError = err
+                                }
+                                onChanged()
+                            }
+                        },
+                    )
+                }
             }
         }
     }

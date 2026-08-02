@@ -132,23 +132,10 @@ private fun StudentNotifications(reloadKey: Int, onRead: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        when {
-            items == null -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
-            items!!.isEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                items(items!!, key = { it.id }) { n ->
-                    NotificationCard(
-                        n = n,
-                        onOpen = { if (!n.read) scope.launch { NotificationClient().markRead(n.id); load(); onRead() } },
-                        onDismiss = {
-                            // Drop it locally at once so the ✕ feels instant, then confirm with the server.
-                            items = items?.filterNot { it.id == n.id }
-                            scope.launch { NotificationClient().dismiss(n.id); onRead() }
-                        },
-                    )
-                }
-            }
-        }
+        // The shared list, not a private copy of it. The copy that lived here dropped the card on
+        // its own authority and never checked whether the server accepted the dismissal, so a
+        // refused ✕ came back with no explanation.
+        NotificationInboxList(items) { load(); onRead() }
     }
 }
 
@@ -343,11 +330,20 @@ private fun StudentProgress(reloadKey: Int) {
 private fun StudentHome(reloadKey: Int) {
     var home by remember { mutableStateOf<StudentHomeClient.Home?>(null) }
     var loading by remember { mutableStateOf(true) }
+    // The student's own attendance, summarised here rather than only on the Progress tab. The
+    // number that decides whether they sit the exam is the reason they open the app; making them
+    // find a second tab for it is what made this screen feel like a noticeboard.
+    var progress by remember { mutableStateOf<ProgressClient.Progress?>(null) }
     LaunchedEffect(reloadKey) {
         loading = true
         home = runCatching { StudentHomeClient().fetch() }.getOrNull()
         home?.let { AppState.cohortLabel = it.cohort }
         loading = false
+    }
+    LaunchedEffect(reloadKey, AppState.studentId) {
+        AppState.studentId?.takeIf { it.isNotBlank() }?.let { reg ->
+            progress = runCatching { ProgressClient().fetch(reg) }.getOrNull()
+        }
     }
 
     val name = home?.fullName?.takeIf { it.isNotBlank() }
@@ -365,9 +361,18 @@ private fun StudentHome(reloadKey: Int) {
             return@Column
         }
 
+        // ── Today, and what's next ───────────────────────────────────────────
+        // The whole week was here and today was not called out, so a student had to find the right
+        // weekday heading to answer the only question they open the app with.
+        val allSlots = home?.timetable.orEmpty()
+        TodayStrip(allSlots)
+
+        // ── Where their attendance stands ────────────────────────────────────
+        progress?.let { EligibilityStrip(it) }
+
         Text("Timetable", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        val slots = home?.timetable.orEmpty()
+        val slots = allSlots
         if (slots.isEmpty()) {
             Text("No timetable published for your cohort yet.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -427,6 +432,143 @@ private fun StudentHome(reloadKey: Int) {
             rest.forEach { UnitRow(it, dimmed = true) }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/**
+ * Today's classes, with the next one still to come picked out.
+ *
+ * Built from the SAME weekly timetable already on this screen — no extra call — by filtering to
+ * today's weekday and comparing start times against the clock. A day with nothing on it says so,
+ * because "no classes today" is a genuinely useful answer and a blank space is not.
+ */
+@Composable
+private fun TodayStrip(slots: List<StudentHomeClient.Slot>) {
+    val today = java.time.LocalDate.now().dayOfWeek.value        // Mon=1 … Sun=7, as the API uses
+    val now = java.time.LocalTime.now()
+    val mine = slots.filter { it.dayOfWeek == today }.sortedBy { it.startTime }
+    // The first class that has not started yet. Times are "HH:MM"; an unparseable one is treated
+    // as still to come rather than silently dropped.
+    val next = mine.firstOrNull { sl ->
+        runCatching { java.time.LocalTime.parse(sl.startTime) }.getOrNull()?.isAfter(now) ?: true
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                "Today · ${java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMM"))}",
+                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(6.dp))
+            when {
+                mine.isEmpty() -> Text(
+                    "No classes timetabled today.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> {
+                    mine.forEach { sl ->
+                        val isNext = sl === next
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                sl.startTime,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isNext) FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (isNext) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(52.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    sl.unitName.ifBlank { sl.unitId },
+                                    fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                sl.room.takeIf { it.isNotBlank() }?.let {
+                                    Text(it, style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            if (isNext) {
+                                Text("NEXT", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Attendance against the exam-eligibility bar, in one line per state.
+ *
+ * A student cares about exactly one thing here: am I going to be allowed to sit the exam. So the
+ * units below the threshold lead, with the number of sessions each still needs — the actionable
+ * figure — rather than a percentage they have to interpret.
+ */
+@Composable
+private fun EligibilityStrip(p: ProgressClient.Progress) {
+    if (p.units.isEmpty()) return
+    val below = p.units.filter { it.status.equals("INELIGIBLE", ignoreCase = true) }
+    val overall = p.units.sumOf { it.held }.takeIf { it > 0 }
+        ?.let { held -> p.units.sumOf { it.attended } * 100.0 / held }
+    val ok = below.isEmpty()
+
+    Surface(
+        color = (if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error).copy(alpha = .09f),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Exam eligibility", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (ok) "All ${p.units.size} of your units are above the attendance bar."
+                        else "${below.size} of your ${p.units.size} units ${if (below.size == 1) "is" else "are"} below the bar.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                overall?.let {
+                    Text(
+                        "${it.toInt()}%", fontWeight = FontWeight.ExtraBold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            // Name the units at risk and what it takes to fix each. Capped so a student failing
+            // everything gets a readable list rather than the whole roadmap again.
+            below.take(4).forEach { u ->
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(u.unitName.ifBlank { u.unitId }, Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        u.deficit?.takeIf { it > 0 }?.let { "attend $it more" } ?: "${u.pct.toInt()}%",
+                        style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            if (below.size > 4) {
+                Text("…and ${below.size - 4} more — see My attendance.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp))
+            }
+        }
     }
 }
 
@@ -506,9 +648,7 @@ private fun StudentProfile(reloadKey: Int, onOpenPortal: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = { showChangePw = true }, Modifier.fillMaxWidth()) { Text("🔑  Change password") }
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = { signOut() }, Modifier.fillMaxWidth()) {
-            Text("Sign out", color = MaterialTheme.colorScheme.error)
-        }
+        SignOutButton()
         Spacer(Modifier.height(24.dp))
     }
 }

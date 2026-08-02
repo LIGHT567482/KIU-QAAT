@@ -65,6 +65,7 @@ export default function Messages() {
 function MessageList({ box }: { box: 'inbox' | 'sent' }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [dismissErr, setDismissErr] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
 
   function load() {
@@ -82,12 +83,16 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
   }
 
   // Remove it from this inbox at once so the ✕ feels instant, then confirm with the server.
+  // If the server refuses, the message comes back — and that MUST be explained, because a card
+  // that silently reappears reads as "delete is broken" rather than "the server said no".
   async function dismiss(m: Msg) {
     setMsgs(list => list?.filter(x => x.message_id !== m.message_id) ?? null)
     if (open === m.message_id) setOpen(null)
+    setDismissErr(null)
     try {
       await api.delete(`/api/v1/messages/${m.message_id}`)
-    } catch {
+    } catch (e) {
+      setDismissErr(e instanceof Error ? e.message : "Couldn't clear that message — it is still in your inbox.")
       load()   // put it back if the server refused
     }
   }
@@ -98,6 +103,7 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {dismissErr && <div style={errBox}>{dismissErr}</div>}
       {msgs.map(m => {
         const isOpen = open === m.message_id
         const unread = box === 'inbox' && !m.read

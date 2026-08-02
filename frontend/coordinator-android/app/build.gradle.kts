@@ -118,6 +118,11 @@ dependencies {
     // the app opens straight to work (no re-login) and runs fully offline.
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Background delivery of in-app alerts as pop-up notifications. There is no FCM in this
+    // build (no Play Services — the backend is the institution's own and the app is offline-
+    // first), so the phone polls: WorkManager keeps that going after the app is swiped away.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // JVM unit tests (run headlessly): exercise the in-room check-in HTTP path end-to-end.
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")

@@ -44,13 +44,27 @@ class NotificationClient {
         }.getOrDefault(0)
     }
 
-    /** Dismiss from MY inbox (the ✕ on an alert). Other recipients keep their copy. */
-    suspend fun dismiss(id: String): Boolean = withContext(Dispatchers.IO) {
-        val token = AppState.token ?: return@withContext false
+    /**
+     * Dismiss from MY inbox (the ✕ on an alert). Other recipients keep their copy.
+     *
+     * Returns null on success, otherwise a human-readable reason. This USED to return a Boolean
+     * that every caller threw away: when the server refused (a role that could read its inbox but
+     * wasn't allowed to clear it), the card disappeared for a moment and then came back on the next
+     * refresh with nothing on screen to explain why. A dismissal that did not stick has to say so.
+     *
+     * 404 counts as success — it means the alert is already gone from this inbox, which is exactly
+     * what the ✕ was asking for.
+     */
+    suspend fun dismiss(id: String): String? = withContext(Dispatchers.IO) {
+        val token = AppState.token ?: return@withContext "Not signed in"
         runCatching {
             val r = http.delete("$base/api/v1/app-notifications/$id") { header("Authorization", "Bearer $token") }
-            r.status.value in 200..299
-        }.getOrDefault(false)
+            when {
+                r.status.value in 200..299 || r.status.value == 404 -> null
+                r.status.value == 401 || r.status.value == 403 -> "You're not allowed to clear this alert."
+                else -> "Couldn't clear it (${r.status.value}). Try again."
+            }
+        }.getOrElse { "Couldn't reach the server — the alert will come back until you're online." }
     }
 
     suspend fun markRead(id: String) {
