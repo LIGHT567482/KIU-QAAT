@@ -1250,8 +1250,15 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		if req.Password == "" {
-			req.Password = randPassword() // students never log in with a password; the QR is their key
+		// A student added here has to be able to SIGN IN afterwards. This used to seed a random
+		// throwaway — a leftover from when students were QR/passwordless and the QR was the key.
+		// The QR subsystem is gone (migration 063), so that random string became the account's
+		// real and only password, known to nobody: the admin added a student, the student's
+		// reg-number resolved correctly, and the app still said "invalid email or password".
+		// Seed the documented default instead, forced to change at first sign-in.
+		seededDefault := req.Password == ""
+		if seededDefault {
+			req.Password = DefaultStudentPassword
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 		if err != nil {
@@ -1277,13 +1284,14 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer tx.Rollback(r.Context()) //nolint:errcheck
 
-		// 1. Create login record in users table.
+		// 1. Create login record in users table. force_password_change is set only when WE chose
+		// the password: an admin who typed one deliberately is not overridden.
 		var userID string
 		err = tx.QueryRow(r.Context(), `
-			INSERT INTO users (tenant_id, email, password_hash, role, full_name)
-			VALUES ($1, $2, $3, 'STUDENT', $4)
+			INSERT INTO users (tenant_id, email, password_hash, role, full_name, force_password_change)
+			VALUES ($1, $2, $3, 'STUDENT', $4, $5)
 			RETURNING user_id::text`,
-			tenantID, req.Email, string(hash), req.FullName).Scan(&userID)
+			tenantID, req.Email, string(hash), req.FullName, seededDefault).Scan(&userID)
 		if err != nil {
 			writeJSON(w, http.StatusConflict, errBody("CONFLICT",
 				fmt.Sprintf("email already registered or tenant not found: %v", err)))
@@ -1309,11 +1317,19 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusCreated, map[string]string{
+		// Tell the admin what the student signs in with. They are the one who has to pass it on,
+		// and having to already know it is how "I added a student and they can't log in" happens.
+		out := map[string]string{
 			"student_id": req.StudentID,
 			"user_id":    userID,
 			"status":     "CREATED",
-		})
+			"sign_in_id": req.StudentID,
+		}
+		if seededDefault {
+			out["default_password"] = DefaultStudentPassword
+			out["note"] = "Sign in with the registration number and this password; a change is forced at first sign-in."
+		}
+		writeJSON(w, http.StatusCreated, out)
 	}
 }
 

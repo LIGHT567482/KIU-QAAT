@@ -86,6 +86,8 @@ export default function AdminStudents() {
   }, [activeAY])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Sign-in details of the student just registered, shown once so the admin can pass them on.
+  const [created, setCreated] = useState<{ id: string; password: string } | null>(null)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
 
   async function handleDelete(s: Student) {
@@ -188,17 +190,23 @@ export default function AdminStudents() {
   const statuses = uniq(all.map(s => s.enrollment_status))
 
   async function handleCreate() {
-    setSaving(true); setError(null)
+    setSaving(true); setError(null); setCreated(null)
     try {
       // Students are identified by their reg-no only — the server auto-handles a
       // hidden identity for the check-in path. Email is OPTIONAL and used solely to
       // email the student their QR; reg-no-only students need none.
-      await api.post(`/api/v1/admin/tenants/${tenantId}/students`, {
+      const res = await api.post<{ sign_in_id?: string; default_password?: string }>(
+        `/api/v1/admin/tenants/${tenantId}/students`, {
         student_id: form.student_id, full_name: form.full_name, email: form.email,
         offering_id: form.offering_id, level: form.level,
         current_year: form.current_year, semester: form.semester,
         academic_year: form.academic_year, intake_session: form.intake_session,
       })
+      // Show the credentials the new student signs in with. The admin is the one who hands them
+      // over, so leaving them to guess is how "I added a student and the app says no account" starts.
+      if (res?.default_password) {
+        setCreated({ id: res.sign_in_id || form.student_id, password: res.default_password })
+      }
       setCreating(false)
       setForm({ student_id: '', full_name: '', email: '', offering_id: '', level: '', current_year: 0, semester: 0, academic_year: activeAY, intake_session: '' })
       setPick({ course: '' })
@@ -311,6 +319,20 @@ export default function AdminStudents() {
         </div>
       )}
 
+      {created && (
+        <div style={{
+          background: 'rgba(26,122,63,.08)', border: '1px solid rgba(26,122,63,.35)', borderRadius: 10,
+          padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 14 }}>
+            <strong>{created.id}</strong> can now sign in to the KIU QAAT app with the registration
+            number and the password <strong>{created.password}</strong>. They are asked to change it
+            immediately at first sign-in.
+          </span>
+          <button onClick={() => setCreated(null)} aria-label="Dismiss"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, color: 'var(--muted)' }}>✕</button>
+        </div>
+      )}
       {creating && (
         <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 24 }}>
           <h3 style={{ margin: '0 0 16px' }}>Register Student</h3>

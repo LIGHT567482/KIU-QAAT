@@ -134,7 +134,7 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 	// 2) Student registration number → its account email. Ensure a login exists: some students were
 	// imported with NO users row (the tenant had no domain set at import time, or they came in via a
 	// path that didn't create the hidden login), so a valid reg-number resolved but then failed
-	// auth-service with "no account". Provision lazily — default password "Student", force change on
+	// auth-service with "no account". Provision lazily — DefaultStudentPassword, force change on
 	// first sign-in — so any ACTIVE student whose reg-number exists can always sign in.
 	var sName string
 	// Match the reg-number case-insensitively and ignoring stray whitespace: IDs imported from
@@ -150,7 +150,7 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 	// 3) Lecturer staff ID → ensure a login account exists, then return its email. Lecturers imported
 	// by the coordinator live in `lecturers` with NO linked users row (user_id NULL) and thus no
 	// password, so a plain JOIN found nothing and login wrongly reported "no account found" even
-	// though the staff ID is valid. Provision the login lazily here — default password "Lecturer",
+	// though the staff ID is valid. Provision the login lazily here — DefaultLecturerPassword,
 	// force change on first sign-in — exactly like the passwordless portal (ensureLecturerLogin),
 	// so any lecturer whose staff ID exists can sign in with the default and be sent to change it.
 	var lecturerID string
@@ -168,6 +168,23 @@ func resolveIdentifier(ctx context.Context, adminPool *pgxpool.Pool, tenantID, i
 				return e, "", staffID
 			}
 		}
+	}
+	// 4) A staff ID carried on the ACCOUNT itself, not in `lecturers` — which is where a QA
+	// PATROLLER's lives (the admin sets users.staff_id when creating them; AppLogin reads it back
+	// from there for the response).
+	//
+	// Without this step a patroller could only ever sign in by EMAIL, while the app's sign-in field
+	// says "Email / Reg. no / Staff ID" and the documentation promises staff ID. Their staff ID
+	// resolved to nothing and the login answered "no account found for that ID" — for an ID that
+	// was perfectly valid. Matched case- and whitespace-insensitively, like the two lookups above,
+	// because these IDs are typed on a phone in a corridor.
+	var accEmail string
+	if adminPool.QueryRow(ctx,
+		`SELECT email, COALESCE(staff_id,'') FROM users
+		  WHERE tenant_id = $1 AND lower(btrim(COALESCE(staff_id,''))) = lower(btrim($2))
+		    AND COALESCE(staff_id,'') <> '' LIMIT 1`,
+		tenantID, id).Scan(&accEmail, &staffID) == nil && accEmail != "" {
+		return accEmail, "", staffID
 	}
 	return "", "", ""
 }

@@ -46,7 +46,7 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 	}
 	// Default sign-in password for the unified app; the lecturer changes it later
 	// (see migration 052 for rows created before that default existed).
-	hash, _ := bcrypt.GenerateFromPassword([]byte("Lecturer"), 12)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(DefaultLecturerPassword), 12)
 
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO users (tenant_id, email, password_hash, role, full_name, force_password_change)
@@ -64,7 +64,7 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 // ensureStudentLogin guarantees a STUDENT login account exists for the given (synthetic or real)
 // student email, so a student who resolves by registration number can always password-login. This
 // mirrors the SIS-import hidden login, covering students imported before that existed or when the
-// tenant had no domain set. Best-effort: default password "Student", forced change on first sign-in.
+// tenant had no domain set. Best-effort: DefaultStudentPassword, forced change on first sign-in.
 func ensureStudentLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, email, fullName string) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
@@ -75,7 +75,7 @@ func ensureStudentLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, email
 		tenantID, email).Scan(&exists) == nil && exists {
 		return
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte("Student"), 10)
+	hash, err := bcrypt.GenerateFromPassword([]byte(DefaultStudentPassword), 10)
 	if err != nil {
 		return
 	}
