@@ -38,6 +38,10 @@ type scope struct {
 	// Column on `courses` this caller filters by, and the value. Empty col = institution-wide.
 	Col, Val string
 	Unbounded bool
+	// Every string that means this scope. For a school that is its full name AND its short form
+	// (SOMAC), because historic rows hold whichever the institution was using at the time — see
+	// schoolAliases. For a department it is just the one name.
+	Aliases []string
 }
 
 func resolveOrgScope(r *http.Request, pool *pgxpool.Pool, tenantID, userID, role string) (scope, bool) {
@@ -49,8 +53,12 @@ func resolveOrgScope(r *http.Request, pool *pgxpool.Pool, tenantID, userID, role
 	switch role {
 	case middleware.RoleHOD, middleware.RoleQADeptRep:
 		s.Col, s.Val = "c.department", s.Department
+		s.Aliases = []string{s.Department}
 	case middleware.RoleDean, middleware.RoleQASchool:
 		s.Col, s.Val = "c.school", s.School
+		// A dean whose account says "SOMAC" must still match courses filed under the full title,
+		// and vice versa.
+		s.Aliases = schoolAliases(r.Context(), pool, tenantID, s.School)
 	default:
 		// DQA / QA officer / VC / DVC / ADMIN see the institution.
 		s.Unbounded = true
@@ -59,16 +67,23 @@ func resolveOrgScope(r *http.Request, pool *pgxpool.Pool, tenantID, userID, role
 	return s, strings.TrimSpace(s.Val) != ""
 }
 
-// whereScope renders the scope as SQL, appending its bind value. `alias` is the courses alias.
+// whereScope renders the scope as SQL, appending its bind value.
+//
+// Matches against the whole alias set, not one string: for a dean that is the college's full name
+// and its abbreviation, so a rename does not orphan every row written before it. Compared case- and
+// whitespace-insensitively, because these are names typed by an admin on one screen and matched
+// against names typed on another — the org picker makes both come from the same list now, but
+// historic rows predate it.
 func (s scope) whereScope(args *[]interface{}) string {
 	if s.Unbounded {
 		return ""
 	}
-	*args = append(*args, s.Val)
-	// Compared case- and whitespace-insensitively: these are names typed by an admin into one
-	// screen and matched against names typed into another. The org picker now makes both come
-	// from the same list, but historic rows predate it.
-	return " AND btrim(lower(" + s.Col + ")) = btrim(lower($" + strconv.Itoa(len(*args)) + "))"
+	aliases := normaliseAliases(s.Aliases)
+	if len(aliases) == 0 {
+		aliases = normaliseAliases([]string{s.Val})
+	}
+	*args = append(*args, aliases)
+	return " AND btrim(lower(" + s.Col + ")) = ANY($" + strconv.Itoa(len(*args)) + ")"
 }
 
 // OrgOverview — GET /api/v1/org/overview

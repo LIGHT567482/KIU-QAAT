@@ -21,7 +21,7 @@ import { useQuery } from '../lib/useApi'
  * and says so, rather than leaving a stale school attached to a department that has none.
  */
 
-export interface OrgSchool { school_id: string; name: string }
+export interface OrgSchool { school_id: string; name: string; abbreviation?: string }
 export interface OrgDepartment { department_id: string; school_id: string; name: string; kind: string }
 
 /** Load the tenant's org lists once; every picker on a page shares the result. */
@@ -130,7 +130,11 @@ export function OrgPicker({
             }}
           >
             <option value="">— none —</option>
-            {schools.map(s => <option key={s.school_id} value={s.name}>{s.name}</option>)}
+            {schools.map(s => (
+            <option key={s.school_id} value={s.name}>
+              {s.abbreviation ? `${s.abbreviation} — ${s.name}` : s.name}
+            </option>
+          ))}
           </select>
           {chosen && (
             <div style={hintStyle}>

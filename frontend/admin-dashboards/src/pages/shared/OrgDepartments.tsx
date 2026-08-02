@@ -29,7 +29,7 @@ interface Hod {
   title: string; phone: string; last_login_at: string
 }
 interface Dept {
-  department_id: string; name: string; school: string; kind: string
+  department_id: string; name: string; school: string; school_abbreviation: string; kind: string
   hod: Hod | null
   courses: number; units: number; units_unstaffed: number
   lecturers: number; students: number
@@ -67,7 +67,8 @@ export default function OrgDepartments({ canNotify = true }: { canNotify?: boole
     <div>
       <h2 style={{ margin: '0 0 4px' }}>Departments &amp; heads of department</h2>
       <p style={{ color: 'var(--muted)', margin: '0 0 18px', fontSize: 13 }}>
-        Every department in <b>{data?.scope || 'your college'}</b>, who runs it, and how it is doing.
+        Every department in <b>{rows[0]?.school_abbreviation || data?.scope || 'your college'}</b>
+        {rows[0]?.school && rows[0].school !== rows[0].school_abbreviation ? ` (${rows[0].school})` : ''}, who runs it, and how it is doing.
         Teaching figures cover the last {data?.window_days ?? 90} days.
       </p>
 

@@ -10,7 +10,7 @@ import { useQuery } from '../../lib/useApi'
 // institution-wide and belong to NO school. They get their own section below, and are stored with
 // school_id NULL (migration 066) rather than parked under a fictional "Support Services" school.
 
-interface School { school_id: string; name: string; dept_count: number }
+interface School { school_id: string; name: string; abbreviation: string; dept_count: number }
 interface Dept { department_id: string; school_id: string; name: string; kind: string }
 
 export default function AdminSchools() {
@@ -21,6 +21,10 @@ export default function AdminSchools() {
   const depts = deptsQ.data ?? []
 
   const [newSchool, setNewSchool] = useState('')
+  const [newAbbr, setNewAbbr] = useState('')
+  // Schools being renamed, keyed by id — so an institution can add the full title to a school it
+  // originally created under its abbreviation.
+  const [edit, setEdit] = useState<Record<string, { name: string; abbreviation: string }>>({})
   const [deptName, setDeptName] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -34,10 +38,31 @@ export default function AdminSchools() {
   function reload() { schoolsQ.refetch(); deptsQ.refetch() }
 
   async function addSchool() {
-    if (!newSchool.trim()) return
+    if (!newSchool.trim() || !newAbbr.trim()) return
     setBusy(true); setError(null)
-    try { await api.post(`/api/v1/admin/tenants/${tenantId}/schools`, { name: newSchool.trim() }); setNewSchool(''); reload() }
+    try {
+      await api.post(`/api/v1/admin/tenants/${tenantId}/schools`,
+        { name: newSchool.trim(), abbreviation: newAbbr.trim() })
+      setNewSchool(''); setNewAbbr(''); reload()
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to add school') }
+    finally { setBusy(false) }
+  }
+
+  // Renaming is how an institution that entered the SHORT FORM as the name (which everyone did
+  // before there was a field for it) fills in the full title. Nothing filed under the old value is
+  // orphaned: the backend keeps both forms as aliases when it scopes a dean's dashboard.
+  async function saveSchool(id: string) {
+    const e = edit[id]
+    if (!e || !e.name.trim() || !e.abbreviation.trim()) return
+    setBusy(true); setError(null)
+    try {
+      await api.patch(`/api/v1/admin/tenants/${tenantId}/schools/${id}`,
+        { name: e.name.trim(), abbreviation: e.abbreviation.trim() })
+      setEdit(p => { const n = { ...p }; delete n[id]; return n })
+      reload()
+    }
+    catch (err) { setError(err instanceof Error ? err.message : 'Failed to save') }
     finally { setBusy(false) }
   }
   async function delSchool(id: string) {
@@ -85,11 +110,25 @@ export default function AdminSchools() {
 
       {error && <div style={errorBox}>{error}</div>}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, maxWidth: 520 }}>
-        <input value={newSchool} onChange={e => setNewSchool(e.target.value)} placeholder="New school / college name"
-          style={inputStyle} onKeyDown={e => { if (e.key === 'Enter') addSchool() }} />
-        <button onClick={addSchool} disabled={busy || !newSchool.trim()} style={btnPrimary}>+ Add school</button>
+      {/* A school has TWO names and both are needed: the full title for reports and letters, and
+          the short form everyone actually says. The short form is not decoration — the backend
+          accepts it as an alias when scoping a dean's dashboard, so historic rows that were filed
+          under it keep resolving to this school. */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6, maxWidth: 760, flexWrap: 'wrap' }}>
+        <input value={newSchool} onChange={e => setNewSchool(e.target.value)}
+          placeholder="Full name — e.g. School of Mathematics and Computing"
+          style={{ ...inputStyle, flex: 3, minWidth: 280 }}
+          onKeyDown={e => { if (e.key === 'Enter') addSchool() }} />
+        <input value={newAbbr} onChange={e => setNewAbbr(e.target.value.toUpperCase())}
+          placeholder="Short form — e.g. SOMAC" maxLength={32}
+          style={{ ...inputStyle, flex: 1, minWidth: 140, textTransform: 'uppercase' }}
+          onKeyDown={e => { if (e.key === 'Enter') addSchool() }} />
+        <button onClick={addSchool} disabled={busy || !newSchool.trim() || !newAbbr.trim()} style={btnPrimary}>+ Add school</button>
       </div>
+      <p style={{ color: 'var(--muted)', fontSize: 12, margin: '0 0 24px' }}>
+        Both are required. The short form is what appears in tables and reports, and it stays valid
+        as a way of naming this school everywhere it has already been used.
+      </p>
 
       {schoolsQ.status === 'loading' && <div style={{ color: 'var(--muted)' }}>Loading…</div>}
       {schoolsQ.status === 'ok' && schools.length === 0 && <div style={{ color: 'var(--muted)' }}>No schools yet — add one above.</div>}
@@ -100,8 +139,41 @@ export default function AdminSchools() {
           return (
             <div key={s.school_id} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0 }}>{s.name} <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}>· {myDepts.length} dept(s)</span></h3>
-                <button onClick={() => delSchool(s.school_id)} style={btnDanger}>Delete</button>
+                {edit[s.school_id] ? (
+                  <div style={{ display: 'flex', gap: 8, flex: 1, flexWrap: 'wrap' }}>
+                    <input value={edit[s.school_id].name}
+                      onChange={e => setEdit(p => ({ ...p, [s.school_id]: { ...p[s.school_id], name: e.target.value } }))}
+                      placeholder="Full name" style={{ ...inputStyle, flex: 3, minWidth: 240 }} />
+                    <input value={edit[s.school_id].abbreviation}
+                      onChange={e => setEdit(p => ({ ...p, [s.school_id]: { ...p[s.school_id], abbreviation: e.target.value.toUpperCase() } }))}
+                      placeholder="Short form" maxLength={32} style={{ ...inputStyle, flex: 1, minWidth: 120 }} />
+                    <button onClick={() => saveSchool(s.school_id)} disabled={busy} style={btnPrimary}>Save</button>
+                    <button onClick={() => setEdit(p => { const n = { ...p }; delete n[s.school_id]; return n })} style={btnDanger}>Cancel</button>
+                  </div>
+                ) : (
+                  <h3 style={{ margin: 0 }}>
+                    {s.abbreviation && (
+                      <span style={{
+                        background: 'var(--brand)', color: '#fff', borderRadius: 6,
+                        padding: '2px 8px', fontSize: 13, marginRight: 8, letterSpacing: '.03em',
+                      }}>{s.abbreviation}</span>
+                    )}
+                    {s.name}
+                    <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}> · {myDepts.length} dept(s)</span>
+                    {!s.abbreviation && (
+                      <span style={{ color: '#b45309', fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+                        no short form set
+                      </span>
+                    )}
+                  </h3>
+                )}
+                {!edit[s.school_id] && (
+                  <span style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => setEdit(p => ({ ...p, [s.school_id]: { name: s.name, abbreviation: s.abbreviation } }))}
+                      style={btnGhostSm}>Rename</button>
+                    <button onClick={() => delSchool(s.school_id)} style={btnDanger}>Delete</button>
+                  </span>
+                )}
               </div>
 
               <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -164,6 +236,7 @@ export default function AdminSchools() {
 
 const inputStyle: React.CSSProperties = { flex: 1, padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }
 const btnPrimary: React.CSSProperties = { padding: '8px 16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
+const btnGhostSm: React.CSSProperties = { padding: '6px 12px', background: '#fff', color: '#1e293b', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }
 const btnDanger: React.CSSProperties = { padding: '6px 12px', background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12 }
 const errorBox: React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }
 const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f1f5f9', borderRadius: 999, padding: '4px 10px', fontSize: 13 }

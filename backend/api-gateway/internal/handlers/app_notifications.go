@@ -121,18 +121,25 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		if strings.TrimSpace(scopeVal) == "" {
 			return nil, nil
 		}
+		// A school answers to two names — its full title and its short form — and rows written
+		// before the institution filled in the other one hold whichever was in use then. Address
+		// the alias set so a broadcast does not silently reach nobody after a rename.
+		scopeVals := normaliseAliases([]string{scopeVal})
+		if senderRole == middleware.RoleDean || senderRole == middleware.RoleQASchool {
+			scopeVals = normaliseAliases(schoolAliases(r.Context(), pool, tenantID, scopeVal))
+		}
 		lecturersInScope := `
 			FROM lecturers l
 			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
 			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
 			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
-			WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL AND btrim(lower(` + scopeCol + `)) = btrim(lower($2))`
+			WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL AND btrim(lower(` + scopeCol + `)) = ANY($2)`
 		switch audience {
 		case "LECTURERS": // bulk — every lecturer in scope
-			args = append(args, scopeVal)
+			args = append(args, scopeVals)
 			sql = `SELECT DISTINCT l.user_id::text ` + lecturersInScope
 		case "LECTURER": // one specific lecturer (by staff id), if in scope
-			args = append(args, scopeVal, targetID)
+			args = append(args, scopeVals, targetID)
 			sql = `SELECT DISTINCT l.user_id::text ` + lecturersInScope + ` AND l.staff_id = $3`
 		case "DQA": // message the DQA directors
 			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'DQA_DIRECTOR'`
@@ -145,34 +152,38 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		// notice. The dean could only address every lecturer in the school at once, going straight
 		// past the person actually responsible for them.
 		case "HODS": // DEAN / QA_SCHOOL_HANDLER → every HOD of a department in their school
-			args = append(args, scopeVal)
+			args = append(args, scopeVals)
 			sql = `SELECT u.user_id::text
 				FROM users u
 				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
 				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
 				WHERE u.tenant_id = $1 AND u.role = 'HOD'
-				  AND btrim(lower(s.name)) = btrim(lower($2))`
+				  AND (btrim(lower(s.name)) = ANY($2) OR btrim(lower(COALESCE(s.abbreviation,''))) = ANY($2))`
 		case "HOD": // one specific head of department, if they run a department of this school
-			args = append(args, scopeVal, targetID)
+			args = append(args, scopeVals, targetID)
 			sql = `SELECT u.user_id::text
 				FROM users u
 				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
 				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
 				WHERE u.tenant_id = $1 AND u.role = 'HOD'
-				  AND btrim(lower(s.name)) = btrim(lower($2))
+				  AND (btrim(lower(s.name)) = ANY($2) OR btrim(lower(COALESCE(s.abbreviation,''))) = ANY($2))
 				  AND u.user_id::text = $3`
 		case "DEAN": // HOD / QA_DEPT_REP → the dean of the school their department sits in
 			args = append(args, scopeVal)
+			// The dean's account may hold EITHER form of the school's name, so compare against
+			// both. Matching only `schools.name` would miss a dean whose account still says
+			// "SOMAC" after the college was given its full title — and a head of department would
+			// see their message reach nobody, with no error to explain it.
 			sql = `SELECT u.user_id::text
 				FROM users u
 				WHERE u.tenant_id = $1 AND u.role = 'DEAN'
-				  AND btrim(lower(COALESCE(u.school,''))) = (
-				      SELECT btrim(lower(COALESCE(s.name,'')))
+				  AND COALESCE(u.school,'') <> ''
+				  AND btrim(lower(COALESCE(u.school,''))) IN (
+				      SELECT unnest(ARRAY[btrim(lower(COALESCE(s.name,''))),
+				                          btrim(lower(COALESCE(s.abbreviation,'')))])
 				      FROM departments d
 				      LEFT JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
-				      WHERE d.tenant_id = $1 AND btrim(lower(d.name)) = btrim(lower($2))
-				      LIMIT 1)
-				  AND COALESCE(u.school,'') <> ''`
+				      WHERE d.tenant_id = $1 AND btrim(lower(d.name)) = btrim(lower($2)))`
 		default:
 			return nil, nil
 		}

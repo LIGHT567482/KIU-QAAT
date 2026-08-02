@@ -45,6 +45,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		DepartmentID string `json:"department_id"`
 		Name         string `json:"name"`
 		School       string `json:"school"`
+		SchoolAbbr   string `json:"school_abbreviation"`
 		Kind         string `json:"kind"`
 		HOD          *hod   `json:"hod"`
 
@@ -91,15 +92,17 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// ── The spine: departments of this school (all of them, for the unscoped roles) ──
 		args := []interface{}{tenantID}
-		q := `SELECT d.department_id::text, d.name, COALESCE(s.name,''), COALESCE(d.kind,'ACADEMIC')
+		q := `SELECT d.department_id::text, d.name, COALESCE(s.name,''), COALESCE(d.kind,'ACADEMIC'), COALESCE(s.abbreviation,'')
 		      FROM departments d
 		      LEFT JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
 		      WHERE d.tenant_id = $1`
 		if !s.Unbounded {
 			// A dean is bounded by their school; support departments (school_id NULL) belong to no
-			// faculty and are correctly excluded from a dean's view.
-			args = append(args, s.Val)
-			q += ` AND btrim(lower(COALESCE(s.name,''))) = btrim(lower($2))`
+			// faculty and are correctly excluded from a dean's view. Matched against the alias set
+			// so an account holding "SOMAC" still finds the school now titled in full.
+			args = append(args, normaliseAliases(s.Aliases))
+			q += ` AND (btrim(lower(COALESCE(s.name,''))) = ANY($2)
+			          OR btrim(lower(COALESCE(s.abbreviation,''))) = ANY($2))`
 		}
 		q += ` ORDER BY d.name`
 
@@ -111,7 +114,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		out := []deptRow{}
 		for rows.Next() {
 			var d deptRow
-			if rows.Scan(&d.DepartmentID, &d.Name, &d.School, &d.Kind) == nil {
+			if rows.Scan(&d.DepartmentID, &d.Name, &d.School, &d.Kind, &d.SchoolAbbr) == nil {
 				out = append(out, d)
 			}
 		}

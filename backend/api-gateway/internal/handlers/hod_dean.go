@@ -58,6 +58,13 @@ func hodDeanLecturers(pool *pgxpool.Pool, bySchool bool) http.HandlerFunc {
 			scopeVal = school
 			scopeCol = "c.school"
 		}
+		// A dean's college answers to two names — its full title and its short form (SOMAC) — and
+		// rows written before the institution filled in the other one hold whichever was in use at
+		// the time. Match on both. A department has only its own name.
+		scopeAliases := normaliseAliases([]string{scopeVal})
+		if bySchool {
+			scopeAliases = normaliseAliases(schoolAliases(r.Context(), pool, tenantID, scopeVal))
+		}
 		if scopeVal == "" {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"scope":     map[string]string{"department": department, "school": school},
@@ -79,9 +86,9 @@ func hodDeanLecturers(pool *pgxpool.Pool, bySchool bool) http.HandlerFunc {
 			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
 			LEFT JOIN lecturer_patrol_logs p
 			       ON p.lecturer_id = l.staff_id AND p.tenant_id = l.tenant_id
-			WHERE l.tenant_id = $1 AND btrim(lower(`+scopeCol+`)) = btrim(lower($2))
+			WHERE l.tenant_id = $1 AND btrim(lower(`+scopeCol+`)) = ANY($2)
 			GROUP BY l.staff_id, l.full_name
-			ORDER BY l.full_name`, tenantID, scopeVal)
+			ORDER BY l.full_name`, tenantID, scopeAliases)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

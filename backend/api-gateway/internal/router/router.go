@@ -359,6 +359,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/admin/tenants/{tenant_id}/schools", handlers.CreateSchool(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/schools/{school_id}", handlers.DeleteSchool(adminPool))
+		// Rename a school / give it its short form. The old value survives as an alias, so nothing
+		// already filed under it is orphaned — see school_alias.go.
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Patch("/api/v1/admin/tenants/{tenant_id}/schools/{school_id}", handlers.UpdateSchool(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/departments", handlers.ListDepartments(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
