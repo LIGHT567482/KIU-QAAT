@@ -180,13 +180,18 @@ func ListQAMessages(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// The read flag is a LEFT JOIN on this caller's read rows.
 		base := `
-			SELECT m.message_id::text, m.sender_name, m.sender_role, m.audience,
+			SELECT m.message_id::text,
+			       -- Show the sender's courtesy title with their name, here as everywhere else.
+			       CASE WHEN COALESCE(su.title,'') = '' THEN m.sender_name
+			            ELSE su.title || ' ' || m.sender_name END,
+			       m.sender_role, m.audience,
 			       COALESCE(m.audience_value,''), m.subject, m.body,
 			       (m.attachment_data IS NOT NULL), COALESCE(m.attachment_name,''), m.created_at,
-			       (rd.user_id IS NOT NULL) AS is_read
+			       (rd.read_at IS NOT NULL) AS is_read
 			FROM qa_messages m
 			LEFT JOIN qa_message_reads rd ON rd.message_id = m.message_id AND rd.user_id = $2
-			WHERE m.tenant_id = $1 `
+			LEFT JOIN users su ON su.user_id = m.sender_id AND su.tenant_id = m.tenant_id
+			WHERE m.tenant_id = $1 AND rd.dismissed_at IS NULL `
 
 		var cond string
 		args := []interface{}{tenantID, userID}
@@ -245,7 +250,7 @@ func UnreadQAMessageCount(pool *pgxpool.Pool) http.HandlerFunc {
 
 		q := `SELECT count(*) FROM qa_messages m
 		      LEFT JOIN qa_message_reads rd ON rd.message_id = m.message_id AND rd.user_id = $2
-		      WHERE m.tenant_id = $1 AND rd.user_id IS NULL AND m.sender_id <> $2 AND `
+		      WHERE m.tenant_id = $1 AND rd.read_at IS NULL AND rd.dismissed_at IS NULL AND m.sender_id <> $2 AND `
 		args := []interface{}{tenantID, userID}
 		switch {
 		case role == middleware.RoleDQADirector:
@@ -275,10 +280,10 @@ func MarkQAMessageRead(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		// Only record a read if the message exists for this tenant (scoping).
 		_, err := pool.Exec(r.Context(), `
-			INSERT INTO qa_message_reads (message_id, tenant_id, user_id)
-			SELECT $1::uuid, $2, $3
+			INSERT INTO qa_message_reads (message_id, tenant_id, user_id, read_at)
+			SELECT $1::uuid, $2, $3, now()
 			WHERE EXISTS (SELECT 1 FROM qa_messages WHERE message_id = $1::uuid AND tenant_id = $2)
-			ON CONFLICT (message_id, user_id) DO NOTHING`,
+			ON CONFLICT (message_id, user_id) DO UPDATE SET read_at = COALESCE(qa_message_reads.read_at, now())`,
 			id, tenantID, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -341,5 +346,39 @@ func QAMessageAttachment(pool *pgxpool.Pool) http.HandlerFunc {
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+strings.ReplaceAll(name, "\"", "")+"\"")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
+	}
+}
+
+// DismissQAMessage — DELETE /api/v1/messages/{id}
+//
+// Clears the message from THIS reader's inbox. QA messages are addressed to an audience (a school,
+// a department, all QA) and resolved to readers at query time, so there is no per-recipient row to
+// delete — dismissal is recorded against the reader in qa_message_reads. The message and everyone
+// else's copy are untouched.
+func DismissQAMessage(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		userID := middleware.GetUserID(r.Context())
+		id := extractPathID(r.URL.Path+"/", "/api/v1/messages/", "/")
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "missing message id"))
+			return
+		}
+		ct, err := pool.Exec(r.Context(), `
+			INSERT INTO qa_message_reads (message_id, tenant_id, user_id, read_at, dismissed_at)
+			SELECT $1::uuid, $2, $3, now(), now()
+			WHERE EXISTS (SELECT 1 FROM qa_messages WHERE message_id = $1::uuid AND tenant_id = $2)
+			ON CONFLICT (message_id, user_id)
+			DO UPDATE SET dismissed_at = now(), read_at = COALESCE(qa_message_reads.read_at, now())`,
+			id, tenantID, userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		if ct.RowsAffected() == 0 {
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "no such message"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "DISMISSED"})
 	}
 }

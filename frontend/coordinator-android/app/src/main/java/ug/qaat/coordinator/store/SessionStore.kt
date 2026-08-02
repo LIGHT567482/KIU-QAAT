@@ -80,6 +80,17 @@ object SessionStore {
         return Triple(i, p, prefs.getString("cred_org", "") ?: "")
     }
 
+    /**
+     * Forget the saved password so this account can never resume without one being typed again.
+     * The QA patroller calls this on every launch: their ticks decide whether a lecturer is
+     * recorded as absent, so a handset left unlocked must not be a way into a live patrol round.
+     * The token itself is left alone — the current session keeps working until it is signed out.
+     */
+    fun clearAppCredentials() {
+        if (!::prefs.isInitialized) return
+        prefs.edit().remove("cred_id").remove("cred_pw").remove("cred_org").remove("cred_email").apply()
+    }
+
     /** Stored so an expired token can be refreshed without bothering the coordinator. */
     fun saveCredentials(email: String, password: String) {
         prefs.edit().putString("cred_email", email).putString("cred_pw", password).apply()

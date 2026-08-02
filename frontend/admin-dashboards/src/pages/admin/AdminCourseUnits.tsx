@@ -15,6 +15,8 @@ interface Unit {
   session_start:           string
   session_duration_minutes: number
   schedule_locked:         boolean
+  lecturer_names:          string   // '' when nobody is assigned to teach it
+  slot_count:              number   // 0 when it appears on no timetable
 }
 
 interface Roadmap {
@@ -283,6 +285,18 @@ export default function AdminCourseUnits() {
                             {u.unit_id}
                             {u.academic_year && ` · ${u.academic_year}`}
                             {u.default_venue_id && ` · venue: ${u.default_venue_id}`}
+                          </div>
+                          {/* The two ways a unit goes dark for everyone downstream. Without a
+                              lecturer it shows blank on the student's timetable and appears on no
+                              lecturer dashboard; without a timetable slot it is on the programme
+                              but on nobody's week. Both are silent everywhere else. */}
+                          <div style={{ fontSize: 11, marginTop: 3, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            {u.lecturer_names
+                              ? <span style={{ color: '#15803d' }}>👤 {u.lecturer_names}</span>
+                              : <span style={{ color: '#b91c1c', fontWeight: 600 }}>⚠ No lecturer assigned</span>}
+                            {u.slot_count > 0
+                              ? <span style={{ color: 'var(--muted)' }}>🗓 {u.slot_count} timetable slot{u.slot_count === 1 ? '' : 's'}</span>
+                              : <span style={{ color: '#b45309', fontWeight: 600 }}>⚠ Not on any timetable</span>}
                           </div>
                         </div>
                         <button

@@ -2,22 +2,221 @@ package handlers
 
 // QA patroller endpoints (Phase 3).
 //
-//   GET  /api/v1/patrol/manifest  — today's timetable (unit↔lecturer↔room↔time) so the offline
-//                                    patroller app can infer the rest from a chosen unit/lecturer/room.
-//   POST /api/v1/patrol/sync      — ingest a batch of patrol logs (whether the lecturer was teaching).
+//   POST /api/v1/patrol/bind-device — claim this handset for the signed-in patroller.
+//   GET  /api/v1/patrol/manifest    — today's timetable (unit↔lecturer↔room↔time) so the offline
+//                                     patrol screen can infer the rest from a chosen unit/room.
+//   POST /api/v1/patrol/sync        — ingest a batch of patrol logs (was the lecturer teaching).
 //
 // Role: QA_PATROLLER. Everything is tenant-scoped via RLS.
+//
+// On top of the role check, every route here is bound to ONE handset. A patrol record states that
+// a named lecturer was or was not teaching and feeds the QA reports as the independent second
+// record, so possession of a valid token is deliberately not enough: the call must also come from
+// the phone the patroller claimed. See migration 069 for why the binding is shaped as it is.
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
 )
+
+// deviceFingerprint reads the handset id the app stamps on every patrol call.
+func deviceFingerprint(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get("X-Device-Fingerprint"))
+}
+
+var errDeviceMismatch = errors.New("device mismatch")
+
+// checkPatrolDevice verifies that this request came from the handset bound to this patroller.
+//
+// It never binds — binding is an explicit act, done once by BindPatrolDevice. A patroller with no
+// binding at all is refused rather than silently trusted, because the sync endpoint is exactly
+// where a lifted token would be replayed, and "no binding yet" is indistinguishable from "binding
+// was released because the phone was stolen".
+func checkPatrolDevice(r *http.Request, conn *pgxpool.Conn, tenantID, userID string) error {
+	fp := deviceFingerprint(r)
+	if fp == "" {
+		return errDeviceMismatch
+	}
+	var bound string
+	err := conn.QueryRow(r.Context(),
+		`SELECT device_fingerprint_hash FROM patroller_device_bindings
+		  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound)
+	if err != nil || bound == "" || bound != fp {
+		return errDeviceMismatch
+	}
+	_, _ = conn.Exec(r.Context(),
+		`UPDATE patroller_device_bindings SET last_seen_at = now()
+		  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
+	return nil
+}
+
+// writeDeviceRefusal answers a handset the patroller is not registered on. The message is written
+// for the person holding the phone, since it is the only thing they will see.
+func writeDeviceRefusal(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, errBody("DEVICE_NOT_BOUND",
+		"This phone is not the one registered to your patrol account. Ask an administrator to release your device binding if you have changed phones."))
+}
+
+// BindPatrolDevice claims this handset for the signed-in patroller (trust on first use), and is a
+// no-op confirmation when called again from the same phone. A call from a DIFFERENT phone, or
+// from a phone already claimed by another patroller, is refused — releasing a binding is an admin
+// action, so a patroller cannot walk their own account onto a new device unsupervised.
+func BindPatrolDevice(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		userID := middleware.GetUserID(r.Context())
+		fp := deviceFingerprint(r)
+		if fp == "" {
+			var body struct {
+				DeviceFingerprint string `json:"device_fingerprint"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fp = strings.TrimSpace(body.DeviceFingerprint)
+		}
+		if fp == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "device fingerprint is required"))
+			return
+		}
+
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+
+		// Already bound? Only the same handset may continue.
+		var bound string
+		switch err := conn.QueryRow(r.Context(),
+			`SELECT device_fingerprint_hash FROM patroller_device_bindings
+			  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound); {
+		case err == nil && bound == fp:
+			_, _ = conn.Exec(r.Context(),
+				`UPDATE patroller_device_bindings SET last_seen_at = now()
+				  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"status": "BOUND", "changed": false})
+			return
+		case err == nil:
+			writeDeviceRefusal(w)
+			return
+		}
+
+		// Unbound account: claim the handset, unless another patroller already holds it.
+		//
+		// Only a unique-constraint violation means "taken" — anything else is our problem, not the
+		// patroller's, and must not be reported to them as a device conflict they cannot resolve.
+		if _, err := conn.Exec(r.Context(), `
+			INSERT INTO patroller_device_bindings (user_id, tenant_id, device_fingerprint_hash)
+			VALUES ($2::uuid, $1, $3)`, tenantID, userID, fp); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				writeJSON(w, http.StatusForbidden, errBody("DEVICE_IN_USE",
+					"This phone is already registered to another patrol account. Each patroller needs their own handset."))
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "BOUND", "changed": true})
+	}
+}
+
+// ListPatrolBindings shows the administrator which patroller is on which handset, so a lost or
+// replaced phone can be found and released. ADMIN only.
+func ListPatrolBindings(pool *pgxpool.Pool) http.HandlerFunc {
+	type row struct {
+		UserID     string `json:"user_id"`
+		FullName   string `json:"full_name"`
+		Email      string `json:"email"`
+		StaffID    string `json:"staff_id"`
+		BoundAt    string `json:"bound_at"`
+		LastSeenAt string `json:"last_seen_at"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		// The fingerprint itself is deliberately NOT returned — an administrator needs to know
+		// that a binding exists and when it was last used, never the value that would let them
+		// impersonate the handset.
+		rows, err := conn.Query(r.Context(), `
+			SELECT b.user_id::text, COALESCE(u.full_name,''), COALESCE(u.email,''),
+			       COALESCE(u.staff_id,''), b.bound_at::text, b.last_seen_at::text
+			FROM patroller_device_bindings b
+			JOIN users u ON u.user_id = b.user_id
+			WHERE b.tenant_id = $1
+			ORDER BY b.last_seen_at DESC`, tenantID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		defer rows.Close()
+		out := make([]row, 0)
+		for rows.Next() {
+			var b row
+			if rows.Scan(&b.UserID, &b.FullName, &b.Email, &b.StaffID, &b.BoundAt, &b.LastSeenAt) == nil {
+				out = append(out, b)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"bindings": out})
+	}
+}
+
+// ReleasePatrolBinding frees a patroller to claim a new handset — the lost-phone path. ADMIN only,
+// and audited by the router's AuditLog middleware, which is the point: a rebind is precisely the
+// event you want a trail for when a patrol record is later disputed.
+func ReleasePatrolBinding(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		userID := strings.TrimSpace(chi.URLParam(r, "user_id"))
+		if userID == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "user_id is required"))
+			return
+		}
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		tag, err := conn.Exec(r.Context(),
+			`DELETE FROM patroller_device_bindings WHERE tenant_id = $1 AND user_id = $2::uuid`,
+			tenantID, userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "RELEASED", "released": tag.RowsAffected(),
+		})
+	}
+}
 
 type patrolSlot struct {
 	UnitID          string `json:"unit_id"`
@@ -44,6 +243,11 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+
+		if err := checkPatrolDevice(r, conn, tenantID, middleware.GetUserID(r.Context())); err != nil {
+			writeDeviceRefusal(w)
 			return
 		}
 
@@ -132,6 +336,12 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		if err := checkPatrolDevice(r, conn, tenantID, userID); err != nil {
+			writeDeviceRefusal(w)
+			return
+		}
+		deviceHash := deviceFingerprint(r)
+
 		// Resolve the patroller's display identity once.
 		var patrollerName, patrollerStaffID string
 		_ = conn.QueryRow(r.Context(),
@@ -146,18 +356,21 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 			_, execErr := conn.Exec(r.Context(), `
 				INSERT INTO lecturer_patrol_logs
 				  (tenant_id, unit_id, unit_name, course_code, lecturer_id, lecturer_name, room,
-				   session_date, scheduled_time, taught, patroller_id, patroller_name, patroller_staff_id, taken_at)
+				   session_date, scheduled_time, taught, patroller_id, patroller_name, patroller_staff_id,
+				   taken_at, patroller_device_hash)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,
 				        $8::date, $9, $10, $11::uuid, $12, $13,
-				        COALESCE(NULLIF($14,'')::timestamptz, now()))
+				        COALESCE(NULLIF($14,'')::timestamptz, now()), $15)
 				ON CONFLICT (tenant_id, unit_id, session_date, scheduled_time)
 				DO UPDATE SET taught = EXCLUDED.taught,
 				              patroller_id = EXCLUDED.patroller_id,
 				              patroller_name = EXCLUDED.patroller_name,
 				              patroller_staff_id = EXCLUDED.patroller_staff_id,
-				              taken_at = EXCLUDED.taken_at`,
+				              taken_at = EXCLUDED.taken_at,
+				              patroller_device_hash = EXCLUDED.patroller_device_hash`,
 				tenantID, l.UnitID, l.UnitName, l.CourseCode, l.LecturerID, l.LecturerName, l.Room,
-				l.SessionDate, l.ScheduledTime, l.Taught, userID, patrollerName, patrollerStaffID, l.TakenAt)
+				l.SessionDate, l.ScheduledTime, l.Taught, userID, patrollerName, patrollerStaffID,
+				l.TakenAt, deviceHash)
 			if execErr == nil {
 				written++
 				// Persistent lecturer alert (stays in their inbox until they delete it): the patroller

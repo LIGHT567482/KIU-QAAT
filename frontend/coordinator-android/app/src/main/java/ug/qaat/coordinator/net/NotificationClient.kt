@@ -44,6 +44,15 @@ class NotificationClient {
         }.getOrDefault(0)
     }
 
+    /** Dismiss from MY inbox (the ✕ on an alert). Other recipients keep their copy. */
+    suspend fun dismiss(id: String): Boolean = withContext(Dispatchers.IO) {
+        val token = AppState.token ?: return@withContext false
+        runCatching {
+            val r = http.delete("$base/api/v1/app-notifications/$id") { header("Authorization", "Bearer $token") }
+            r.status.value in 200..299
+        }.getOrDefault(false)
+    }
+
     suspend fun markRead(id: String) {
         withContext(Dispatchers.IO) {
             val token = AppState.token ?: return@withContext

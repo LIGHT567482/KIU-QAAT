@@ -97,7 +97,31 @@ Sub-resources under `/api/v1/admin/tenants/{tenant_id}/…` are confined to the 
 |--------|------|---------|
 | POST | `/api/v1/student/checkin` | Authenticated check-in (room code) |
 | GET | `/api/v1/student/live-sessions` | Live sessions for the student's cohort |
+| GET | `/api/v1/student/home` | The app's Home tab: profile, cohort, programme units, weekly timetable |
 | GET | `/api/v1/eligibility/{student_id}` | Own attendance/eligibility — **path id is ignored for STUDENT; forced to caller** |
+
+`student/home` returns **every unit on the student's programme**, each carrying its `year`,
+`semester` and a `current` flag for the year/semester they are sitting. It deliberately does not
+filter to the current semester: a cohort whose year/semester has no units tagged against it yet
+would otherwise be told it has no units at all. The `timetable` array is scoped to the student's own
+`offering_id`, so a Weekend student never sees the Day run of a shared unit.
+
+## 5b. Lecturer — `RequireRole(LECTURER)`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/v1/lecturer/overview` | The units they are assigned to, with session counts |
+| GET | `/api/v1/lecturer/calendar?from=&to=&unit_id=` | Unit-centric teaching calendar, cohorts as sub-tags |
+| GET | `/api/v1/lecturer/roster?scope=enrolled\|attended&unit_id=` | Students across their units |
+| GET | `/api/v1/lecturer/sessions[?unit_id=]` | Sessions held, per cohort |
+| GET | `/api/v1/lecturer/sessions/{session_id}/students` | One session's present/absent list |
+| GET | `/api/v1/lecturer/attendance?unit_id=` | The unit's attendance matrix |
+
+Every one of these is driven by **`lecturer_assignments`** — the row that says this lecturer teaches
+this unit. A unit with no assignment row is invisible to all of them, shows a blank lecturer on the
+student's timetable, and reaches the patrol manifest with nobody named against it. The admin
+roadmap (`GET /api/v1/admin/courses/{course_id}/roadmap`) therefore returns `lecturer_names` and
+`slot_count` per unit, so that gap is visible on the screen that governs it.
 
 ## 6. Governance — VC / DVC / DQA_DIRECTOR / QA_OFFICER
 
@@ -108,6 +132,34 @@ Sub-resources under `/api/v1/admin/tenants/{tenant_id}/…` are confined to the 
 - **Shared lecturer-teaching report:** `GET /api/v1/reports/lecturer-teaching?from=&to=&school=&department=&lecturer=&unit=&status=` — aggregates `lecturer_patrol_logs` (patroller observations **and** QA-rep workbook uploads). Open to QA/DQA/VC/DVC/ADMIN unscoped; for HOD, DEAN and the QA rep roles the caller's own department/school is applied **on top of** the query filters, so an org-scoped caller cannot read another unit by naming it.
 - **Rooms picker:** `GET /api/v1/dashboard/rooms` — the tenant's active rooms (ADMIN/QA/DQA/COORDINATOR/HOD/DEAN/QA reps)
 - **Any authenticated role:** `GET /api/v1/branding`, `POST /api/v1/auth/{change-password,change-email}`
+
+## 6a. QA patrol — QA_PATROLLER
+
+The patroller works from the **KIU QAAT** Android app (the same one everyone installs — the former
+standalone `ug.qaat.patroller` APK was deleted and its screens became a role branch).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/patrol/bind-device` | Claims this handset for the caller. First call binds; a repeat from the same phone is a no-op |
+| GET | `/api/v1/patrol/manifest` | Today's timetabled slots — unit ↔ lecturer ↔ room ↔ time |
+| POST | `/api/v1/patrol/sync` | Batch of observations; idempotent per (tenant, unit, date, scheduled time) |
+
+**Handset binding.** All three require an `X-Device-Fingerprint` header matching the row in
+`patroller_device_bindings` (migration 069), on top of the `QA_PATROLLER` role check. A patrol
+record accuses a named lecturer and feeds the teaching reports as the independent second record, so
+a valid token is deliberately not sufficient — the call must come from the bound phone. Anything
+else, including a call with no fingerprint at all and a call from an as-yet-unbound account, is
+refused `403 DEVICE_NOT_BOUND`. Claiming a handset already held by another patroller is refused
+`403 DEVICE_IN_USE`: one phone serves exactly one patrol account. The handset each tick came from
+is stored on the record itself (`lecturer_patrol_logs.patroller_device_hash`).
+
+**Releasing a binding** (lost or replaced phone) is an ADMIN action, recorded by the audit-log
+middleware:
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/admin/patrol-bindings` | Who is bound to a handset, when it was claimed and last used. The fingerprint value itself is never returned |
+| DELETE | `/api/v1/admin/patrol-bindings/{user_id}` | Frees that patroller to claim a new phone |
 
 ## 6b. Org-scoped oversight — HOD / DEAN / QA_SCHOOL_HANDLER / QA_DEPT_REP
 

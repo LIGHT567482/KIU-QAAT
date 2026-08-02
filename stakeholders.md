@@ -24,7 +24,7 @@ role is carried in their RS256 JWT and enforced by `RequireRole` at the API gate
 | 5 | QA Officer | `QA_OFFICER` | QA dashboard | Email + password |
 | 6 | QA School Handler | `QA_SCHOOL_HANDLER` | QA school dashboard | Email + password |
 | 7 | QA Department Rep | `QA_DEPT_REP` | QA department dashboard | Email + password |
-| 8 | QA Patroller | `QA_PATROLLER` | **KIU QAAT Patrol** (Android) | Staff ID / email + password |
+| 8 | QA Patroller | `QA_PATROLLER` | **KIU QAAT** (Android) — Patrol role | Staff ID / email + password |
 | 9 | Dean | `DEAN` | Dean dashboard | Email + password |
 | 10 | Head of Department | `HOD` | HOD dashboard | Email + password |
 | 11 | Course Coordinator | `COORDINATOR` | **KIU QAAT** (Android) | Password or coordinator code |
@@ -103,11 +103,21 @@ hand; recognised rows become teaching observations and the workbook is kept as t
 Walks room to room and records whether the timetabled lecturer is actually teaching. Works offline
 and syncs when a network returns.
 
-- **App:** **KIU QAAT Patrol** (`ug.qaat.patroller`, `KIU QAAT Patrol.apk`) — a separate Android app
-  from the coordinator's, installable alongside it.
+- **App:** **KIU QAAT** (`KIU QAAT.apk`) — the same single app everyone else installs. The token's
+  role opens the Patrol experience. *(The separate `ug.qaat.patroller` / `KIU QAAT Patrol.apk` build
+  was deleted; there is one APK to distribute, and it runs wherever the main app runs.)*
 - **Sign-in:** `POST /api/v1/auth/app-login` with staff ID or email + password. Accounts are created
   by the ADMIN with a `staff_id`.
 - **No web dashboard** — patrollers work entirely from the phone.
+- **One patroller, one handset.** A patrol record accuses a named lecturer, so the account is bound
+  to the first phone that claims it (`patroller_device_bindings`, migration 069) and every patrol
+  call must carry that handset's `X-Device-Fingerprint`. A token replayed from another phone is
+  refused with `DEVICE_NOT_BOUND`, and one phone cannot serve two patrol accounts. A lost or
+  replaced phone is freed by the ADMIN via `DELETE /api/v1/admin/patrol-bindings/{user_id}`, which
+  the audit-log middleware records.
+- **No silent re-login.** Unlike every other role, the app erases the saved credentials when a
+  patroller signs in, so their round can never be resumed on an unattended phone without the
+  password being typed again. Signing out also wipes the cached timetable and any queued ticks.
 
 ---
 
@@ -271,9 +281,15 @@ There is no tier above ADMIN. The institution (tenant) is provisioned at deploy 
 |---|---|---|
 | Admin dashboards (web) | ADMIN, VC, DVC, DQA_DIRECTOR, QA_OFFICER, QA_SCHOOL_HANDLER, QA_DEPT_REP, DEAN, HOD, LECTURER | `frontend/admin-dashboards` |
 | Student portal (web) | Students (passwordless) | `frontend/student-portal` |
-| **KIU QAAT** (Android) | Coordinators, lecturers, students, standby coordinators — including student check-in | `frontend/coordinator-android` (`:app`) |
-| **KIU QAAT Patrol** (Android) | QA patrollers | `frontend/coordinator-android` (`:patroller`) |
+| **KIU QAAT** (Android) | Coordinators, lecturers, students, **QA patrollers**, standby coordinators — including student check-in | `frontend/coordinator-android` (`:app`) |
 | Biometric tablet | Employees | external device → employee attendance ingest |
+
+**The phone app serves four roles and only four:** `COORDINATOR`, `LECTURER`, `STUDENT` and
+`QA_PATROLLER`. Every other role — the oversight tier, the org tier and the ADMIN — signs in
+successfully but is shown a screen saying their work is on the web dashboard. It used to fall
+through to the coordinator's in-room hub, which handed session-opening and roster controls to
+roles that had no business seeing them; the server refused the calls, but the controls were on
+screen. Unknown roles now get no role UI rather than the most powerful one.
 
 All web traffic reaches one public service, the **api-gateway**, which verifies the JWT, resolves the
 tenant and enforces the role. Clients never talk to Postgres.

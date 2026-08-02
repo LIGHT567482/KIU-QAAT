@@ -134,10 +134,20 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/manifest/daily", handlers.ManifestDaily(pool, rdb))
 
 		// ── QA Patroller (offline-first lecturer-presence patrol) ─────────────
+		// Beyond the role check, all three are bound to ONE handset per patroller (migration 069):
+		// bind-device claims it, the other two refuse any call that arrives from a different phone.
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Post("/api/v1/patrol/bind-device", handlers.BindPatrolDevice(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Get("/api/v1/patrol/manifest", handlers.PatrolManifest(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
+		// The lost-phone path: an administrator releases a binding so the patroller can claim a
+		// new handset. Audited by the AuditLog middleware already on this group.
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Get("/api/v1/admin/patrol-bindings", handlers.ListPatrolBindings(pool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Delete("/api/v1/admin/patrol-bindings/{user_id}", handlers.ReleasePatrolBinding(pool))
 
 		// ── HOD + Dean (org-scoped lecturer oversight) ────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleHOD)).
@@ -196,6 +206,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Live/active sessions the student may attend right now (#4a).
 		r.With(middleware.RequireRole(middleware.RoleStudent)).
 			Get("/api/v1/student/live-sessions", handlers.StudentLiveSessions(pool))
+		// The student app's Home tab: profile, their cohort's units and its weekly timetable.
+		r.With(middleware.RequireRole(middleware.RoleStudent)).
+			Get("/api/v1/student/home", handlers.StudentHome(adminPool))
 		// ── Synchronisation (→ sync-receiver) ─────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Post("/api/v1/sync/init", syncProxy)
@@ -229,6 +242,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/messages/{id}/read", handlers.MarkQAMessageRead(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/messages/{id}/attachment", handlers.QAMessageAttachment(adminPool))
+		// Dismiss (the ✕) — clears it from YOUR inbox only.
+		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleQAOfficer, middleware.RoleQADeptRep, middleware.RoleQASchool)).
+			Delete("/api/v1/messages/{id}", handlers.DismissQAMessage(adminPool))
 
 		// ── Branding (any authenticated role: own tenant's logo + motto) ─────
 		// Feeds the top-left header on every dashboard.
@@ -495,6 +511,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/lecturer/overview", handlers.LecturerOverview(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).
 			Get("/api/v1/lecturer/attendance", handlers.LecturerAttendance(adminPool))
+		// Unit-centric teaching calendar: timetabled sessions per course unit, with the cohorts
+		// attending each as sub-tags and their attendance broken out per cohort.
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Get("/api/v1/lecturer/calendar", handlers.LecturerCalendar(adminPool))
 		// Lecturer roster & analytics: enrolled/attended students across cohorts, sessions,
 		// and per-session present/absent — all sortable/filterable by the app.
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).
@@ -515,6 +535,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
+		// Dismiss (the ✕ on every alert) — clears it from YOUR inbox, not everyone else's.
+		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleLecturer, middleware.RoleCoordinator,
+			middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC)).
+			Delete("/api/v1/app-notifications/{id}", handlers.DismissAppNotification(adminPool))
 		// Lecturers of the coordinator's course units (for the "notify a specific lecturer" picker).
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Get("/api/v1/coordinator/lecturers", handlers.CoordinatorLecturers(adminPool))

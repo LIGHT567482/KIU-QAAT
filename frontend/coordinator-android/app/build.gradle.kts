@@ -24,8 +24,10 @@ android {
         applicationId = "ug.qaat.coordinator"
         minSdk = 26          // LocalOnlyHotspot + java.time
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.0.1"
+        // 4 / 1.1.0 — the QA patroller moved in from the retired standalone `ug.qaat.patroller`
+        // APK, so this one package now serves coordinators, lecturers, students AND patrollers.
+        versionCode = 4
+        versionName = "1.1.0"
         // DEFAULT backend URL the app starts with. The app works for BOTH your local server
         // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
         // self-signed cert, and the URL is switchable at runtime (login "server" field /
@@ -47,6 +49,15 @@ android {
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
             }
+            // Sign with ALL THREE schemes, not just v2 (the Gradle default for minSdk >= 24).
+            // A v2-only APK carries no META-INF/*.RSA JAR signature, and the on-device scanners
+            // that still read v1 — MIUI/HyperOS's installer above all — therefore treat it as
+            // UNSIGNED and refuse it with "this app may be infected by a virus". v1 costs nothing
+            // and makes the package verifiable to every installer; v3 is what current Android
+            // prefers and enables key rotation later.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
     buildTypes {

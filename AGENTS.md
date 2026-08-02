@@ -17,7 +17,7 @@ single-institution build and every admin is confined to their own tenant.
 |------|----------|
 | `backend/` | 4 Go services (auth-service, api-gateway, session-manager, sync-receiver) + 1 Node.js service (notification-service) |
 | `frontend/` | 4 apps (admin-dashboards, coordinator-pwa, student-portal, coordinator-android) |
-| `db/migrations/` | 64 SQL files (001–066, no 045 or 051). Auto-run on an **empty** PG volume; on an existing database use `make migrate` (see below) |
+| `db/migrations/` | 67 SQL files (001–069, no 045 or 051). Auto-run on an **empty** PG volume; on an existing database use `make migrate` (see below) |
 | `db/seeds/` | `001_test_tenants.sql`, `002_test_users.sql`, `003_e2e_test_data.sql` |
 | `tests/security/` | Go RLS isolation tests (must connect as `qaat_app`) |
 | `tests/e2e/` | Playwright + shell-based E2E |
@@ -155,6 +155,14 @@ A lecture has two independent witnesses, and they are deliberately **never merge
 `CoordinatorRecord` and `PatrolLecturerAttendance`, in both the admin console and the oversight
 dashboards. Where the two disagree (a session the coordinator logged but the patroller found empty)
 is exactly the finding QA exists to surface, so merging them would destroy the signal.
+
+## Android release signing
+
+Both APKs are signed with **v1 + v2 + v3** (`enableV1Signing/V2/V3` in each module's
+`signingConfigs`). Gradle defaults to v2-only for `minSdk >= 24`, which produces an APK with no
+`META-INF/CERT.RSA` — and the on-device scanners that still read the v1 JAR manifest, MIUI/HyperOS's
+installer above all, then reject it as **"this app may be infected by a virus"**. Do not turn v1
+back off. Verify with `apksigner verify --min-sdk-version 21 -v <apk>`; all three must say true.
 
 ## Org hierarchy
 

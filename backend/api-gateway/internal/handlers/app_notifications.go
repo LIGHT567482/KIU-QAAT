@@ -9,6 +9,7 @@ package handlers
 //   GET  /api/v1/app-notifications                       (any signed-in app user)
 //   GET  /api/v1/app-notifications/unread-count          (any signed-in app user)
 //   POST /api/v1/app-notifications/{id}/read             (any signed-in app user)
+//   DELETE /api/v1/app-notifications/{id}                (dismiss from your own inbox)
 
 import (
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
@@ -260,11 +262,16 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		var senderName string
-		_ = pool.QueryRow(r.Context(), `SELECT full_name FROM users WHERE user_id = $1 AND tenant_id = $2`, senderID, tenantID).Scan(&senderName)
+		// Store the sender's TITLE alongside their name ("Dr Jane Smith"), so every reader —
+		// inbox, dashboard, export — shows the courtesy title without having to re-join later.
+		var senderName, senderTitle string
+		_ = pool.QueryRow(r.Context(),
+			`SELECT COALESCE(full_name,''), COALESCE(title,'') FROM users WHERE user_id = $1 AND tenant_id = $2`,
+			senderID, tenantID).Scan(&senderName, &senderTitle)
 		if senderName == "" {
 			senderName = role
 		}
+		senderName = withTitle(senderTitle, senderName)
 
 		tx, err := pool.Begin(r.Context())
 		if err != nil {
@@ -305,11 +312,15 @@ func ListAppNotifications(pool *pgxpool.Pool) http.HandlerFunc {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
 		rows, err := pool.Query(r.Context(), `
-			SELECT n.notification_id::text, n.sender_name, n.sender_role, COALESCE(n.unit_id,''),
+			SELECT n.notification_id::text, n.sender_name, COALESCE(u.title,''), n.sender_role,
+			       COALESCE(n.unit_id,''),
 			       n.subject, n.body, n.created_at, (nr.read_at IS NOT NULL)
 			FROM notification_recipients nr
 			JOIN app_notifications n ON n.notification_id = nr.notification_id
+			-- Rows written before titles were stored still get one, via the sender's account.
+			LEFT JOIN users u ON u.user_id = n.sender_id AND u.tenant_id = n.tenant_id
 			WHERE nr.tenant_id = $1 AND nr.recipient_user_id = $2::uuid
+			  AND nr.dismissed_at IS NULL
 			ORDER BY n.created_at DESC LIMIT 300`, tenantID, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -330,9 +341,12 @@ func ListAppNotifications(pool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var n notif
 			var created time.Time
-			if rows.Scan(&n.NotificationID, &n.SenderName, &n.SenderRole, &n.UnitID, &n.Subject, &n.Body, &created, &n.Read) != nil {
+			var title string
+			if rows.Scan(&n.NotificationID, &n.SenderName, &title, &n.SenderRole, &n.UnitID,
+				&n.Subject, &n.Body, &created, &n.Read) != nil {
 				continue
 			}
+			n.SenderName = withTitle(title, n.SenderName)
 			n.CreatedAt = created.Format(time.RFC3339)
 			out = append(out, n)
 		}
@@ -372,5 +386,47 @@ func MarkAppNotificationRead(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "READ"})
+	}
+}
+
+// withTitle prefixes a courtesy title to a name once — "Dr" + "Jane Smith" -> "Dr Jane Smith".
+// Blank titles pass through, and a name that already starts with the title is left alone so
+// nobody ends up as "Dr Dr Jane Smith".
+func withTitle(title, name string) string {
+	t := strings.TrimSpace(title)
+	n := strings.TrimSpace(name)
+	if t == "" || n == "" {
+		return n
+	}
+	if strings.HasPrefix(strings.ToLower(n), strings.ToLower(t)+" ") {
+		return n
+	}
+	return t + " " + n
+}
+
+// DismissAppNotification — DELETE /api/v1/app-notifications/{id}
+//
+// Removes the notification from THIS recipient's inbox only. The notification itself and every
+// other recipient's copy are untouched: an alert sent to a whole cohort is one row fanned out to
+// many, and one student clearing their copy must not delete everyone else's.
+func DismissAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		userID := middleware.GetUserID(r.Context())
+		id := chi.URLParam(r, "id")
+		ct, err := pool.Exec(r.Context(), `
+			UPDATE notification_recipients
+			   SET dismissed_at = now()
+			 WHERE notification_id = $1::uuid AND tenant_id = $2 AND recipient_user_id = $3::uuid
+			   AND dismissed_at IS NULL`, id, tenantID, userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		if ct.RowsAffected() == 0 {
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "no such notification in your inbox"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "DISMISSED"})
 	}
 }

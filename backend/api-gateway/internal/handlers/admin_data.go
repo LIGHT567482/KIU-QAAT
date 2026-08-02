@@ -410,15 +410,35 @@ func GetCourseRoadmap(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Each unit carries who teaches it and how many timetable slots it has.
+		//
+		// The roadmap used to list units alone, which made the two ways a unit goes dark invisible
+		// from the one screen meant to govern them. A unit with no `lecturer_assignments` row shows
+		// a blank lecturer on the student's timetable, is absent from every lecturer dashboard, and
+		// reaches the QA patroller's manifest with nobody named against it. A unit with no
+		// `timetable_slots` row is on the programme but on nobody's week. Both look identical to a
+		// correctly-configured unit here, so the administrator had no way to find them short of
+		// signing in as each affected student. Now the gap is a column.
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT unit_id, name, COALESCE(year,1), COALESCE(semester,1),
-			       COALESCE(level,''),
-			       COALESCE(academic_year,''), COALESCE(default_venue_id,''),
-			       COALESCE(to_char(session_start,'HH24:MI'),''),
-			       COALESCE(session_duration_minutes,0), schedule_locked
-			FROM course_units
-			WHERE course_id = $1
-			ORDER BY year, semester, name`, courseID)
+			SELECT cu.unit_id, cu.name, COALESCE(cu.year,1), COALESCE(cu.semester,1),
+			       COALESCE(cu.level,''),
+			       COALESCE(cu.academic_year,''), COALESCE(cu.default_venue_id,''),
+			       COALESCE(to_char(cu.session_start,'HH24:MI'),''),
+			       COALESCE(cu.session_duration_minutes,0), cu.schedule_locked,
+			       COALESCE(lec.names,''), COALESCE(slots.n,0)
+			FROM course_units cu
+			LEFT JOIN LATERAL (
+			    SELECT string_agg(DISTINCT l.full_name, ', ') AS names
+			    FROM lecturer_assignments la
+			    JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+			    WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
+			) lec ON true
+			LEFT JOIN LATERAL (
+			    SELECT COUNT(*) AS n FROM timetable_slots ts
+			    WHERE ts.unit_id = cu.unit_id AND ts.tenant_id = cu.tenant_id
+			) slots ON true
+			WHERE cu.course_id = $1
+			ORDER BY cu.year, cu.semester, cu.name`, courseID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -436,13 +456,16 @@ func GetCourseRoadmap(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SessionStart    string `json:"session_start"`
 			DurationMinutes int    `json:"session_duration_minutes"`
 			ScheduleLocked  bool   `json:"schedule_locked"`
+			LecturerNames   string `json:"lecturer_names"` // "" = nobody assigned
+			SlotCount       int    `json:"slot_count"`     // 0 = on nobody's timetable
 		}
 		// roadmap[year][semester] = []unit
 		roadmap := map[int]map[int][]unit{}
 		for rows.Next() {
 			var u unit
 			rows.Scan(&u.UnitID, &u.Name, &u.Year, &u.Semester, &u.Level, &u.AcademicYear, &u.DefaultVenueID,
-				&u.SessionStart, &u.DurationMinutes, &u.ScheduleLocked) //nolint:errcheck
+				&u.SessionStart, &u.DurationMinutes, &u.ScheduleLocked,
+				&u.LecturerNames, &u.SlotCount) //nolint:errcheck
 			if roadmap[u.Year] == nil {
 				roadmap[u.Year] = map[int][]unit{}
 			}

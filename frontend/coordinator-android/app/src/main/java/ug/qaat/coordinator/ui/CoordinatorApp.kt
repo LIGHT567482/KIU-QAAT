@@ -123,8 +123,17 @@ private suspend fun refreshAll() {
     AppState.refreshing = false
 }
 
-/** Root: branded theme → gate on login → route by ROLE (coordinator / student / lecturer).
- *  ONE app "KIU QAAT" — the token's role decides which experience the user sees. */
+/**
+ * Root: branded theme → gate on login → route by ROLE. ONE app "KIU QAAT" — the token's role
+ * decides which experience the user sees, and an unrecognised role gets none of them.
+ *
+ * The final branch matters. It used to be `else -> CoordinatorApp()`, which meant ANY role the app
+ * did not recognise was handed the coordinator's in-room hub: a QA patroller, a dean, a QA
+ * department rep signing in got the screen that opens sessions, runs the class hotspot and holds
+ * the roster. Their token was correctly scoped so the server refused the calls — but the app put
+ * the controls in front of them and let them try. Unknown now means no role UI at all, rather than
+ * the most powerful one.
+ */
 @Composable
 fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding, AppState.darkTheme)) {
     AppState.lastCrash?.let { trace -> CrashReportDialog(trace) { AppState.lastCrash = null } }
@@ -144,7 +153,9 @@ fun RootApp() = MaterialTheme(colorScheme = brandedColorScheme(AppState.branding
             }
             AppState.role == "STUDENT" -> StudentRoleApp()
             AppState.role == "LECTURER" -> LecturerApp()
-            else -> CoordinatorApp()          // COORDINATOR + admin roles → the in-room hub
+            AppState.role == "QA_PATROLLER" -> PatrolRoleApp()
+            AppState.role == "COORDINATOR" -> CoordinatorApp()   // the in-room hub
+            else -> NoPhoneUiScreen(AppState.role)               // web-dashboard roles: no phone UI
         }
         BrandWatermark(AppState.branding)   // faint, non-interactive; drawn over every screen
     }
@@ -183,7 +194,13 @@ fun CoordinatorApp() {
     val onNav = navColor?.let { onNavColor(it) }
     var showProfile by remember { mutableStateOf(false) }
     var showChangePw by remember { mutableStateOf(false) }
+    var showPortal by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
+    // The portal takes over the whole screen, with its own back button.
+    if (showPortal) {
+        StudentPortalScreen(regNo = AppState.coordinatorRegNo, onClose = { showPortal = false })
+        return
+    }
 
     val nav = rememberNavController()
     Scaffold(
@@ -208,6 +225,7 @@ fun CoordinatorApp() {
                         if (showProfile) ProfilePopup(
                             onClose = { showProfile = false },
                             onChangePw = { showProfile = false; showChangePw = true },
+                            onOpenPortal = { showProfile = false; showPortal = true },
                             onSignOut = { showProfile = false; signOut() },
                         )
                     }
@@ -248,7 +266,7 @@ fun CoordinatorApp() {
 /** Corner popup: the coordinator's identity + cohort + settings (theme, change password,
  *  sign out), with an × to close. Everything that used to crowd the top bar lives here. */
 @Composable
-private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onSignOut: () -> Unit) {
+private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onOpenPortal: () -> Unit, onSignOut: () -> Unit) {
     Popup(alignment = Alignment.TopEnd, onDismissRequest = onClose, properties = PopupProperties(focusable = true)) {
         Surface(
             shape = RoundedCornerShape(14.dp), tonalElevation = 6.dp, shadowElevation = 8.dp,
@@ -269,6 +287,11 @@ private fun ProfilePopup(onClose: () -> Unit, onChangePw: () -> Unit, onSignOut:
                     Spacer(Modifier.height(8.dp)); Text("Cohort", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(it, fontSize = 13.sp)
                 }
+                // The same student portal the students get, opened in-app with the coordinator's
+                // own registration number copied ready to paste (the portal is an external site,
+                // so it cannot be filled programmatically — see StudentPortalScreen).
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onOpenPortal, modifier = Modifier.fillMaxWidth()) { Text("🎓  Student portal") }
                 HorizontalDivider(Modifier.padding(vertical = 10.dp))
                 TextButton(onClick = { AppState.darkTheme = !AppState.darkTheme; SessionStore.saveTheme(AppState.darkTheme) }, modifier = Modifier.fillMaxWidth()) {
                     Text((if (AppState.darkTheme) "☀  Light mode" else "☾  Dark mode"), modifier = Modifier.fillMaxWidth())
@@ -444,6 +467,32 @@ private fun CrashReportDialog(trace: String, onClose: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Dismiss") } },
     )
+}
+
+/**
+ * Shown to the oversight, org and administrator roles, which do their work on the web dashboards.
+ * They can sign in — the account is real — but there is nothing here for them, and saying so is
+ * the honest answer. It is also the safe one: the alternative was showing them the hub.
+ */
+@Composable
+internal fun NoPhoneUiScreen(role: String?) {
+    Surface(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                BrandLogo(AppState.branding, size = 72)
+                Spacer(Modifier.height(16.dp))
+                Text("Signed in as ${role?.replace('_', ' ')?.lowercase() ?: "an unrecognised role"}",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(10.dp))
+                Text("This role works on the QAAT web dashboard, not on the phone app. Open the dashboard in your browser and sign in with the same details.",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(28.dp))
+                Button(onClick = { signOut() }, Modifier.fillMaxWidth()) { Text("Sign out") }
+            }
+        }
+    }
 }
 
 internal fun signOut() {

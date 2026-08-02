@@ -65,6 +65,44 @@ data class PresentDisplayEntity(
     val status: String,          // PRESENT or a rejection reason (for the live feed)
 )
 
+/**
+ * One timetabled slot for today, cached so the QA patroller works with no signal.
+ *
+ * The patroller used to be a separate app with its own plain-SQLite database. It now lives in
+ * this one, which means its cached timetable and its queued observations are encrypted at rest
+ * by the same SQLCipher key as everything else — a patrol round is a record of who was and
+ * wasn't teaching, and that is not something to leave in the clear on a phone.
+ */
+@Entity(tableName = "patrol_slots", primaryKeys = ["unitId", "startTime"])
+data class PatrolSlotEntity(
+    val unitId: String,
+    val unitName: String,
+    val courseCode: String,
+    val lecturerStaffId: String,
+    val lecturerName: String,
+    val room: String,
+    val dayOfWeek: Int,
+    val startTime: String,        // "HH:MM"
+    val durationMinutes: Int,
+)
+
+/** A patrol observation captured in the field; uploaded when the phone is back online. */
+@Entity(tableName = "patrol_logs", indices = [Index("sessionDate")])
+data class PatrolLogEntity(
+    @PrimaryKey val id: String,
+    val unitId: String,
+    val unitName: String,
+    val courseCode: String,
+    val lecturerId: String,       // lecturer staff id
+    val lecturerName: String,
+    val room: String,
+    val sessionDate: String,      // YYYY-MM-DD
+    val scheduledTime: String,    // HH:MM
+    val taught: Boolean,
+    val takenAt: String,          // RFC3339
+    val synced: Boolean = false,
+)
+
 @Dao
 interface AppDao {
     @Query("SELECT * FROM device_bindings WHERE fingerprintHash = :fp LIMIT 1")
@@ -140,6 +178,37 @@ interface AppDao {
 
     @Query("SELECT COUNT(*) FROM present_display WHERE sessionId = :s AND status = 'PRESENT'")
     fun presentCount(s: String): kotlinx.coroutines.flow.Flow<Int>
+
+    // ── QA patrol (offline round) ───────────────────────────────────────────────
+    @Query("DELETE FROM patrol_slots") fun clearPatrolSlots()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun putPatrolSlots(rows: List<PatrolSlotEntity>)
+
+    /** Replace the cached day wholesale — a re-fetched manifest is the truth, not an addition. */
+    @Transaction
+    fun replacePatrolSlots(rows: List<PatrolSlotEntity>) { clearPatrolSlots(); putPatrolSlots(rows) }
+
+    @Query("SELECT * FROM patrol_slots ORDER BY startTime")
+    fun patrolSlots(): List<PatrolSlotEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun putPatrolLog(log: PatrolLogEntity)
+
+    @Query("SELECT * FROM patrol_logs WHERE synced = 0 ORDER BY takenAt")
+    fun unsyncedPatrolLogs(): List<PatrolLogEntity>
+
+    @Query("UPDATE patrol_logs SET synced = 1 WHERE id = :id")
+    fun markPatrolLogSynced(id: String)
+
+    @Query("SELECT * FROM patrol_logs WHERE sessionDate = :date ORDER BY takenAt DESC")
+    fun patrolLogsForDay(date: String): kotlinx.coroutines.flow.Flow<List<PatrolLogEntity>>
+
+    @Query("SELECT COUNT(*) FROM patrol_logs WHERE synced = 0")
+    fun pendingPatrolCount(): Int
+
+    /** Signing out of a patroller account must not leave their round on the handset. */
+    @Query("DELETE FROM patrol_logs") fun clearPatrolLogs()
 }
 
 /** Projection for grouping attendance by session (for analytics). */
@@ -147,8 +216,9 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
 
 @Database(
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
-        SessionEntity::class, PresentDisplayEntity::class],
-    version = 3,
+        SessionEntity::class, PresentDisplayEntity::class,
+        PatrolSlotEntity::class, PatrolLogEntity::class],
+    version = 4,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -167,5 +237,28 @@ val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE roster ADD COLUMN studentId TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE roster ADD COLUMN fullName TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/** v3→v4: the QA patrol tables, moved in from the retired standalone patroller app. Additive —
+ *  a coordinator upgrading keeps every pending session; the new tables simply start empty. */
+val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS patrol_slots (
+                 unitId TEXT NOT NULL, unitName TEXT NOT NULL, courseCode TEXT NOT NULL,
+                 lecturerStaffId TEXT NOT NULL, lecturerName TEXT NOT NULL, room TEXT NOT NULL,
+                 dayOfWeek INTEGER NOT NULL, startTime TEXT NOT NULL, durationMinutes INTEGER NOT NULL,
+                 PRIMARY KEY(unitId, startTime))"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS patrol_logs (
+                 id TEXT NOT NULL, unitId TEXT NOT NULL, unitName TEXT NOT NULL,
+                 courseCode TEXT NOT NULL, lecturerId TEXT NOT NULL, lecturerName TEXT NOT NULL,
+                 room TEXT NOT NULL, sessionDate TEXT NOT NULL, scheduledTime TEXT NOT NULL,
+                 taught INTEGER NOT NULL, takenAt TEXT NOT NULL, synced INTEGER NOT NULL,
+                 PRIMARY KEY(id))"""
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_patrol_logs_sessionDate ON patrol_logs (sessionDate)")
     }
 }

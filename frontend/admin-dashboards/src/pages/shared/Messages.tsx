@@ -81,6 +81,17 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
     }
   }
 
+  // Remove it from this inbox at once so the ✕ feels instant, then confirm with the server.
+  async function dismiss(m: Msg) {
+    setMsgs(list => list?.filter(x => x.message_id !== m.message_id) ?? null)
+    if (open === m.message_id) setOpen(null)
+    try {
+      await api.delete(`/api/v1/messages/${m.message_id}`)
+    } catch {
+      load()   // put it back if the server refused
+    }
+  }
+
   if (err) return <div style={errBox}>{err}</div>
   if (!msgs) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
   if (msgs.length === 0) return <p style={{ color: 'var(--muted)' }}>No messages {box === 'sent' ? 'sent yet' : 'yet'}.</p>
@@ -91,7 +102,7 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
         const isOpen = open === m.message_id
         const unread = box === 'inbox' && !m.read
         return (
-          <div key={m.message_id} style={{ border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)', overflow: 'hidden' }}>
+          <div key={m.message_id} style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)', overflow: 'hidden' }}>
             <button onClick={() => expand(m)} style={{
               width: '100%', textAlign: 'left', cursor: 'pointer', border: 'none', background: unread ? 'rgba(26,122,63,.06)' : 'transparent',
               padding: '12px 14px', display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', color: 'var(--text)',
@@ -108,6 +119,13 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
               </span>
               <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{new Date(m.created_at).toLocaleString()}</span>
             </button>
+            {/* Dismiss — removes it from THIS inbox; other recipients keep theirs. */}
+            <button onClick={e => { e.stopPropagation(); dismiss(m) }} title="Dismiss this message"
+              aria-label="Dismiss this message" style={{
+                position: 'absolute', top: 6, right: 6, width: 24, height: 24, lineHeight: '22px',
+                border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer',
+                fontSize: 16, borderRadius: 6, padding: 0,
+              }}>✕</button>
             {isOpen && (
               <div style={{ padding: '0 14px 14px', borderTop: '1px solid var(--border)' }}>
                 <p style={{ whiteSpace: 'pre-wrap', margin: '12px 0', fontSize: 14, lineHeight: 1.5 }}>{m.body || <em style={{ color: 'var(--muted)' }}>(no message body)</em>}</p>

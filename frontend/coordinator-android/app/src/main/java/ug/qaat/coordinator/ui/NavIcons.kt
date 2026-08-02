@@ -3,6 +3,8 @@ package ug.qaat.coordinator.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
@@ -39,6 +41,24 @@ object NavIcons {
     val Profile get() = Icons.Filled.Menu
     val Account get() = Icons.Filled.AccountCircle
     val Person get() = Icons.Filled.Person
+
+    /** The ✕ that dismisses an alert. */
+    val Close get() = Icons.Filled.Close
+
+    /** The lecturer's teaching calendar. */
+    val Calendar get() = Icons.Filled.DateRange
+
+    /** Shield with a tick — the QA patroller's round. */
+    val Patrol: ImageVector by lazy {
+        materialPath("qaat_patrol") {
+            moveTo(12f, 1f); lineTo(3f, 5f); verticalLineToRelative(6f)
+            curveToRelative(0f, 5.55f, 3.84f, 10.74f, 9f, 12f)
+            curveToRelative(5.16f, -1.26f, 9f, -6.45f, 9f, -12f)
+            verticalLineTo(5f); close()
+            moveTo(10.6f, 16.2f); lineTo(6.4f, 12f); lineToRelative(1.4f, -1.4f)
+            lineToRelative(2.8f, 2.8f); lineToRelative(5.6f, -5.6f); lineTo(17.6f, 9.2f); close()
+        }
+    }
 
     /** Rising line chart — "Trends". */
     val Trends: ImageVector by lazy {

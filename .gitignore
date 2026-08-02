@@ -56,3 +56,6 @@ frontend/coordinator-android/keystore.properties
 frontend/coordinator-android/qaat-release.keystore
 *.keystore
 *.jks
+
+# Kotlin/Gradle build scratch
+frontend/coordinator-android/.kotlin/

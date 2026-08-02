@@ -267,7 +267,12 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/users")
 
 		rows, err := pool.Query(r.Context(), `
-			SELECT user_id, email, role, full_name, is_active, last_login_at, created_at,
+			SELECT user_id, email, role,
+			       -- Name carries the courtesy title wherever it is displayed.
+			       CASE WHEN COALESCE(title,'') = '' THEN full_name
+			            ELSE title || ' ' || full_name END AS full_name,
+			       COALESCE(title,''),
+			       is_active, last_login_at, created_at,
 			       COALESCE(coordinator_code, ''), COALESCE(department, ''), COALESCE(school, '')
 			FROM users WHERE tenant_id = $1 ORDER BY role, email`, tenantID)
 		if err != nil {
@@ -281,6 +286,7 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 			Email           string  `json:"email"`
 			Role            string  `json:"role"`
 			FullName        string  `json:"full_name"`
+			Title           string  `json:"title"`
 			IsActive        bool    `json:"is_active"`
 			LastLoginAt     *string `json:"last_login_at"`
 			CreatedAt       string  `json:"created_at"`
@@ -293,7 +299,7 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 			var u user
 			var lastLogin *time.Time
 			var createdAt time.Time
-			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode, &u.Department, &u.School) //nolint:errcheck
+			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.Title, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode, &u.Department, &u.School) //nolint:errcheck
 			u.CreatedAt = createdAt.Format(time.RFC3339)
 			if lastLogin != nil {
 				s := lastLogin.Format(time.RFC3339)

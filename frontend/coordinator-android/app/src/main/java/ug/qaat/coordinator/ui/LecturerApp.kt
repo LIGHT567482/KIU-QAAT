@@ -38,7 +38,8 @@ fun LecturerApp() {
     val onNav = navColor?.let { onNavColor(it) }
     var tab by remember { mutableStateOf(0) }
     var unread by remember { mutableStateOf(0) }
-    LaunchedEffect(tab) { runCatching { unread = NotificationClient().unread() } }
+    var reloadKey by remember { mutableStateOf(0) }
+    LaunchedEffect(tab, reloadKey) { runCatching { unread = NotificationClient().unread() } }
     var showChangePw by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
 
@@ -56,6 +57,9 @@ fun LecturerApp() {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { reloadKey++ }) {
+                        BarIcon(NavIcons.Sync, "Refresh", onNav ?: MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(onClick = { AppState.darkTheme = !AppState.darkTheme; SessionStore.saveTheme(AppState.darkTheme) }) {
                         BarIcon(if (AppState.darkTheme) NavIcons.LightMode else NavIcons.DarkMode,
                             if (AppState.darkTheme) "Switch to light theme" else "Switch to dark theme",
@@ -72,20 +76,21 @@ fun LecturerApp() {
                     indicatorColor = onNav.copy(alpha = .18f),
                 ) else NavigationBarItemDefaults.colors()
                 NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Session, "Session") }, label = { Text("Session") }, colors = itemColors)
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Roster, "Roster") }, label = { Text("Roster") }, colors = itemColors)
-                NavigationBarItem(tab == 2, { tab = 2 }, colors = itemColors, label = { Text("Alerts") },
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Calendar, "Calendar") }, label = { Text("Calendar") }, colors = itemColors)
+                NavigationBarItem(tab == 2, { tab = 2 }, icon = { TabGlyph(NavIcons.Roster, "Roster") }, label = { Text("Roster") }, colors = itemColors)
+                NavigationBarItem(tab == 3, { tab = 3 }, colors = itemColors, label = { Text("Alerts") },
                     icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph(NavIcons.Alerts, "Alerts") } else TabGlyph(NavIcons.Alerts, "Alerts") })
-                NavigationBarItem(tab == 3, { tab = 3 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
+                NavigationBarItem(tab == 4, { tab = 4 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
             }
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            LecturerHeader()
             Box(Modifier.weight(1f)) {
                 when (tab) {
                     0 -> LecturerSessionTab()
-                    1 -> LecturerRosterTab()
-                    2 -> LecturerAlertsTab()
+                    1 -> LecturerCalendarTab()
+                    2 -> LecturerRosterTab()
+                    3 -> LecturerAlertsTab()
                     else -> LecturerProfileTab(onChangePw = { showChangePw = true })
                 }
             }
@@ -378,7 +383,11 @@ private fun LecturerProfileTab(onChangePw: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text("Profile", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
-        AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+        val titled = listOfNotNull(
+            AppState.coordinatorTitle?.takeIf { it.isNotBlank() },
+            AppState.coordinatorName?.takeIf { it.isNotBlank() },
+        ).joinToString(" ")
+        if (titled.isNotBlank()) Text(titled, fontWeight = FontWeight.SemiBold)
         AppState.staffId?.let { Text("Staff ID: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         AppState.role?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.height(24.dp))

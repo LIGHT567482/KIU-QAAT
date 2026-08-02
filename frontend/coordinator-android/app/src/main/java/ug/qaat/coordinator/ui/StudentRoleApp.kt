@@ -13,8 +13,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import ug.qaat.coordinator.net.AuthClient
 import ug.qaat.coordinator.net.NotificationClient
+import ug.qaat.coordinator.net.StudentHomeClient
 import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.student.CheckinClient
 import ug.qaat.coordinator.student.Discovery
@@ -52,6 +55,8 @@ fun StudentRoleApp() {
     val onNav = navColor?.let { onNavColor(it) }
     var tab by remember { mutableStateOf(0) }
     var showPortal by remember { mutableStateOf(false) }
+    // Bumped by the top-bar refresh; every page keys its fetch on it and reloads.
+    var reloadKey by remember { mutableStateOf(0) }
 
     // The KIU student portal takes over the whole screen (with its own back button) when opened.
     if (showPortal) {
@@ -60,7 +65,7 @@ fun StudentRoleApp() {
     }
     var unread by remember { mutableStateOf(0) }
     // Refresh the unread badge whenever the tab changes (so it clears after reading the inbox).
-    LaunchedEffect(tab) { runCatching { unread = NotificationClient().unread() } }
+    LaunchedEffect(tab, reloadKey) { runCatching { unread = NotificationClient().unread() } }
 
     Scaffold(
         containerColor = (if (!AppState.darkTheme) appBackgroundColor(AppState.branding) else null)
@@ -70,15 +75,12 @@ fun StudentRoleApp() {
                 colors = if (navColor != null) TopAppBarDefaults.topAppBarColors(
                     containerColor = navColor, titleContentColor = onNav!!, actionIconContentColor = onNav,
                 ) else TopAppBarDefaults.topAppBarColors(),
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        BrandLogo(AppState.branding, size = 30)
-                        Spacer(Modifier.width(8.dp))
-                        Text("KIU QAAT", fontWeight = FontWeight.Bold)
-                    }
-                },
+                title = { BrandHeader(AppState.branding) },
                 actions = {
-                    // Light/dark toggle, like the coordinator app.
+                    // Refresh + light/dark toggle, matching the coordinator app's top bar.
+                    IconButton(onClick = { reloadKey++ }) {
+                        BarIcon(NavIcons.Sync, "Refresh", onNav ?: MaterialTheme.colorScheme.primary)
+                    }
                     IconButton(onClick = { AppState.darkTheme = !AppState.darkTheme; SessionStore.saveTheme(AppState.darkTheme) }) {
                         BarIcon(if (AppState.darkTheme) NavIcons.LightMode else NavIcons.DarkMode,
                             if (AppState.darkTheme) "Switch to light theme" else "Switch to dark theme",
@@ -94,41 +96,25 @@ fun StudentRoleApp() {
                     unselectedIconColor = onNav.copy(alpha = .65f), unselectedTextColor = onNav.copy(alpha = .65f),
                     indicatorColor = onNav.copy(alpha = .18f),
                 ) else NavigationBarItemDefaults.colors()
-                NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Attend, "Attend") }, label = { Text("Attend") }, colors = itemColors)
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Attendance, "Attendance") }, label = { Text("Attendance") }, colors = itemColors)
-                NavigationBarItem(tab == 2, { tab = 2 }, colors = itemColors, label = { Text("Alerts") },
+                NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Home, "Home") }, label = { Text("Home") }, colors = itemColors)
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Attend, "Attend") }, label = { Text("Attend") }, colors = itemColors)
+                NavigationBarItem(tab == 2, { tab = 2 }, icon = { TabGlyph(NavIcons.Attendance, "Attendance") }, label = { Text("Attendance") }, colors = itemColors)
+                NavigationBarItem(tab == 3, { tab = 3 }, colors = itemColors, label = { Text("Alerts") },
                     icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph(NavIcons.Alerts, "Alerts") } else TabGlyph(NavIcons.Alerts, "Alerts") })
-                NavigationBarItem(tab == 3, { tab = 3 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
+                NavigationBarItem(tab == 4, { tab = 4 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
             }
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            StudentHeader()
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> StudentAttend()
-                    1 -> StudentProgress()
-                    2 -> StudentNotifications(onRead = { runCatching { } })
-                    else -> StudentProfile(onOpenPortal = { showPortal = true })
+                    0 -> StudentHome(reloadKey)
+                    1 -> StudentAttend()
+                    2 -> StudentProgress(reloadKey)
+                    3 -> StudentNotifications(reloadKey, onRead = { runCatching { } })
+                    else -> StudentProfile(reloadKey, onOpenPortal = { showPortal = true })
                 }
             }
-        }
-    }
-}
-
-/** The KIU-branded page header: institution logo + KIU QAAT is in the top bar; here we show
- *  WHO is signed in — student name, registration number and (when known) their cohort. */
-@Composable
-private fun StudentHeader() {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
-        AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let {
-            Text(it, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        }
-        AppState.studentId?.let {
-            Text("Reg. no: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        AppState.cohortLabel?.takeIf { it.isNotBlank() }?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -137,11 +123,11 @@ private fun StudentHeader() {
  *  message marks it read. Fully cloud-backed (fetched when the phone is online). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StudentNotifications(onRead: () -> Unit) {
+private fun StudentNotifications(reloadKey: Int, onRead: () -> Unit) {
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<NotificationClient.Notif>?>(null) }
     fun load() { scope.launch { items = NotificationClient().inbox() } }
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(reloadKey) { load() }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -150,27 +136,19 @@ private fun StudentNotifications(onRead: () -> Unit) {
             items == null -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
             items!!.isEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                items(items!!) { n ->
-                    var expanded by remember { mutableStateOf(false) }
-                    Surface(
-                        color = if (!n.read) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.medium,
-                        onClick = {
-                            expanded = !expanded
-                            if (!n.read) scope.launch { NotificationClient().markRead(n.id); load(); onRead() }
+                items(items!!, key = { it.id }) { n ->
+                    NotificationCard(
+                        n = n,
+                        onOpen = { if (!n.read) scope.launch { NotificationClient().markRead(n.id); load(); onRead() } },
+                        onDismiss = {
+                            // Drop it locally at once so the ✕ feels instant, then confirm with the server.
+                            items = items?.filterNot { it.id == n.id }
+                            scope.launch { NotificationClient().dismiss(n.id); onRead() }
                         },
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                            Text(n.subject, fontWeight = if (n.read) FontWeight.SemiBold else FontWeight.Bold)
-                            Text("from ${n.senderName} · ${n.senderRole.replace('_', ' ')}",
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (expanded && n.body.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(n.body) }
-                        }
-                    }
+                    )
                 }
             }
         }
-        OutlinedButton(onClick = { load() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Refresh") }
     }
 }
 
@@ -223,9 +201,6 @@ private fun StudentAttend() {
     }
 
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(12.dp))
-        Text("KIU QAAT", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        AppState.studentId?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
         Spacer(Modifier.weight(1f))
 
         // Device-switch cooldown only applies when the anti-cheat is enabled (off during testing).
@@ -306,7 +281,7 @@ private fun StudentAttend() {
 }
 
 @Composable
-private fun StudentProgress() {
+private fun StudentProgress(reloadKey: Int) {
     val scope = rememberCoroutineScope()
     var data by remember { mutableStateOf<ProgressClient.Progress?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -322,7 +297,7 @@ private fun StudentProgress() {
                 .onFailure { error = it.message ?: "Couldn't load progress"; loading = false }
         }
     }
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(reloadKey) { load() }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("My attendance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -362,22 +337,189 @@ private fun StudentProgress() {
     }
 }
 
+/** Home — greets the student, then their cohort's weekly timetable and the units they take.
+ *  Deliberately just those two things, as the coordinator's Home is. */
 @Composable
-private fun StudentProfile(onOpenPortal: () -> Unit) {
+private fun StudentHome(reloadKey: Int) {
+    var home by remember { mutableStateOf<StudentHomeClient.Home?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    LaunchedEffect(reloadKey) {
+        loading = true
+        home = runCatching { StudentHomeClient().fetch() }.getOrNull()
+        home?.let { AppState.cohortLabel = it.cohort }
+        loading = false
+    }
+
+    val name = home?.fullName?.takeIf { it.isNotBlank() }
+        ?: AppState.coordinatorName?.takeIf { it.isNotBlank() } ?: "there"
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+        Text("Welcome, $name 👋", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        (home?.cohort ?: AppState.cohortLabel)?.takeIf { it.isNotBlank() }?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.height(18.dp))
+
+        if (loading && home == null) {
+            Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
+            return@Column
+        }
+
+        Text("Timetable", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        val slots = home?.timetable.orEmpty()
+        if (slots.isEmpty()) {
+            Text("No timetable published for your cohort yet.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            // Grouped by weekday so the week reads top-to-bottom.
+            slots.groupBy { it.dayOfWeek }.toSortedMap().forEach { (day, daySlots) ->
+                Text(dayName(day), style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                daySlots.sortedBy { it.startTime }.forEach { sl ->
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(sl.unitName.ifBlank { sl.unitId }, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    listOfNotNull(
+                                        sl.unitId.takeIf { it.isNotBlank() },
+                                        sl.room.takeIf { it.isNotBlank() },
+                                        sl.lecturerName.takeIf { it.isNotBlank() },
+                                    ).joinToString(" · "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                sl.startTime + (if (sl.durationMinutes > 0) " · ${sl.durationMinutes}m" else ""),
+                                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        val units = home?.units.orEmpty()
+        val current = units.filter { it.current }
+        val rest = units.filterNot { it.current }
+
+        Text("Units", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        when {
+            units.isEmpty() -> Text("No units registered on your programme yet.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            current.isEmpty() -> Text("Nothing is tagged for Year ${home?.year} Semester ${home?.semester} yet — your programme's full unit list is below.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> current.forEach { UnitRow(it) }
+        }
+
+        // The rest of the roadmap, so a student can always see where the semester sits in the
+        // whole programme — and so an untagged year/semester never renders as "you have no units".
+        if (rest.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Text("Other units on your programme", style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            rest.forEach { UnitRow(it, dimmed = true) }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** One unit on the student's roadmap. `dimmed` marks a unit outside the current year/semester. */
+@Composable
+private fun UnitRow(u: StudentHomeClient.Unit, dimmed: Boolean = false) {
+    val alpha = if (dimmed) 0.55f else 1f
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (dimmed) 0.45f else 1f),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(u.unitName.ifBlank { u.unitId }, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+                Text(
+                    listOfNotNull(u.unitId.takeIf { it.isNotBlank() },
+                        u.lecturerName.takeIf { it.isNotBlank() }).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                )
+            }
+            if (u.year > 0) Text("Y${u.year}/S${u.semester}",
+                style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))
+        }
+    }
+}
+
+private fun dayName(d: Int) = when (d) {
+    1 -> "Monday"; 2 -> "Tuesday"; 3 -> "Wednesday"; 4 -> "Thursday"
+    5 -> "Friday"; 6 -> "Saturday"; 7 -> "Sunday"; else -> "Unscheduled"
+}
+
+/** Profile — a whole page, so it shows the student's whole record rather than three lines. */
+@Composable
+private fun StudentProfile(reloadKey: Int, onOpenPortal: () -> Unit) {
     var showChangePw by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
+
+    var home by remember { mutableStateOf<StudentHomeClient.Home?>(null) }
+    LaunchedEffect(reloadKey) { home = runCatching { StudentHomeClient().fetch() }.getOrNull() }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("Profile", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        // Opens the KIU student portal in-app, with the reg number auto-filled.
+        Spacer(Modifier.height(14.dp))
+
+        // Identity card.
+        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text(home?.fullName?.takeIf { it.isNotBlank() } ?: AppState.coordinatorName.orEmpty(),
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                AppState.role?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        ProfileField("Registration number", home?.studentId ?: AppState.studentId.orEmpty())
+        ProfileField("Email", home?.email.orEmpty())
+        ProfileField("Course", home?.course.orEmpty())
+        ProfileField("Level of study", home?.level.orEmpty())
+        ProfileField("Study session", home?.sessionType.orEmpty())
+        ProfileField("Intake", home?.intake.orEmpty())
+        ProfileField("Year of study", home?.year?.takeIf { it > 0 }?.let { "Year $it" }.orEmpty())
+        ProfileField("Semester", home?.semester?.takeIf { it > 0 }?.let { "Semester $it" }.orEmpty())
+        ProfileField("Academic year", home?.academicYear.orEmpty())
+        ProfileField("Cohort", home?.cohort ?: AppState.cohortLabel.orEmpty())
+        // This semester's units, not the whole programme roadmap that Home also lists.
+        ProfileField("Units this semester", home?.units?.count { it.current }?.takeIf { it > 0 }?.toString().orEmpty())
+
+        Spacer(Modifier.height(22.dp))
         Button(onClick = onOpenPortal, Modifier.fillMaxWidth()) { Text("🎓  Student portal") }
-        Spacer(Modifier.height(12.dp))
-        AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
-        AppState.studentId?.let { Text("Reg. no: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        AppState.role?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = { showChangePw = true }, Modifier.fillMaxWidth()) { Text("🔑  Change password") }
         Spacer(Modifier.height(8.dp))
-        Button(onClick = { signOut() }, Modifier.fillMaxWidth()) { Text("Sign out") }
+        OutlinedButton(onClick = { signOut() }, Modifier.fillMaxWidth()) {
+            Text("Sign out", color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.height(24.dp))
     }
+}
+
+/** One label/value row. Blank values are skipped rather than shown as an empty line. */
+@Composable
+private fun ProfileField(label: String, value: String) {
+    if (value.isBlank()) return
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
 }

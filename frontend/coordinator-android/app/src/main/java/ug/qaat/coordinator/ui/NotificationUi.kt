@@ -64,24 +64,22 @@ fun NotificationComposer(audiences: List<Pair<String, String>>, onSent: () -> Un
 @Composable
 fun NotificationInboxList(items: List<NotificationClient.Notif>?, onChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
+    // Locally dismissed ids, so the ✕ feels instant while the server call is in flight.
+    val dismissed = remember { mutableStateListOf<String>() }
+    val visible = items?.filterNot { it.id in dismissed }
     when {
         items == null -> Box(Modifier.fillMaxWidth().padding(top = 30.dp), Alignment.Center) { CircularProgressIndicator() }
-        items.isEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        visible.isNullOrEmpty() -> Text("No notifications yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(items) { n ->
-                var expanded by remember { mutableStateOf(false) }
-                Surface(
-                    color = if (!n.read) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else MaterialTheme.colorScheme.surface,
-                    shape = MaterialTheme.shapes.medium,
-                    onClick = { expanded = !expanded; if (!n.read) scope.launch { NotificationClient().markRead(n.id); onChanged() } },
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(n.subject, fontWeight = if (n.read) FontWeight.SemiBold else FontWeight.Bold)
-                        Text("from ${n.senderName} · ${n.senderRole.replace('_', ' ')}",
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (expanded && n.body.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(n.body) }
-                    }
-                }
+            items(visible, key = { it.id }) { n ->
+                NotificationCard(
+                    n = n,
+                    onOpen = { if (!n.read) scope.launch { NotificationClient().markRead(n.id); onChanged() } },
+                    onDismiss = {
+                        dismissed.add(n.id)
+                        scope.launch { NotificationClient().dismiss(n.id); onChanged() }
+                    },
+                )
             }
         }
     }

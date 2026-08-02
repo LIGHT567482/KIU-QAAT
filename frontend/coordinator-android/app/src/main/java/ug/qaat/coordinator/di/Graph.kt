@@ -6,6 +6,7 @@ import ug.qaat.coordinator.data.Repository
 import ug.qaat.coordinator.db.AppDatabase
 import ug.qaat.coordinator.db.MIGRATION_1_2
 import ug.qaat.coordinator.db.MIGRATION_2_3
+import ug.qaat.coordinator.db.MIGRATION_3_4
 
 /** Tiny manual service-locator (no Hilt) — one DB instance shared by the UI + the service. */
 object Graph {
@@ -21,7 +22,7 @@ object Graph {
         if (::db.isInitialized) return
         // Production: wrap with SQLCipher SupportFactory keyed by an Android-Keystore secret.
         db = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "qaat.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .fallbackToDestructiveMigration()   // safety net for any unforeseen schema drift
             .build()
         repo = Repository(db.dao())
