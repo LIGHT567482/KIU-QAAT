@@ -103,22 +103,41 @@ const NAV: Record<Role, NavLink[]> = {
   COORDINATOR: [],
   ADMIN: [], // built per-tenant in adminNav() — needs the admin's tenant_id.
   LECTURER: [
-    { label: 'My Attendance', path: '/lecturer' },
+    { label: 'My Teaching', path: '/lecturer' },
   ],
+  // HOD and DEAN each had exactly ONE page — a lecturer list — which is why the two roles
+  // responsible for a department and a college could see less than the QA rep who visits it.
+  // They now open on an overview of their own unit and carry the pages that make it actionable.
   HOD: [
-    { label: 'Department Lecturers', path: '/hod' },
+    { label: 'Overview',            path: '/hod' },
+    { label: 'Lecturers',           path: '/hod/lecturers' },
+    { label: 'At-risk Students',    path: '/hod/at-risk' },
+    { label: 'Student Attendance',  path: '/hod/attendance' },
+    { label: 'Timetable',           path: '/hod/timetable' },
+    { label: 'Alerts',              path: '/hod/messages' },
   ],
   DEAN: [
-    { label: 'School Lecturers', path: '/dean' },
+    { label: 'Overview',            path: '/dean' },
+    { label: 'Departments & HODs',  path: '/dean/departments' },
+    { label: 'Lecturers',           path: '/dean/lecturers' },
+    { label: 'At-risk Students',    path: '/dean/at-risk' },
+    { label: 'Student Attendance',  path: '/dean/attendance' },
+    { label: 'Timetable',           path: '/dean/timetable' },
+    { label: 'Alerts',              path: '/dean/messages' },
   ],
   QA_DEPT_REP: [
-    { label: 'My Department',  path: '/qa-dept' },
+    { label: 'Overview',       path: '/qa-dept' },
+    { label: 'Lecturers',      path: '/qa-dept/lecturers' },
+    { label: 'At-risk Students', path: '/qa-dept/at-risk' },
     { label: 'File QA Report', path: '/qa-dept/report' },
     { label: 'Messages',       path: '/qa-dept/messages' },
   ],
   QA_SCHOOL_HANDLER: [
-    { label: 'School Overview', path: '/qa-school' },
+    { label: 'Overview',        path: '/qa-school' },
+    { label: 'Departments & HODs', path: '/qa-school/departments' },
+    { label: 'QA Coverage',     path: '/qa-school/qa-departments' },
     { label: 'Lecturers',       path: '/qa-school/lecturers' },
+    { label: 'At-risk Students', path: '/qa-school/at-risk' },
     { label: 'QA Reports',      path: '/qa-school/reports' },
     { label: 'Messages',        path: '/qa-school/messages' },
   ],
@@ -140,8 +159,12 @@ function adminNav(tenantId: string): NavLink[] {
     { label: 'Assignments',         path: `${t}/lecturer-assignments` },
     { label: 'Lecturer Attendance', path: `${t}/lecturer-attendance` },
     { label: 'Employees',           path: `${t}/employees` },
+    { label: 'At-risk Students',    path: '/admin/at-risk' },
     { label: 'Reports',             path: '/admin/reports' },
     { label: 'Rooms & Codes',       path: `${t}/rooms` },
+    // The trail of who did what. It has been written to since the audit helper landed; before
+    // that the table existed and nothing ever wrote a row to it.
+    { label: 'Audit Trail',         path: '/admin/audit' },
     { label: 'Settings',            path: '/admin/settings' },
   ]
 }

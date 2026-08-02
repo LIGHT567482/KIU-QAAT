@@ -567,6 +567,10 @@ func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
 			pool.Exec(r.Context(), //nolint:errcheck
 				`DELETE FROM students_extended WHERE email = $1 AND (`+tenantScopeClause("$2")+`)`, email, scope)
 		}
+		// Deleting an account removes the person from every scoped view at once, so it is recorded
+		// with what was deleted — the row itself is gone and cannot be looked up afterwards.
+		auditAdmin(r, pool, scope, middleware.GetUserID(r.Context()), "USER_DELETED", "user", userID,
+			jsonObject(map[string]string{"email": email, "role": role}))
 		writeJSON(w, http.StatusOK, map[string]string{"user_id": userID, "status": "DELETED"})
 	}
 }

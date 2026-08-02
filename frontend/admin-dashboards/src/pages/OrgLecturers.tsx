@@ -14,7 +14,14 @@ interface Resp { scope: { department: string; school: string }; lecturers: Lectu
 
 export default function OrgLecturers({ level }: { level: 'hod' | 'dean' }) {
   const { status, data } = useQuery<Resp>(() => api.get(`/api/v1/${level}/lecturers`), [level])
-  const rows = data?.lecturers ?? []
+  const all = data?.lecturers ?? []
+  // A dean's list spans every department in the college, so it needs a way to narrow to one —
+  // otherwise the only way to answer "how is Computer Science doing" is to read the whole college.
+  // Pre-set from ?department= so the Departments page can link straight into a department.
+  const [dept, setDept] = useState(
+    () => new URLSearchParams(window.location.search).get('department') ?? '')
+  const departments = Array.from(new Set(all.map(l => l.department).filter(Boolean) as string[])).sort()
+  const rows = dept ? all.filter(l => l.department === dept) : all
   const scopeLabel = level === 'hod' ? (data?.scope.department || 'your department') : (data?.scope.school || 'your school')
 
   const [compose, setCompose] = useState<null | { audience: string; target?: string; who: string }>(null)
@@ -28,6 +35,19 @@ export default function OrgLecturers({ level }: { level: 'hod' | 'dean' }) {
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <button style={btn} onClick={() => setCompose({ audience: 'LECTURERS', who: `all lecturers in ${scopeLabel}` })}>✉ Notify all lecturers</button>
+        {level === 'dean' && departments.length > 1 && (
+          <select value={dept} onChange={e => setDept(e.target.value)} style={selectSm}>
+            <option value="">All departments</option>
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        )}
+        {/* Upward and downward, so the chain is a channel in both directions. */}
+        {level === 'dean' && (
+          <button style={btnGhost} onClick={() => setCompose({ audience: 'HODS', who: 'every head of department in your college' })}>Message HODs</button>
+        )}
+        {level === 'hod' && (
+          <button style={btnGhost} onClick={() => setCompose({ audience: 'DEAN', who: 'your dean' })}>Message Dean</button>
+        )}
         <button style={btnGhost} onClick={() => setCompose({ audience: 'DQA', who: 'the DQA director(s)' })}>Message DQA</button>
         <button style={btnGhost} onClick={() => setCompose({ audience: 'ADMIN', who: 'the admin(s)' })}>Message Admin</button>
       </div>
@@ -117,6 +137,7 @@ const td: React.CSSProperties = { padding: '10px' }
 const btn: React.CSSProperties = { padding: '8px 14px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 const btnGhost: React.CSSProperties = { padding: '8px 14px', background: '#fff', color: '#1e293b', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 const btnSm: React.CSSProperties = { padding: '4px 10px', background: '#fff', color: '#1e293b', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontSize: 12 }
+const selectSm: React.CSSProperties = { padding: '8px 12px', background: '#fff', color: '#1e293b', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontSize: 13 }
 const note: React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, margin: '8px 0', fontSize: 13 }
 const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }
 const modal: React.CSSProperties = { background: '#fff', borderRadius: 12, padding: 20, width: 'min(480px, 92vw)' }

@@ -713,6 +713,11 @@ func QADeviceReset(pool *pgxpool.Pool) http.HandlerFunc {
 
 		conn.Exec(r.Context(), `DELETE FROM hardware_vault WHERE student_id = $1`, req.StudentID) //nolint:errcheck
 
+		// Clearing a device binding is how a student is let onto a new phone — and also how one
+		// would be let onto a SECOND phone. The reason the officer gave is recorded with it.
+		auditAdmin(r, pool, tenantID, officerID, "STUDENT_DEVICE_RESET", "student", req.StudentID,
+			jsonObject(map[string]string{"reason_code": req.ReasonCode, "reason_text": req.ReasonText}))
+
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":     "RESET",
 			"student_id": req.StudentID,

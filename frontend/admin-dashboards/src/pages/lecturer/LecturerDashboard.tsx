@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
+import { Kpi, KpiRow, Section } from '../../components/Kpi'
 
 // Lecturer dashboard — every course unit the lecturer is assigned to is listed, each
 // collapsed to a single row. Expanding one reveals its session logs: the student
@@ -43,11 +44,15 @@ export default function LecturerDashboard() {
 
   return (
     <div style={{ color: 'var(--text, #0f172a)' }}>
-      <h2 style={{ margin: '0 0 4px' }}>My Attendance</h2>
+      <h2 style={{ margin: '0 0 4px' }}>My Teaching</h2>
       <p style={{ color: 'var(--muted,#64748b)', margin: '0 0 16px', fontSize: 13 }}>
         {data?.lecturer?.full_name ? `Signed in as ${data.lecturer.full_name}. ` : ''}
-        Every unit you teach is listed below — open one to see its session logs.
+        Your own attendance this month, then every unit you teach — open one to see its session logs.
       </p>
+
+      {/* The lecturer's OWN record, which is the thing they are actually assessed on and the one
+          thing this page never showed. The unit panels below are about their students. */}
+      <MyTeachingMonth />
 
       {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'ok' && units.length === 0 && (
@@ -69,6 +74,102 @@ export default function LecturerDashboard() {
         ))}
       </div>
     </div>
+  )
+}
+
+interface CalEvent {
+  date: string; unit_id: string; unit_name: string; start_time: string; room: string
+  held: boolean; enrolled: number; present: number; pct: number
+  lecturer_present: boolean; contact_hours: number
+}
+
+/**
+ * The lecturer's own month: what they were timetabled to teach, and what they actually taught.
+ *
+ * The web dashboard showed only their STUDENTS' attendance — the one number a lecturer is himself
+ * judged on was visible nowhere but the phone app. `lecturer_present` comes from the gate record in
+ * `lecturer_attendance_logs`, so it means "I was there", not merely "a session existed": a
+ * coordinator can open a room around a lecturer who never arrived.
+ *
+ * A slot in the past with no gate record is a MISS. Today is never counted as one — the class may
+ * still be ahead of them.
+ */
+function MyTeachingMonth() {
+  const now = new Date()
+  const [offset, setOffset] = useState(0)
+  const shown = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+  const from = `${shown.getFullYear()}-${String(shown.getMonth() + 1).padStart(2, '0')}-01`
+  const last = new Date(shown.getFullYear(), shown.getMonth() + 1, 0)
+  const to = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`
+
+  const { data, status } = useQuery<{ events: CalEvent[] }>(
+    () => api.get(`/api/v1/lecturer/calendar?from=${from}&to=${to}`), [from, to])
+
+  const events = data?.events ?? []
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const taught = events.filter(e => e.lecturer_present).length
+  const missed = events.filter(e => !e.lecturer_present && e.date < todayIso).length
+  const upcoming = events.length - taught - missed
+  const rate = taught + missed > 0 ? Math.round((taught / (taught + missed)) * 100) : 0
+  // Students who turned up to the classes that ran, across every unit.
+  const studentPct = (() => {
+    const held = events.filter(e => e.held && e.enrolled > 0)
+    const enrolled = held.reduce((s, e) => s + e.enrolled, 0)
+    return enrolled > 0 ? (held.reduce((s, e) => s + e.present, 0) / enrolled) * 100 : null
+  })()
+
+  const label = shown.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+
+  return (
+    <Section
+      title="My teaching"
+      hint={label}
+      right={
+        <span style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setOffset(o => o - 1)} style={linkBtn}>‹ Prev</button>
+          <button onClick={() => setOffset(o => o + 1)} style={linkBtn}>Next ›</button>
+        </span>
+      }
+    >
+      {status === 'loading' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading…</p>}
+      {status === 'ok' && events.length === 0 && (
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>Nothing timetabled for you in {label}.</p>
+      )}
+      {events.length > 0 && (
+        <>
+          <KpiRow>
+            <Kpi label="Classes taught" value={taught} tone="good" sub={`of ${events.length} timetabled`} />
+            <Kpi label="Missed" value={missed} tone={missed > 0 ? 'bad' : 'good'}
+              sub={missed > 0 ? 'no gate record' : 'none so far'} />
+            {upcoming > 0 && <Kpi label="Still to come" value={upcoming} sub="later this month" />}
+            <Kpi label="Attendance rate" value={`${rate}%`} tone={rate >= 90 ? 'good' : rate >= 70 ? 'warn' : 'bad'}
+              sub="your own, so far this month" />
+            {studentPct !== null && (
+              <Kpi label="Your students" value={`${studentPct.toFixed(0)}%`}
+                tone={studentPct >= 75 ? 'good' : 'bad'} sub="turned up to your classes" />
+            )}
+          </KpiRow>
+
+          {missed > 0 && (
+            <details style={{ fontSize: 13 }}>
+              <summary style={{ cursor: 'pointer', color: '#b91c1c', fontWeight: 600 }}>
+                Show the {missed} class{missed === 1 ? '' : 'es'} with no gate record
+              </summary>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 20, color: 'var(--muted)' }}>
+                {events.filter(e => !e.lecturer_present && e.date < todayIso).map(e => (
+                  <li key={`${e.unit_id}-${e.date}-${e.start_time}`} style={{ marginBottom: 3 }}>
+                    <strong style={{ color: 'var(--text)' }}>{e.unit_id}</strong> — {' '}
+                    {new Date(e.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                    {e.start_time ? ` at ${e.start_time}` : ''}
+                    {e.held ? ' (a session was opened, but you never gated in)' : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
+    </Section>
   )
 }
 

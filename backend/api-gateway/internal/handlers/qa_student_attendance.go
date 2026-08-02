@@ -64,6 +64,14 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 		conds = append(conds, fmt.Sprintf("se.semester = $%d", len(args)))
 	}
 	add("se.academic_year = $%d", q["academic_year"])
+	// ORG SCOPE, applied on top of whatever the caller asked for and never settable BY the caller.
+	// A head of department and a dean read this same endpoint, and must see only their own unit —
+	// so the scope arrives here already resolved from their account (see resolveOrgScope), as a
+	// column name the caller could not have chosen. Institution-wide roles pass "".
+	if q["_scope_col"] != "" && q["_scope_val"] != "" {
+		args = append(args, q["_scope_val"])
+		conds = append(conds, fmt.Sprintf("btrim(lower(%s)) = btrim(lower($%d))", q["_scope_col"], len(args)))
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = " AND " + strings.Join(conds, " AND ")
@@ -123,10 +131,35 @@ func qaFilters(r *http.Request) map[string]string {
 	}
 }
 
+// qaFiltersScoped is qaFilters plus the caller's OWN org unit, for the roles that are bounded by
+// one. The `_scope_*` keys are underscored because they are not query parameters and must never
+// be: they are read from the account, so a dean cannot ask for another college's students by
+// adding `?school=`. Institution-wide roles get no scope keys and see everything, as before.
+func qaFiltersScoped(r *http.Request, pool *pgxpool.Pool) map[string]string {
+	f := qaFilters(r)
+	tenantID := middleware.GetTenantID(r.Context())
+	userID := middleware.GetUserID(r.Context())
+	s, ok := resolveOrgScope(r, pool, tenantID, userID, middleware.GetRole(r.Context()))
+	if s.Unbounded {
+		return f
+	}
+	if !ok {
+		// Bounded role with no unit on the account: match NOTHING rather than everything. An
+		// impossible value is the safe reading of "your scope is unset" — see the same choice in
+		// resolveRecipients, where a blank scope would otherwise broadcast to the whole institution.
+		f["_scope_col"] = s.Col
+		f["_scope_val"] = "\x00-unset-\x00"
+		return f
+	}
+	f["_scope_col"] = s.Col
+	f["_scope_val"] = s.Val
+	return f
+}
+
 // GET /api/v1/dashboard/qa/student-attendance
 func QAStudentAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := queryStudentAttendance(r.Context(), pool, middleware.GetTenantID(r.Context()), qaFilters(r))
+		list, err := queryStudentAttendance(r.Context(), pool, middleware.GetTenantID(r.Context()), qaFiltersScoped(r, pool))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -138,7 +171,7 @@ func QAStudentAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 // GET /api/v1/dashboard/qa/student-attendance/export.xlsx
 func QAStudentAttendanceExport(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := queryStudentAttendance(r.Context(), pool, middleware.GetTenantID(r.Context()), qaFilters(r))
+		list, err := queryStudentAttendance(r.Context(), pool, middleware.GetTenantID(r.Context()), qaFiltersScoped(r, pool))
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

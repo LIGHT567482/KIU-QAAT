@@ -52,7 +52,13 @@ const to12 = (hhmm: string) => {
 }
 const hourLabel = (h: number) => to12(`${((h % 24) + 24) % 24}:00`)
 
-export default function Timetable() {
+/**
+ * `readOnly` is for the roles that need to SEE the schedule but must not rewrite it — a head of
+ * department and a dean oversee teaching, they do not own the timetable. Hiding the controls is
+ * not the security boundary (the gateway still refuses their PUT/DELETE); it is what stops the
+ * page offering buttons that were always going to fail.
+ */
+export default function Timetable({ readOnly = false }: { readOnly?: boolean } = {}) {
   const { data, status, refetch } = useQuery<{ offerings: Offering[]; slots: Slot[] }>(
     () => api.get('/api/v1/dashboard/timetable/slots'))
   // Legacy overview gives the full unit list per offering (incl. unscheduled) for the add-slot picker.
@@ -113,7 +119,11 @@ export default function Timetable() {
     <div>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: '0 0 2px' }}>Timetable</h2>
-        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>Weekly lecture schedule per cohort. Import the whole institution's timetable, or edit a cohort below.</p>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
+          {readOnly
+            ? 'Weekly lecture schedule per cohort, as published. Changes are made by the admin or QA office.'
+            : "Weekly lecture schedule per cohort. Import the whole institution's timetable, or edit a cohort below."}
+        </p>
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
@@ -123,9 +133,11 @@ export default function Timetable() {
           <option value="">— Select a cohort —</option>
           {filteredOfferings.map(o => <option key={o.offering_id} value={o.offering_id}>{cohortLabel(o)}</option>)}
         </select>
-        <button onClick={() => downloadText('timetable_template.csv', TT_COLS.join(',') + '\n')} style={btnGhost} title="Download a blank CSV with the timetable columns">Template</button>
-        <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
-        <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost}>{importing ? 'Importing…' : 'Import timetable'}</button>
+        {!readOnly && <>
+          <button onClick={() => downloadText('timetable_template.csv', TT_COLS.join(',') + '\n')} style={btnGhost} title="Download a blank CSV with the timetable columns">Template</button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
+          <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost}>{importing ? 'Importing…' : 'Import timetable'}</button>
+        </>}
       </div>
 
       {msg && <div style={{ background: msg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: msg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>{msg}</div>}
@@ -137,14 +149,15 @@ export default function Timetable() {
           {offerings.length === 0 ? 'No cohorts yet. Import a timetable or add offerings first.' : 'Select a cohort above to view its weekly timetable.'}
         </div>
       ) : (
-        <CohortTimetable offering={current} slots={curSlots} units={curUnits} rows={rows} onChanged={refetch} cohortLabel={cohortLabel(current)} />
+        <CohortTimetable offering={current} slots={curSlots} units={curUnits} rows={rows} onChanged={refetch} cohortLabel={cohortLabel(current)} readOnly={readOnly} />
       )}
     </div>
   )
 }
 
-function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel }: {
-  offering: Offering; slots: Slot[]; units: OverviewRow[]; rows: number[]; onChanged: () => void; cohortLabel: string
+function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel, readOnly = false }: {
+  offering: Offering; slots: Slot[]; units: OverviewRow[]; rows: number[]; onChanged: () => void
+  cohortLabel: string; readOnly?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   // Weekend cohorts show Sat–Sun columns; everyone else Mon–Fri.
@@ -196,7 +209,7 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
                     <td key={d} style={cell} rowSpan={span}>
                       {here.map(s => (
                         <div key={s.slot_id} style={card} title="Click × to remove">
-                          <button onClick={() => del(s.slot_id)} style={delBtn}>×</button>
+                          {!readOnly && <button onClick={() => del(s.slot_id)} style={delBtn}>×</button>}
                           <div style={{ fontWeight: 800, color: KIU_GREEN, fontSize: 12 }}>{s.unit_id}</div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{s.unit_name}</div>
                           {s.lecturer_name && <div style={{ fontSize: 11, color: '#475569' }}>Lecturer: {s.lecturer_name}</div>}
@@ -216,12 +229,14 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel 
         </table>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        {adding
-          ? <AddSlot offering={offering} units={units} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
-          : <button onClick={() => setAdding(true)} style={btnGhost} disabled={units.length === 0}>+ Add a lecture slot</button>}
-        {units.length === 0 && <span style={{ marginLeft: 10, color: 'var(--muted)', fontSize: 12 }}>This cohort has no units yet — add units (or import a timetable) first.</span>}
-      </div>
+      {!readOnly && (
+        <div style={{ marginTop: 12 }}>
+          {adding
+            ? <AddSlot offering={offering} units={units} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            : <button onClick={() => setAdding(true)} style={btnGhost} disabled={units.length === 0}>+ Add a lecture slot</button>}
+          {units.length === 0 && <span style={{ marginLeft: 10, color: 'var(--muted)', fontSize: 12 }}>This cohort has no units yet — add units (or import a timetable) first.</span>}
+        </div>
+      )}
     </div>
   )
 }

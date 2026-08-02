@@ -39,6 +39,11 @@ import { QAOrgLecturers, QAOrgDepartments, QAOrgReports } from './pages/qa/QAOrg
 import Timetable from './pages/shared/Timetable'
 import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
+import OrgOverview from './pages/shared/OrgOverview'
+import AtRisk from './pages/shared/AtRisk'
+import AdminAudit from './pages/admin/AdminAudit'
+import Alerts from './pages/shared/Alerts'
+import OrgDepartments from './pages/shared/OrgDepartments'
 
 export default function App() {
   return (
@@ -105,6 +110,8 @@ export default function App() {
             <Route path="/admin/tenants/:tenantId/employee-attendance"   element={<AdminEmployeeAttendance />} />
             <Route path="/admin/tenants/:tenantId/student-attendance"    element={<QAStudentAttendance />} />
             <Route path="/admin/reports"                                 element={<AdminReports />} />
+            <Route path="/admin/at-risk"                                 element={<AtRisk />} />
+            <Route path="/admin/audit"                                   element={<AdminAudit />} />
           </Route>
 
           {/* ── Lecturer (own assigned units) ──────────────────────────── */}
@@ -112,23 +119,44 @@ export default function App() {
             <Route path="/lecturer" element={<LecturerDashboard />} />
           </Route>
 
-          {/* ── HOD (own department) / Dean (own school) ───────────────── */}
+          {/* ── HOD (own department) / Dean (own school) ─────────────────
+              Both landed on a bare lecturer list with no sense of whether their unit was
+              working. They now open on the KPI overview, with the lecturer list, the
+              at-risk watchlist, the timetable and their inbox alongside it. Every page is
+              scoped server-side by the unit on their own account. */}
           <Route element={<RoleLayout allowedRoles={['HOD']} />}>
-            <Route path="/hod" element={<OrgLecturers level="hod" />} />
+            <Route path="/hod"           element={<OrgOverview level="hod" />} />
+            <Route path="/hod/lecturers" element={<OrgLecturers level="hod" />} />
+            <Route path="/hod/at-risk"   element={<AtRisk />} />
+            <Route path="/hod/attendance" element={<QAStudentAttendance />} />
+            <Route path="/hod/timetable" element={<Timetable readOnly />} />
+            <Route path="/hod/messages"  element={<Alerts />} />
           </Route>
           <Route element={<RoleLayout allowedRoles={['DEAN']} />}>
-            <Route path="/dean" element={<OrgLecturers level="dean" />} />
+            <Route path="/dean"            element={<OrgOverview level="dean" />} />
+            {/* The management layer a dean is accountable THROUGH — skipped entirely before. */}
+            <Route path="/dean/departments" element={<OrgDepartments />} />
+            <Route path="/dean/lecturers"  element={<OrgLecturers level="dean" />} />
+            <Route path="/dean/at-risk"   element={<AtRisk />} />
+            <Route path="/dean/attendance" element={<QAStudentAttendance />} />
+            <Route path="/dean/timetable" element={<Timetable readOnly />} />
+            <Route path="/dean/messages"  element={<Alerts />} />
           </Route>
 
           {/* ── QA reps: department rep / school handler ────────────────── */}
           <Route element={<RoleLayout allowedRoles={['QA_DEPT_REP']} />}>
-            <Route path="/qa-dept"          element={<QAOrgLecturers />} />
+            <Route path="/qa-dept"          element={<OrgOverview level="qa-dept" />} />
+            <Route path="/qa-dept/lecturers" element={<QAOrgLecturers />} />
+            <Route path="/qa-dept/at-risk"  element={<AtRisk />} />
             <Route path="/qa-dept/report"   element={<QAOrgReports />} />
             <Route path="/qa-dept/messages" element={<Messages />} />
           </Route>
           <Route element={<RoleLayout allowedRoles={['QA_SCHOOL_HANDLER']} />}>
-            <Route path="/qa-school"           element={<QAOrgDepartments />} />
+            <Route path="/qa-school"           element={<OrgOverview level="qa-school" />} />
+            <Route path="/qa-school/departments" element={<OrgDepartments />} />
+            <Route path="/qa-school/qa-departments" element={<QAOrgDepartments />} />
             <Route path="/qa-school/lecturers" element={<QAOrgLecturers />} />
+            <Route path="/qa-school/at-risk"   element={<AtRisk />} />
             <Route path="/qa-school/reports"   element={<QAOrgReports />} />
             <Route path="/qa-school/messages"  element={<Messages />} />
           </Route>
