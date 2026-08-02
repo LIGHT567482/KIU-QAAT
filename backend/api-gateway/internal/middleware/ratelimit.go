@@ -86,11 +86,18 @@ func PublicIPRateLimit(perSec rate.Limit, burst int) func(http.Handler) http.Han
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !get(r.RemoteAddr).Allow() {
+				// Retry-After lets a client back off intelligently instead of hammering or
+				// giving up. This matters most on sign-in: a whole cohort opening the app in a
+				// lecture hall arrives from ONE public IP (the campus NAT), so they share a
+				// bucket and the ones at the back are refused through no fault of their own.
+				// Without this header the app had nothing to distinguish "wrong password" from
+				// "wait two seconds", and showed the student a credentials error for neither.
+				w.Header().Set("Retry-After", "2")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 					"error":   "RATE_LIMIT_EXCEEDED",
-					"message": "too many requests",
+					"message": "Too many people are signing in at once. Wait a moment and try again.",
 				})
 				return
 			}

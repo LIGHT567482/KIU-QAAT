@@ -82,7 +82,29 @@ class CheckinValidator(
         return null
     }
 
-    /** Steps 5 (bind device on first check-in), 6 (duplicate), 7 (one device), then append PRESENT. */
+    /**
+     * Steps 5 (bind device on first check-in), 6 (duplicate), 7 (one device), then append PRESENT.
+     *
+     * SYNCHRONIZED, and it has to be. This is a read-modify-write across four separate store calls —
+     * "has this student already checked in?", "has this device been used?", "what is the next
+     * sequence number?", "append" — and a lecture hall is precisely where they run concurrently:
+     * the coordinator opens the gate and forty phones POST to this hub within the same second, each
+     * on its own Ktor request thread.
+     *
+     * Measured before this lock (see InRoomConcurrencyTest): 40 simultaneous scans produced 40
+     * attendance rows but only 37 DISTINCT sequence numbers — three pairs read the same
+     * `attendanceCount` before either had written, and both claimed it. That number is the
+     * append-only ordering the sealed session package is built on, so duplicates there mean the
+     * ledger uploaded to the server is ambiguous about what happened in the room. The duplicate-scan
+     * check has the same shape and the same race: two taps interleaving between the check and the
+     * insert would both be admitted and the student counted twice.
+     *
+     * The lock is cheap and correctly placed: signature verification, expiry and roster checks all
+     * happen BEFORE this call, so the expensive crypto stays outside it and only the few
+     * microseconds of ledger bookkeeping are serialised. One hub, one validator, one SQLite file —
+     * there is nothing to coordinate beyond this process.
+     */
+    @Synchronized
     private fun bindAndRecord(studentIdHash: String, session: ActiveSession, device: DeviceContext): ValidationResult {
         val stored = store.bindingByStudent(studentIdHash)
         if (stored != null) {

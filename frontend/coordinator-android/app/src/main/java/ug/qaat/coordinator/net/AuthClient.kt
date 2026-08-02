@@ -57,6 +57,19 @@ class AuthClient {
                 contentType(ContentType.Application.Json); setBody(body.toString())
             }
             text = r.bodyAsText(); status = r.status.value
+
+            // 429 = the server is shedding load, not rejecting THIS student. A whole cohort opens
+            // the app at the start of a lecture and, on campus Wi-Fi, arrives from one public IP,
+            // so they share a rate-limit bucket and the ones at the back are refused. Treated as a
+            // hard failure this showed a sign-in error to students whose password was perfectly
+            // correct. Back off (honouring Retry-After) and try again instead.
+            if (status == 429 && attempt < 6) {
+                val wait = r.headers["Retry-After"]?.toLongOrNull()?.coerceIn(1, 10) ?: 2
+                // Staggered by attempt so the whole cohort does not retry in lockstep and
+                // rebuild the same stampede a moment later.
+                kotlinx.coroutines.delay(wait * 1000L * attempt + (0..750).random())
+                continue
+            }
             if (text.looksJson() || status < 500) break
             if (attempt < 6) kotlinx.coroutines.delay(6000)
         }

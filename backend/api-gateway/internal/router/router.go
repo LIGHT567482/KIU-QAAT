@@ -67,7 +67,15 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 
 	// Unified KIU QAAT app sign-in: identifier (email / reg-no / staff-id) + password + org →
 	// resolves to the account, reuses auth-service /auth/login, augments with student_id/staff_id.
-	r.With(middleware.PublicIPRateLimit(5, 60)).
+	//
+	// BURST 250, NOT 60. A whole cohort opens the app at the start of a lecture, and on campus
+	// Wi-Fi they all leave through ONE public IP — so they share one bucket. Measured: 150
+	// simultaneous sign-ins from a single IP had 85 refused with a burst of 60. The server shed
+	// the load cleanly rather than falling over, but 85 students saw a failed sign-in for no
+	// reason of their own. The SUSTAINED rate stays low (that is what blunts credential
+	// stuffing) and per-ACCOUNT lockout in auth-service is the real brute-force defence; the
+	// burst only has to be big enough for the legitimate stampede.
+	r.With(middleware.PublicIPRateLimit(5, 250)).
 		Post("/api/v1/auth/app-login", handlers.AppLogin(adminPool))
 
 	// Lecturer gate scan is public — authenticated by HMAC-signed QR token issued
@@ -142,12 +150,47 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/patrol/manifest", handlers.PatrolManifest(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
+		// The patroller's SECOND FACTOR (migration 071). The handset binding above proves WHICH
+		// phone; the PIN proves WHO is holding it. Set on the first sign-in, entered on every one
+		// after, before the round will open.
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Get("/api/v1/patrol/pin", handlers.PatrolPINStatus(pool))
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Post("/api/v1/patrol/pin", handlers.SetPatrolPIN(pool))
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Post("/api/v1/patrol/pin/verify", handlers.VerifyPatrolPIN(pool))
 		// The lost-phone path: an administrator releases a binding so the patroller can claim a
 		// new handset. Audited by the AuditLog middleware already on this group.
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Get("/api/v1/admin/patrol-bindings", handlers.ListPatrolBindings(pool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Delete("/api/v1/admin/patrol-bindings/{user_id}", handlers.ReleasePatrolBinding(pool))
+		// The forgotten-PIN path. Clears the PIN so the patroller sets a new one; an administrator
+		// never learns or chooses it.
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Delete("/api/v1/admin/patrol-pins/{user_id}", handlers.ResetPatrolPIN(pool))
+
+		// ── Administrative audit trail + the admin landing page's numbers ─────
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Get("/api/v1/admin/audit", handlers.ListAdminAudit(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Get("/api/v1/admin/overview", handlers.AdminOverview(adminPool))
+
+		// ── Org-scoped dashboards (HOD / Dean / QA reps), plus the unscoped
+		//    view of the same data for the institution-wide roles.
+		//
+		// Scope is NEVER a parameter: it comes from the caller's own account, so a dean cannot
+		// read another college by naming it. See resolveOrgScope.
+		orgDashRoles := middleware.RequireRole(
+			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool,
+			middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC,
+			middleware.RoleAdmin,
+		)
+		r.With(orgDashRoles).Get("/api/v1/org/overview", handlers.OrgOverview(adminPool))
+		r.With(orgDashRoles).Get("/api/v1/org/at-risk", handlers.OrgAtRisk(adminPool))
+		// The management layer a dean is accountable THROUGH: one row per department of their
+		// school, naming its head and how that department is performing.
+		r.With(orgDashRoles).Get("/api/v1/org/departments", handlers.OrgDepartments(adminPool))
 
 		// ── HOD + Dean (org-scoped lecturer oversight) ────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleHOD)).
@@ -527,17 +570,28 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// ── Cross-role in-app notifications ──────────────────────────────────
 		// Lecturer → his students / the coordinator; Coordinator → his students / the
 		// lecturers. Students, coordinators and lecturers all read their own inbox.
+		//
+		// READ, MARK-READ and DISMISS share ONE role list on purpose. They used to be spelled out
+		// separately and drifted: dismiss was missing HOD/DEAN/QA_DEPT_REP/QA_SCHOOL_HANDLER, so
+		// those roles could see an alert and press its ✕ but got 403 — the card vanished locally
+		// and came back on the next refresh. Anyone allowed to READ their inbox must be allowed to
+		// CLEAR it, so the sets are now literally the same variable.
+		inboxRoles := []string{
+			middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer,
+			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool,
+			middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector,
+			middleware.RoleVC, middleware.RoleDVC, middleware.RolePatroller,
+		}
 		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Post("/api/v1/app-notifications", handlers.SendAppNotification(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
+		r.With(middleware.RequireRole(inboxRoles...)).
 			Get("/api/v1/app-notifications", handlers.ListAppNotifications(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
+		r.With(middleware.RequireRole(inboxRoles...)).
 			Get("/api/v1/app-notifications/unread-count", handlers.UnreadAppNotificationCount(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleCoordinator, middleware.RoleLecturer, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
+		r.With(middleware.RequireRole(inboxRoles...)).
 			Post("/api/v1/app-notifications/{id}/read", handlers.MarkAppNotificationRead(adminPool))
 		// Dismiss (the ✕ on every alert) — clears it from YOUR inbox, not everyone else's.
-		r.With(middleware.RequireRole(middleware.RoleStudent, middleware.RoleLecturer, middleware.RoleCoordinator,
-			middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC)).
+		r.With(middleware.RequireRole(inboxRoles...)).
 			Delete("/api/v1/app-notifications/{id}", handlers.DismissAppNotification(adminPool))
 		// Lecturers of the coordinator's course units (for the "notify a specific lecturer" picker).
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
@@ -587,7 +641,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 
 		// Timetable (ADMIN + QA OFFICER): view the coordinator-filled weekly schedule
 		// of every offering's units, with override power on the PUT.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer,
+			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep,
+			middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/timetable", handlers.TimetableOverview(pool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable", handlers.SetTimetableSchedule(pool, rdb))
@@ -599,7 +655,12 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/dashboard/rooms", handlers.DashboardRooms(pool))
 
 		// Multi-slot weekly timetable grid (one slot per unit per day, with room).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
+		// READ is open to the oversight roles — a head of department and a dean need to see the
+		// schedule they are accountable for — but WRITE stays with the admin and the QA office.
+		// The org roles get the read-only rendering of the same page (Timetable readOnly).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer,
+			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep,
+			middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/timetable/slots", handlers.GetTimetableSlots(pool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable/slots", handlers.UpsertTimetableSlot(pool, rdb))
@@ -616,7 +677,8 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Student attendance (ADMIN + QA + VC + DQA): filterable summary + Excel export/import.
 		// ADMIN reaches this from the Reports hub; it supports course_id/unit_id/session/
 		// year/semester filters so the report drills into real courses and their units.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector,
+			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
 			Get("/api/v1/dashboard/qa/student-attendance", handlers.QAStudentAttendance(pool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/qa/student-attendance/export.xlsx", handlers.QAStudentAttendanceReport(pool, "xlsx"))
