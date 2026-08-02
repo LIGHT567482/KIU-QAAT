@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
+import { OrgPicker, useOrg } from '../../components/OrgPicker'
 import { useQuery } from '../../lib/useApi'
 
 // email is OPTIONAL — correspondence only; the staff ID is the lecturer's identity.
@@ -28,6 +29,7 @@ export default function AdminLecturers() {
   const { status, data, refetch } = useQuery<Lecturer[]>(
     () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturers`)
   )
+  const org = useOrg(tenantId ?? '')
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ full_name: '', email: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
   const [saving, setSaving] = useState(false)
@@ -152,7 +154,15 @@ export default function AdminLecturers() {
             <Input label="Full name *" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} />
             <Input label="Email (optional)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
             <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+256 700 000000" />
-            <Input label="Department" value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))} placeholder="Computer Science" />
+            {/* Picked, not typed. A lecturer's department is what puts them in their HOD's list and
+                their dean's school; a typo makes them invisible to both. No school field — a
+                lecturer's school follows from their department, which is where it is derived. */}
+            <OrgPicker
+              schools={org.schools} departments={org.departments}
+              department={form.department} school=""
+              onChange={next => setForm(f => ({ ...f, department: next.department }))}
+              showSchool={false}
+            />
             <Input label="Staff ID (optional — auto-generated if left blank)" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} placeholder="leave blank to auto-generate e.g. KIU/STAFF/00001" />
           </div>
           <button onClick={handleCreate} disabled={saving || !form.full_name} style={{ ...btnPrimary, marginTop: 16, opacity: !form.full_name ? 0.5 : 1 }}>
@@ -200,7 +210,12 @@ export default function AdminLecturers() {
                     </select></label>
                   <Input label="Staff ID" value={editForm.staff_id} onChange={v => setEditForm(f => ({ ...f, staff_id: v }))} />
                   <Input label="Phone" value={editForm.phone} onChange={v => setEditForm(f => ({ ...f, phone: v }))} />
-                  <Input label="Department" value={editForm.department} onChange={v => setEditForm(f => ({ ...f, department: v }))} />
+                  <OrgPicker
+                    schools={org.schools} departments={org.departments}
+                    department={editForm.department} school=""
+                    onChange={next => setEditForm(f => ({ ...f, department: next.department }))}
+                    showSchool={false}
+                  />
                 </div>
                 <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
                   <button onClick={handleEditSave} style={{ ...btnPrimary, background: '#92400e' }}>Save</button>

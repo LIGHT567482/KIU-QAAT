@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import PasswordInput from '../../components/PasswordInput'
+import { OrgPicker, useOrg } from '../../components/OrgPicker'
 import { useQuery } from '../../lib/useApi'
 
 // The Users page manages the oversight roles only — coordinators have their own
@@ -97,9 +98,9 @@ function UsersInner() {
   // Only the oversight roles belong on this page (coordinators/students excluded).
   const users = (status === 'ok' ? (data ?? []) : []).filter(u => MANAGED_ROLES.has(u.role))
 
-  // Datalist suggestions from departments/schools already in use (free-text, but guided).
-  const deptSuggestions = [...new Set((data ?? []).map(u => u.department).filter((d): d is string => !!d && d.trim() !== ''))].sort()
-  const schoolSuggestions = [...new Set((data ?? []).map(u => u.school).filter((s): s is string => !!s && s.trim() !== ''))].sort()
+  // The org units the admin has created. Replaces the old datalist of "whatever strings are
+  // already in the data", which suggested past typos as readily as real departments.
+  const org = useOrg(tenantId ?? '')
   const missingDept = NEEDS_DEPARTMENT.has(form.role) && !form.department.trim()
   const missingSchool = NEEDS_SCHOOL.has(form.role) && !form.school.trim()
   const scopeIncomplete = missingDept || missingSchool
@@ -155,22 +156,18 @@ function UsersInner() {
                 {GENDERS.map(g => <option key={g} value={g}>{g || '—'}</option>)}
               </select>
             </label>
-            <label>
-              <div style={labelStyle}>Department {NEEDS_DEPARTMENT.has(form.role) ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
-              <input list="dept-suggestions" value={form.department} placeholder="e.g. Computer Science"
-                onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${missingDept ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
-              <datalist id="dept-suggestions">{deptSuggestions.map(d => <option key={d} value={d} />)}</datalist>
-              {NEEDS_DEPARTMENT.has(form.role) && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{SCOPE_HINT[form.role]}</div>}
-            </label>
-            <label>
-              <div style={labelStyle}>College / School {NEEDS_SCHOOL.has(form.role) ? <span style={{ color: '#b91c1c' }}>*</span> : '(optional)'}</div>
-              <input list="school-suggestions" value={form.school} placeholder="e.g. SOMAC"
-                onChange={e => setForm(f => ({ ...f, school: e.target.value }))}
-                style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${missingSchool ? '#fca5a5' : '#e2e8f0'}`, fontSize: 14, boxSizing: 'border-box' }} />
-              <datalist id="school-suggestions">{schoolSuggestions.map(s => <option key={s} value={s} />)}</datalist>
-              {NEEDS_SCHOOL.has(form.role) && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{SCOPE_HINT[form.role]}</div>}
-            </label>
+            {/* Chosen from the org units the admin created, never typed. These two strings ARE the
+                scope of an org-bounded role, matched by NAME against courses.department/.school, so
+                a typo silently makes the account see nothing at all. Picking a department fills in
+                its school and locks it. */}
+            <OrgPicker
+              schools={org.schools} departments={org.departments}
+              department={form.department} school={form.school}
+              onChange={next => setForm(f => ({ ...f, ...next }))}
+              requireDepartment={NEEDS_DEPARTMENT.has(form.role)}
+              requireSchool={NEEDS_SCHOOL.has(form.role)}
+              hint={SCOPE_HINT[form.role]}
+            />
             <Field label="Phone (optional)"        value={form.phone}    onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <Field label="WhatsApp (optional)"      value={form.whatsapp} onChange={v => setForm(f => ({ ...f, whatsapp: v }))} />
             <Field label="Registration No. (optional)" value={form.registration_number} onChange={v => setForm(f => ({ ...f, registration_number: v }))} />
