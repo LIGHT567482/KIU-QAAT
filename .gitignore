@@ -59,3 +59,17 @@ frontend/coordinator-android/qaat-release.keystore
 
 # Kotlin/Gradle build scratch
 frontend/coordinator-android/.kotlin/
+
+# Compiled Go service binaries. These were tracked by accident — ~58 MB of build
+# output that changes on every build, conflicts on every merge, and is rebuilt by
+# the Dockerfile anyway. The pattern is the binary sharing its directory's name.
+backend/api-gateway/api-gateway
+backend/auth-service/auth-service
+backend/sync-receiver/sync-receiver
+backend/session-manager/session-manager
+backend/notification-service/notification-service
+
+# Android build output
+frontend/coordinator-android/**/build/
+frontend/coordinator-android/.gradle/
+frontend/coordinator-android/local.properties
