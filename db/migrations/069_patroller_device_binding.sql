@@ -33,6 +33,10 @@ CREATE INDEX IF NOT EXISTS idx_patrol_bindings_tenant
 
 ALTER TABLE patroller_device_bindings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE patroller_device_bindings FORCE  ROW LEVEL SECURITY;
+-- DROP-then-CREATE: `CREATE POLICY` has no IF NOT EXISTS, so a database where this table
+-- was created by hand (the "ragged" case the migrate package exists for) would fail here
+-- and leave the migration half-applied.
+DROP POLICY IF EXISTS "tenant_isolation" ON patroller_device_bindings;
 CREATE POLICY "tenant_isolation" ON patroller_device_bindings
     FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 GRANT SELECT, INSERT, UPDATE, DELETE ON patroller_device_bindings TO qaat_app;

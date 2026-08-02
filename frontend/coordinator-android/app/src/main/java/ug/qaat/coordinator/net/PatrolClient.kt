@@ -49,6 +49,70 @@ class PatrolClient {
             ?: "This phone is not authorised for patrol (${r.status.value})."
     }
 
+    // ── The patrol PIN: the second factor in front of the round ──────────────────
+    //
+    // The handset binding above answers "which phone"; the PIN answers "who is holding it". The
+    // PIN itself never comes back from the server — only whether one has been set — so the app
+    // cannot cache it, show it, or check it locally.
+
+    /** What the PIN screen should show: set it, ask for it, or report the lockout. */
+    data class PinState(val isSet: Boolean, val locked: Boolean, val lockedUntil: String, val attemptsLeft: Int)
+
+    suspend fun pinState(): PinState? = withContext(Dispatchers.IO) {
+        val token = AppState.token ?: return@withContext null
+        runCatching {
+            val r = http.get("$base/api/v1/patrol/pin") { header("Authorization", "Bearer $token") }
+            if (r.status.value !in 200..299) return@runCatching null
+            val o = JSONObject(r.bodyAsText())
+            PinState(
+                o.optBoolean("pin_set"), o.optBoolean("locked"),
+                o.optString("locked_until"), o.optInt("attempts_left", 5),
+            )
+        }.getOrNull()
+    }
+
+    /** Set the PIN (first time) or change it. Returns null on success, else a message to show. */
+    suspend fun setPin(pin: String, currentPin: String? = null): String? = withContext(Dispatchers.IO) {
+        val token = AppState.token ?: return@withContext "Not signed in"
+        runCatching {
+            val body = JSONObject().put("pin", pin)
+            if (!currentPin.isNullOrBlank()) body.put("current_pin", currentPin)
+            val r = http.post("$base/api/v1/patrol/pin") {
+                header("Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
+                setBody(body.toString())
+            }
+            if (r.status.value in 200..299) null
+            else JSONObject(r.bodyAsText()).optString("message").ifBlank { "Couldn't save your PIN." }
+        }.getOrElse { "Couldn't reach the server. You need to be online to set your PIN." }
+    }
+
+    /** Result of an attempt: null message = the round may open. */
+    data class PinAttempt(val ok: Boolean, val message: String, val attemptsLeft: Int, val locked: Boolean)
+
+    suspend fun verifyPin(pin: String): PinAttempt = withContext(Dispatchers.IO) {
+        val token = AppState.token
+            ?: return@withContext PinAttempt(false, "Your session has ended. Sign in again.", 0, false)
+        runCatching {
+            val r = http.post("$base/api/v1/patrol/pin/verify") {
+                header("Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
+                setBody(JSONObject().put("pin", pin).toString())
+            }
+            if (r.status.value in 200..299) return@runCatching PinAttempt(true, "", 5, false)
+            val o = JSONObject(r.bodyAsText())
+            PinAttempt(
+                ok = false,
+                message = o.optString("message").ifBlank { "That PIN is not right." },
+                attemptsLeft = o.optInt("attempts_left", 0),
+                locked = o.optString("error") == "PIN_LOCKED",
+            )
+        }.getOrElse {
+            // The PIN is verified server-side ON PURPOSE — a locally-checkable secret on a stolen
+            // handset is no secret. So being offline here means the round cannot open, and the
+            // patroller is told plainly rather than left tapping.
+            PinAttempt(false, "You need to be online to unlock patrol. Find signal and try again.", 0, false)
+        }
+    }
+
     /** GET /api/v1/patrol/manifest — today's timetabled slots. */
     suspend fun manifest(token: String, fingerprint: String): List<PatrolSlotEntity> = withContext(Dispatchers.IO) {
         val r = http.get("$base/api/v1/patrol/manifest") { auth(token, fingerprint) }

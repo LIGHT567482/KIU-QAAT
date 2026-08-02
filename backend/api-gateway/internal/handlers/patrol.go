@@ -212,6 +212,12 @@ func ReleasePatrolBinding(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
+		// A rebind is exactly the moment worth being able to look back at — see migration 069.
+		if tag.RowsAffected() > 0 {
+			auditAdmin(r, pool, tenantID, middleware.GetUserID(r.Context()),
+				"PATROL_DEVICE_RELEASED", "user", userID,
+				`{"note":"handset binding cleared; the patroller may claim a new phone on next sign-in"}`)
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "RELEASED", "released": tag.RowsAffected(),
 		})
