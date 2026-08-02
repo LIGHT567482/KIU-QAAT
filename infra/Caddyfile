@@ -24,11 +24,6 @@
 	reverse_proxy api-gateway:8443
 }
 
-:3000 {
-	tls /certs/qaat.crt /certs/qaat.key
-	reverse_proxy coordinator-pwa:3000
-}
-
 :3001 {
 	tls /certs/qaat.crt /certs/qaat.key
 	reverse_proxy admin-dashboards:3001

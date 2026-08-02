@@ -31,10 +31,6 @@ CREATE TYPE intake_session_enum AS ENUM (
     'Morning', 'Evening', 'Weekend', 'Distance'
 );
 
-CREATE TYPE beacon_format_enum AS ENUM (
-    'IBEACON', 'EDDYSTONE_UID'
-);
-
 -- ─── Tables ───────────────────────────────────────────────────────────────────
 
 CREATE TABLE tenants (
@@ -45,7 +41,6 @@ CREATE TABLE tenants (
     attendance_threshold     SMALLINT    NOT NULL DEFAULT 75  CHECK (attendance_threshold BETWEEN 1 AND 100),
     checkin_window_minutes   SMALLINT    NOT NULL DEFAULT 120 CHECK (checkin_window_minutes > 0),
     auto_kill_minutes        SMALLINT    NOT NULL DEFAULT 180 CHECK (auto_kill_minutes > 0),
-    rssi_threshold_dbm       SMALLINT    NOT NULL DEFAULT -65,
     logo_url                 TEXT,
     brand_color              VARCHAR(7),
     is_active                BOOLEAN     NOT NULL DEFAULT true,
@@ -86,17 +81,6 @@ CREATE TABLE venues (
     gps_latitude             DECIMAL(10, 8),
     gps_longitude            DECIMAL(11, 8),
     geofence_radius_meters   SMALLINT    NOT NULL DEFAULT 50
-);
-
-CREATE TABLE ble_beacons (
-    beacon_uuid              UUID        PRIMARY KEY,
-    tenant_id                UUID        NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
-    venue_id                 VARCHAR(50) NOT NULL REFERENCES venues(venue_id),
-    format                   beacon_format_enum NOT NULL,
-    major                    SMALLINT,
-    minor                    SMALLINT,
-    battery_level            SMALLINT,
-    last_seen                TIMESTAMPTZ
 );
 
 CREATE TABLE courses (
@@ -166,7 +150,6 @@ CREATE TABLE attendance_logs (
     student_id               VARCHAR(50)  NOT NULL,
     checkin_timestamp        TIMESTAMPTZ  NOT NULL,
     device_fingerprint_hash  VARCHAR(128),
-    beacon_rssi              SMALLINT,
     sequence_number          INTEGER      NOT NULL,
     entry_method             entry_method_enum NOT NULL DEFAULT 'QR_SCAN',
     override_officer_id      VARCHAR(50),

@@ -6,7 +6,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cp brand.json backend/api-gateway/internal/handlers/brand.json
 cp brand.json frontend/admin-dashboards/src/brand.json
-cp brand.json frontend/coordinator-pwa/src/brand.json
 cp brand.json frontend/student-portal/src/brand.json
 cp brand.json frontend/coordinator-android/app/src/main/assets/brand.json
 echo "brand.json synced to backend + 3 web apps + Android."

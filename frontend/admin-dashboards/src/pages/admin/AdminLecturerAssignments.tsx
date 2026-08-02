@@ -102,9 +102,7 @@ export default function AdminLecturerAssignments() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>← Tenants</a>
-          <h2 style={{ margin: '4px 0 0' }}>Lecturer Assignments</h2>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Tenant: {tenantId}</div>
+          <h2 style={{ margin: '0' }}>Lecturer Assignments</h2>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a href={`/admin/tenants/${tenantId}/lecturers`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>

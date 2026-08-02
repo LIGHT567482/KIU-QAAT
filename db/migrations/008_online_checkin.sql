@@ -3,8 +3,8 @@
 -- Replaces the offline PWA-LAN scan path (which cannot work cross-platform: iOS
 -- can't host a server, phone hotspots cap at ~10 clients, and secure-context
 -- browser APIs require HTTPS — see plan async-napping-petal). Live check-in now
--- runs over HTTPS against the cloud. Proximity (was BLE RSSI, impossible on iOS
--- Safari) becomes a rotating 6-digit room code derived from a per-session secret.
+-- runs over HTTPS against the cloud. Proximity becomes a rotating 6-digit room
+-- code derived from a per-session secret.
 
 -- ─── Per-session check-in secret ──────────────────────────────────────────────
 -- The secret seeds the rotating room code (HMAC-based TOTP). It is created when

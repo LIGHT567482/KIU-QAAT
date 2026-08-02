@@ -86,10 +86,8 @@ TRUNCATE
   course_units,
   courses,
   venues,
-  ble_beacons,
   lecturer_attendance_logs,
   admin_audit_log,
-  tenant_rsa_keys,
   users
 RESTART IDENTITY CASCADE;
 DELETE FROM tenants;
@@ -99,8 +97,8 @@ DELETE FROM tenants;
 print("Creating tenant…")
 cur.execute("""
 INSERT INTO tenants (name, domain, rsa_key_id, attendance_threshold,
-                     checkin_window_minutes, auto_kill_minutes, rssi_threshold_dbm)
-VALUES ('Nairobi University of Technology', 'nut.ac.ke', 'pending', 75, 30, 180, -65)
+                     checkin_window_minutes, auto_kill_minutes)
+VALUES ('Nairobi University of Technology', 'nut.ac.ke', 'pending', 75, 30, 180)
 RETURNING tenant_id, student_hash_key
 """)
 tenant_id, student_hash_key = cur.fetchone()

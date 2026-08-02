@@ -32,8 +32,8 @@ type openSessionRequest struct {
 type openSessionResponse struct {
 	SessionID        string `json:"session_id"`
 	TenantID         string `json:"tenant_id"`
-	CheckinCode      string `json:"checkin_code"`  // rotating (lecturer)
-	StudentCode      string `json:"student_code"`  // static (students)
+	CheckinCode      string `json:"checkin_code"` // rotating (lecturer)
+	StudentCode      string `json:"student_code"` // static (students)
 	SecondsRemaining int    `json:"seconds_remaining"`
 	CheckinWindowEnd string `json:"checkin_window_end"`
 }
@@ -188,8 +188,8 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type checkinCodeResponse struct {
-	Code             string `json:"code"`           // rotating — the LECTURER's live digit code
-	StudentCode      string `json:"student_code"`   // static — the STUDENT room code (does not rotate)
+	Code             string `json:"code"`         // rotating — the LECTURER's live digit code
+	StudentCode      string `json:"student_code"` // static — the STUDENT room code (does not rotate)
 	SecondsRemaining int    `json:"seconds_remaining"`
 	SessionStatus    string `json:"session_status"`
 	CheckinCount     int    `json:"checkin_count"`

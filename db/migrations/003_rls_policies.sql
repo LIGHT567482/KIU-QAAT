@@ -9,7 +9,6 @@
 
 ALTER TABLE users                    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE venues                   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ble_beacons              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE courses                  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course_units             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE students_extended        ENABLE ROW LEVEL SECURITY;
@@ -29,9 +28,6 @@ CREATE POLICY tenant_isolation ON users
     FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 CREATE POLICY tenant_isolation ON venues
-    FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
-
-CREATE POLICY tenant_isolation ON ble_beacons
     FOR ALL USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 CREATE POLICY tenant_isolation ON courses

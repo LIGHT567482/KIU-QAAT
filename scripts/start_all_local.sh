@@ -52,24 +52,6 @@ PORT="8080" \
 PIDS+=($!)
 info "api-gateway → :8080 (PID ${PIDS[-1]})"
 
-# ── qr-generator (Node.js) ────────────────────────────────────────────────────
-info "Starting qr-generator..."
-# Source SMTP env if .env.smtp exists
-[ -f "$REPO/.env.smtp" ] && source "$REPO/.env.smtp"
-DB_URL="postgresql://qaat:changeme_db@127.0.0.1:5434/qaat?sslmode=disable" \
-RSA_PUBLIC_KEY_PATH="$REPO/keys/auth_public.pem" \
-KEY_ENCRYPTION_KEY="$KEK" \
-CHECKIN_BASE_URL="${CHECKIN_BASE_URL:-http://127.0.0.1:8080}" \
-SMTP_HOST="${SMTP_HOST:-localhost}" \
-SMTP_PORT="${SMTP_PORT:-1025}" \
-SMTP_SECURE="${SMTP_SECURE:-false}" \
-SMTP_USER="${SMTP_USER:-}" \
-SMTP_PASS="${SMTP_PASS:-}" \
-PORT="3002" \
-pnpm --dir "$REPO/services/qr-generator" dev &>/tmp/qr-generator.log &
-PIDS+=($!)
-info "qr-generator → :3002 (PID ${PIDS[-1]})"
-
 # ── sync-receiver ─────────────────────────────────────────────────────────────
 info "Building sync-receiver..."
 (cd "$REPO/services/sync-receiver" && go build -o sync-receiver . 2>&1)
@@ -91,7 +73,7 @@ sleep 3
 
 echo ""
 info "All services started. Health checks:"
-for svc in "8090/health:auth-service" "8080/health:api-gateway" "3002/health:qr-generator" "8083/health:sync-receiver"; do
+for svc in "8090/health:auth-service" "8080/health:api-gateway" "8083/health:sync-receiver"; do
   port="${svc%%/*}"; path="${svc%%:*}"; name="${svc##*:}"
   curl -sf "http://localhost:$port/${path#*/}" > /dev/null \
     && echo -e "  ${GREEN}OK${NC}  $name (:$port)" \
@@ -100,5 +82,5 @@ done
 
 echo ""
 echo "PIDs saved to /tmp/qaat-pids.txt"
-echo "Logs: /tmp/auth-service.log  /tmp/api-gateway.log  /tmp/qr-generator.log  /tmp/sync-receiver.log"
+echo "Logs: /tmp/auth-service.log  /tmp/api-gateway.log  /tmp/sync-receiver.log"
 echo "Stop: kill \$(cat /tmp/qaat-pids.txt)"

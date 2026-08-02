@@ -4,7 +4,7 @@ package handlers
 // student body (next.txt "biggest thing"). One offering per (program, session)
 // and one offering per coordinator per tenant. These run on the privileged
 // adminPool (cross-tenant platform op); tenant is taken from the path + scoped by
-// RequireOwnTenant for non-SUPER_ADMIN.
+// RequireOwnTenant.
 
 import (
 	"fmt"
@@ -135,26 +135,38 @@ func UpdateOffering(adminPool *pgxpool.Pool) http.HandlerFunc {
 		args := []interface{}{}
 		n := 1
 		if req.SessionType != nil {
-			set = append(set, fmt.Sprintf("session_type = $%d", n)); args = append(args, strings.TrimSpace(*req.SessionType)); n++
+			set = append(set, fmt.Sprintf("session_type = $%d", n))
+			args = append(args, strings.TrimSpace(*req.SessionType))
+			n++
 		}
 		if req.StudyYear != nil {
-			set = append(set, fmt.Sprintf("study_year = $%d", n)); args = append(args, *req.StudyYear); n++
+			set = append(set, fmt.Sprintf("study_year = $%d", n))
+			args = append(args, *req.StudyYear)
+			n++
 		}
 		if req.Semester != nil {
-			set = append(set, fmt.Sprintf("semester = $%d", n)); args = append(args, *req.Semester); n++
+			set = append(set, fmt.Sprintf("semester = $%d", n))
+			args = append(args, *req.Semester)
+			n++
 		}
 		if req.Level != nil {
-			set = append(set, fmt.Sprintf("level = $%d", n)); args = append(args, strings.TrimSpace(*req.Level)); n++
+			set = append(set, fmt.Sprintf("level = $%d", n))
+			args = append(args, strings.TrimSpace(*req.Level))
+			n++
 		}
 		if req.Intake != nil {
-			set = append(set, fmt.Sprintf("intake = $%d", n)); args = append(args, strings.TrimSpace(*req.Intake)); n++
+			set = append(set, fmt.Sprintf("intake = $%d", n))
+			args = append(args, strings.TrimSpace(*req.Intake))
+			n++
 		}
 		if req.CoordinatorID != nil {
 			val := interface{}(nil)
 			if strings.TrimSpace(*req.CoordinatorID) != "" {
 				val = strings.TrimSpace(*req.CoordinatorID)
 			}
-			set = append(set, fmt.Sprintf("coordinator_id = $%d", n)); args = append(args, val); n++
+			set = append(set, fmt.Sprintf("coordinator_id = $%d", n))
+			args = append(args, val)
+			n++
 		}
 		if len(set) == 0 {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "no fields to update"))

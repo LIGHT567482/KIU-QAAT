@@ -91,7 +91,6 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Messages',            path: '/dqa/messages' },
   ],
   QA_OFFICER: [
-    { label: 'Live Sessions',       path: '/qa/live' },
     { label: 'QA Reports',          path: '/qa/reports' },
     { label: 'Timetable',           path: '/qa/timetable' },
     { label: 'Student Attendance',  path: '/qa/student-attendance' },
@@ -288,9 +287,9 @@ const pwInp: React.CSSProperties = { width: '100%', padding: '10px', borderRadiu
 const pwBtn: React.CSSProperties = { padding: '10px 16px', background: 'var(--brand)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 
 // A back-button shown on every sub-page so the user can always go back to the
-// previous page. Hidden on the base role route (e.g. /vc, /qa/live, /admin).
+// previous page. Hidden on the base role route (e.g. /vc, /qa/reports, /admin).
 function GoBack({ navigate: nav, location: loc }: { navigate: ReturnType<typeof useNavigate>; location: ReturnType<typeof useLocation> }) {
-  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/live', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school']
+  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/reports', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school']
   const isBase = baseRoutes.some(b => loc.pathname === b || loc.pathname === b + '/')
   if (isBase) return null
   return (

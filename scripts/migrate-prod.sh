@@ -1,27 +1,37 @@
 #!/usr/bin/env bash
-# One-shot production migration for the single-institution + unified-app changes.
-# Applies db/migrations/050, 052, 053 to the Render Postgres, IN ORDER. All three are
-# idempotent (IF NOT EXISTS / last_login_at guards), so it is safe to re-run.
+# Apply every pending database migration to a remote (Render) Postgres.
 #
-# IMPORTANT: run this BEFORE you deploy the new code (push main). The new auth-service
-# reads users.force_password_change (added by 053) and register-device needs the table
-# from 050 — deploying the code first would break logins until these run.
+# This script used to carry a HAND-WRITTEN list of three filenames (050, 052, 053). Every migration
+# added afterwards had to be remembered and applied by hand — and several were not: 050 and 057-062
+# were absent from the running database while the code that needed them shipped, so features such as
+# "Schools & Departments" looked present in the app but could not load. The list is gone. The runner
+# reads db/migrations itself and records what it applied in a `schema_migrations` ledger, so it is
+# always complete, and re-running it only ever applies what is genuinely outstanding.
 #
 # Usage:
-#   ./scripts/migrate-prod.sh "postgres://qaat:...@dpg-...-a.oregon-postgres.render.com/qaat?sslmode=require"
-#   EXTERNAL_URL='postgres://...' ./scripts/migrate-prod.sh          # or via env
-#   ./scripts/migrate-prod.sh --yes "postgres://..."                 # skip the prompt
+#   ./scripts/migrate-prod.sh "postgres://qaat:...@dpg-...render.com/qaat?sslmode=require"
+#   EXTERNAL_URL='postgres://...' ./scripts/migrate-prod.sh
+#   ./scripts/migrate-prod.sh --status "postgres://..."   # report only, change nothing
+#   ./scripts/migrate-prod.sh --adopt  "postgres://..."   # FIRST run against a hand-migrated DB
+#   ./scripts/migrate-prod.sh --yes    "postgres://..."   # skip the confirmation prompt
 #
-# The URL is the Render dashboard -> qaat-postgres -> Connect -> "External Database URL".
+# The URL is the Render dashboard -> qaat-postgres -> Connect -> "External Database URL". It must be
+# the OWNER role (`qaat`), not `qaat_app`: migrations create tables, policies and roles, which the
+# RLS-confined data-plane role deliberately cannot do.
+#
+# Run this BEFORE deploying code that depends on a new migration.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# ── parse args: first non-flag is the URL; --yes/-y skips the confirmation ──
-URL=""; YES="no"
+URL=""; YES="no"; MODE="up"; EXTRA=""
 for a in "$@"; do
   case "$a" in
-    --yes|-y) YES="yes" ;;
-    *) [[ -z "$URL" ]] && URL="$a" ;;
+    --yes|-y)   YES="yes" ;;
+    --status)   MODE="status" ;;
+    --adopt)    EXTRA="--adopt" ;;
+    --dry-run)  EXTRA="--dry-run" ;;
+    -h|--help)  sed -n '2,21p' "$0"; exit 0 ;;
+    *)          [[ -z "$URL" ]] && URL="$a" ;;
   esac
 done
 URL="${URL:-${EXTERNAL_URL:-${DBURL:-}}}"
@@ -31,47 +41,34 @@ if [[ -z "${URL:-}" ]]; then
   echo "  Render dashboard -> qaat-postgres -> Connect -> External Database URL" >&2
   exit 1
 fi
-command -v psql >/dev/null || { echo "ERROR: psql not found — install the postgresql-client package." >&2; exit 1; }
+command -v go >/dev/null || { echo "ERROR: go not found — it builds the migration runner." >&2; exit 1; }
+[[ -d db/migrations ]] || { echo "ERROR: db/migrations not found — run this from the repo." >&2; exit 1; }
 
-MIGRATIONS=(
-  db/migrations/050_student_device_bindings.sql
-  db/migrations/052_seed_default_passwords.sql
-  db/migrations/053_force_password_change.sql
-)
-for f in "${MIGRATIONS[@]}"; do
-  [[ -f "$f" ]] || { echo "ERROR: missing $f — run this from the repo root." >&2; exit 1; }
-done
+MIGRATIONS_DIR="$PWD/db/migrations"
+run() { ( cd backend/api-gateway && go run ./cmd/migrate -db "$URL" -dir "$MIGRATIONS_DIR" "$@" ); }
 
-echo "-> testing connection ..."
-psql "$URL" -v ON_ERROR_STOP=1 -tAc 'SELECT 1' >/dev/null
-echo "   connected."
+# Always report before touching anything.
+run status
+
+if [[ "$MODE" == "status" ]]; then exit 0; fi
 
 echo
-echo "About to apply, IN ORDER:"
-for f in "${MIGRATIONS[@]}"; do echo "   - $f"; done
+echo "Each pending migration is applied in its own transaction and recorded in schema_migrations."
+echo "Anything already recorded is skipped, so this is safe to re-run."
 echo
-echo "WARNING: 052/053 reset EVERY never-signed-in student/lecturer to the default password"
-echo "         (\"Student\" / \"Lecturer\") and force a change on first login. Already-changed"
-echo "         passwords are left untouched (last_login_at guard). Safe to re-run."
+echo "NOTE: if 052/053 are among the pending list, they reset EVERY never-signed-in student/lecturer"
+echo "      to the default password (\"Student\" / \"Lecturer\") and force a change at first login."
+echo "      Already-changed passwords are left alone (last_login_at guard)."
+[[ -n "$EXTRA" ]] && echo "Extra flag: $EXTRA"
 if [[ "$YES" != "yes" ]]; then
   read -r -p "Proceed? [y/N] " ans
   [[ "${ans:-}" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
 fi
 
-for f in "${MIGRATIONS[@]}"; do
-  echo "-> applying $f"
-  psql "$URL" -v ON_ERROR_STOP=1 -q -f "$f"
-done
+if [[ -n "$EXTRA" ]]; then run up "$EXTRA"; else run up; fi
 
 echo
-echo "-> verifying schema ..."
-psql "$URL" -v ON_ERROR_STOP=1 -tAc \
-  "SELECT 'student_device_bindings table: ' || (to_regclass('public.student_device_bindings') IS NOT NULL)
-   || '  | users.force_password_change: ' ||
-   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='force_password_change')
-   || '  | attend_block_until: ' ||
-   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='student_device_bindings' AND column_name='attend_block_until')"
-
+echo "-> verifying the features that depend on the newest migrations ..."
+run status | tail -4
 echo
-echo "Done. Now deploy the code so the services match the schema:"
-echo "   git checkout main && git merge --ff-only fix/manifest-crash-timetable-password-hotspot && git push origin main"
+echo "Done. Deploy the code so the services match the schema."

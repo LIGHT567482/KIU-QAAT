@@ -40,7 +40,7 @@ DO $$
 DECLARE
     t text;
     tables text[] := ARRAY[
-        'users', 'venues', 'ble_beacons', 'courses', 'course_units',
+        'users', 'venues', 'courses', 'course_units',
         'students_extended', 'sessions', 'attendance_logs',
         'lecturer_attendance_logs', 'hardware_vault', 'admin_audit_log',
         'sync_uploads', 'tenant_rsa_keys', 'student_attendance_summary'

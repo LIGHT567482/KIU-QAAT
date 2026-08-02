@@ -10,6 +10,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -83,7 +84,9 @@ func ListDepartments(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 		schoolID := r.URL.Query().Get("school_id")
-		q := `SELECT d.department_id::text, d.school_id::text, d.name, d.kind
+		// school_id is NULL for a standalone SUPPORT department (Finance, ICT, Library…),
+		// which belongs to no school — COALESCE so it scans, and reaches the UI as "".
+		q := `SELECT d.department_id::text, COALESCE(d.school_id::text,''), d.name, d.kind
 		      FROM departments d WHERE d.tenant_id = $1`
 		args := []interface{}{tenantID}
 		if schoolID != "" {
@@ -122,17 +125,27 @@ func CreateDepartment(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Name     string `json:"name"`
 			Kind     string `json:"kind"`
 		}
-		if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.SchoolID == "" {
-			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "school_id and name are required"))
+		if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "name is required"))
 			return
 		}
+		req.Name = strings.TrimSpace(req.Name)
 		if req.Kind == "" {
 			req.Kind = "ACADEMIC"
+		}
+		// A SUPPORT department (Finance, Admissions, Bursary, Library, ICT…) is
+		// institution-wide and belongs to no school, so school_id may be omitted.
+		// An ACADEMIC one still has to name its school.
+		req.SchoolID = strings.TrimSpace(req.SchoolID)
+		if req.SchoolID == "" && req.Kind != "SUPPORT" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+				"school_id is required for an academic department"))
+			return
 		}
 		var id string
 		err := adminPool.QueryRow(r.Context(), `
 			INSERT INTO departments (tenant_id, school_id, name, kind)
-			VALUES ($1, $2::uuid, $3, $4) RETURNING department_id::text`,
+			VALUES ($1, NULLIF($2,'')::uuid, $3, $4) RETURNING department_id::text`,
 			tenantID, req.SchoolID, req.Name, req.Kind).Scan(&id)
 		if err != nil {
 			writeJSON(w, http.StatusConflict, errBody("CONFLICT", "department already exists: "+err.Error()))

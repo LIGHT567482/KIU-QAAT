@@ -11,9 +11,8 @@ const (
 	RoleVC          Role = "VC"
 	RoleDVC         Role = "DVC" // Deputy Vice-Chancellor (oversight tier)
 	RoleAdmin       Role = "ADMIN"
-	RoleSuperAdmin  Role = "SUPER_ADMIN" // platform owner (registers tenants, configures branding)
-	RoleStudent     Role = "STUDENT"     // learner; logs in by scanning their personal QR
-	RoleLecturer    Role = "LECTURER"    // logs into the lecturer dashboard (read-only attendance)
+	RoleStudent     Role = "STUDENT"  // learner; logs in by scanning their personal QR
+	RoleLecturer    Role = "LECTURER" // logs into the lecturer dashboard (read-only attendance)
 )
 
 // MFARequired returns true for roles that mandate TOTP.

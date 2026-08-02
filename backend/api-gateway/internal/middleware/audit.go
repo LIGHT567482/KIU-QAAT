@@ -53,8 +53,8 @@ func AuditLog(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			}
 
 			tenantID := GetTenantID(r.Context())
-			actorID  := GetUserID(r.Context())
-			action   := r.Method + " " + r.URL.Path
+			actorID := GetUserID(r.Context())
+			action := r.Method + " " + r.URL.Path
 
 			var payload interface{}
 			if len(bodySnap) > 0 {

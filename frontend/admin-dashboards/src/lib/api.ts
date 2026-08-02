@@ -91,18 +91,6 @@ export interface EligibilityRecord {
   units:         EligibilityUnit[]
 }
 
-export interface LiveSession {
-  session_id:       string
-  coordinator_id:   string
-  unit_id:          string
-  unit_name:        string
-  venue_id:         string
-  session_status:   string
-  student_count:    number
-  gate_open_time:   string
-  audit_flags:      string[]
-}
-
 export interface VCOverview {
   total_sessions_scheduled: number
   total_sessions_actual:    number

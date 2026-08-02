@@ -1,10 +1,9 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
-// email is OPTIONAL — used only to email the lecturer their permanent career QR.
+// email is OPTIONAL — correspondence only; the staff ID is the lecturer's identity.
 const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'department', 'title', 'gender']
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
@@ -46,19 +45,7 @@ export default function AdminLecturers() {
     } catch (e) { alert(e instanceof Error ? e.message : 'Could not create enrolment link') }
   }
 
-  // The lecturer's personal QR — scanning it signs them into their dashboard.
-  const [qr, setQr] = useState<{ name: string; url: string; staff_id: string } | null>(null)
-  const [qrImg, setQrImg] = useState('')
-  async function showQR(l: Lecturer) {
-    try {
-      const res = await api.get<{ full_name: string; url: string; staff_id: string }>(`/api/v1/admin/tenants/${tenantId}/lecturers/${l.lecturer_id}/qr`)
-      setQr({ name: res.full_name, url: res.url, staff_id: res.staff_id })
-    } catch (e) { alert(e instanceof Error ? e.message : 'Could not load QR') }
-  }
-  useEffect(() => {
-    if (!qr) { setQrImg(''); return }
-    QRCode.toDataURL(qr.url, { width: 320, margin: 2, errorCorrectionLevel: 'H' }).then(setQrImg).catch(() => setQrImg(''))
-  }, [qr])
+  // Lecturers sign in with their staff ID (passwordless) — no QR is issued.
 
   const titlesQ = useQuery<{ titles: string[] }>(() => api.get('/api/v1/admin/settings/titles'))
   const titles = (titlesQ.status === 'ok' ? titlesQ.data?.titles : null) ?? []
@@ -125,9 +112,7 @@ export default function AdminLecturers() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>← Tenants</a>
-          <h2 style={{ margin: '4px 0 0' }}>Lecturers</h2>
-          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Tenant: {tenantId}</div>
+          <h2 style={{ margin: '0' }}>Lecturers</h2>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={editPrefix} style={btnSmall} title="Format for auto-generated staff IDs">
@@ -165,7 +150,7 @@ export default function AdminLecturers() {
               </select>
             </label>
             <Input label="Full name *" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} />
-            <Input label="Email (optional — emails them their QR)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
+            <Input label="Email (optional)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
             <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+256 700 000000" />
             <Input label="Department" value={form.department} onChange={v => setForm(f => ({ ...f, department: v }))} placeholder="Computer Science" />
             <Input label="Staff ID (optional — auto-generated if left blank)" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} placeholder="leave blank to auto-generate e.g. KIU/STAFF/00001" />
@@ -234,7 +219,6 @@ export default function AdminLecturers() {
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(l)} style={btnSmall}>Edit</button>
                 <button onClick={() => makeEnroll(l)} style={{ ...btnSmall, marginLeft: 6, background: '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}>Enroll FP</button>
-                <button onClick={() => showQR(l)} style={{ ...btnSmall, marginLeft: 6, background: '#fef9c3', borderColor: '#fde68a', color: '#854d0e' }} title="Show this lecturer's QR — scan to open their dashboard">QR</button>
               </td>
             </tr>
           ))}
@@ -247,24 +231,6 @@ export default function AdminLecturers() {
           )}
         </tbody>
       </table>
-
-      {qr && (
-        <div onClick={() => setQr(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 380, width: '100%', textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 2px' }}>{qr.name}</h3>
-            {qr.staff_id && <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 12 }}>{qr.staff_id}</div>}
-            {qrImg
-              ? <img src={qrImg} alt="Lecturer QR" style={{ width: 280, height: 280 }} />
-              : <p style={{ color: 'var(--muted)' }}>Generating QR…</p>}
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0' }}>The lecturer scans this with their phone to open their attendance dashboard — every unit they teach, separated and filterable. No password.</p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-              {qrImg && <a href={qrImg} download={`lecturer-qr-${qr.staff_id || qr.name}.png`} style={{ ...btnPrimary, textDecoration: 'none' }}>Download</a>}
-              <button onClick={() => { navigator.clipboard?.writeText(qr.url) }} style={btnSmall}>Copy link</button>
-              <button onClick={() => setQr(null)} style={btnSmall}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {enroll && (
         <div onClick={() => setEnroll(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>

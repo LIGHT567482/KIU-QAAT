@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
-// email is OPTIONAL — supply it only to email a student their QR; identity is the reg-no.
+// email is OPTIONAL — identity is the reg-no; email is only for correspondence.
 const CSV_COLS = ['student_id', 'full_name', 'email', 'course_id', 'academic_year', 'current_year', 'semester', 'intake_session', 'level']
 function toCSV(rows: Record<string, unknown>[], cols: string[]): string {
   const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
@@ -55,12 +55,9 @@ export default function AdminStudents() {
     () => api.get(`/api/v1/admin/tenants/${tenantId}/offerings`),
     [tenantId],
   )
-  // This tenant's student-progress portal link (carries the institution domain so
-  // a student only ever sees THIS institution's records).
+  // Students reach their own progress view from inside the app, so no share-link is
+  // surfaced here — only the institution's active academic year is needed.
   const brandQ = useQuery<{ domain: string; active_academic_year?: string }>(() => api.get('/api/v1/branding'))
-  const portalLink = brandQ.data?.domain
-    ? `${location.protocol}//${location.hostname}:3003/?org=${brandQ.data.domain}`
-    : ''
   // The institution's active academic year (set once in Settings). Students inherit
   // it — no need to re-type it per registration, same as the cohort-derived fields.
   const activeAY = brandQ.data?.active_academic_year ?? ''
@@ -89,7 +86,6 @@ export default function AdminStudents() {
   }, [activeAY])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [qrFor, setQrFor] = useState<{ id: string; name: string } | null>(null)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
 
   async function handleDelete(s: Student) {
@@ -230,9 +226,7 @@ export default function AdminStudents() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
-          <h2 style={{ margin: '4px 0 0' }}>Students</h2>
-          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Tenant: {tenantId}</p>
+          <h2 style={{ margin: '0' }}>Students</h2>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <button onClick={() => download('students_template.csv', CSV_COLS.join(',') + '\n')} style={btnGhost} title="Download a blank CSV with the required columns">Template</button>
@@ -247,15 +241,6 @@ export default function AdminStudents() {
           </button>
         </div>
       </div>
-
-      {portalLink && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-          <span style={{ fontSize: 13, color: '#1e40af', fontWeight: 600 }}>📱 Student progress portal (share with your students):</span>
-          <code style={{ flex: '1 1 240px', minWidth: 0, fontSize: 12, color: '#1e3a8a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{portalLink}</code>
-          <button onClick={() => { navigator.clipboard?.writeText(portalLink); }} style={{ ...btnGhost, padding: '6px 12px' }}>Copy link</button>
-          <span style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted)' }}>Students open this link and enter only their registration number. The link is scoped to this institution, so it can only show your students.</span>
-        </div>
-      )}
 
       {importMsg && (
         <div style={{ background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
@@ -331,12 +316,12 @@ export default function AdminStudents() {
           <h3 style={{ margin: '0 0 16px' }}>Register Student</h3>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: -8, marginBottom: 16 }}>
             Only the registration number and name are needed — the student is identified by their reg-no.
-          </p>
+          </p>{/* no QR: check-in is by typed registration number */}
           {error && <div style={errorBox}>{error}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <Input label="Registration Number" value={form.student_id} onChange={v => setForm(f => ({ ...f, student_id: v }))} placeholder="e.g. NUT/CS/2024/001" />
             <Input label="Full Name" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} placeholder="e.g. Jane Doe" />
-            <Input label="Email (optional — emails them their QR)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="leave blank to skip" />
+            <Input label="Email (optional)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="leave blank to skip" />
 
             {/* Course → Session resolves the offering; Level is the student's own
                 attribute. */}
@@ -409,7 +394,7 @@ export default function AdminStudents() {
             </label>
           </div>
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 0' }}>
-            The student is identified by their registration number. Their attendance QR is available from the “Show QR” button after registration.
+            The student is identified by their registration number — that is what they type to check in and to open their progress view in the app.
           </p>
           <button
             onClick={handleCreate}
@@ -453,7 +438,7 @@ export default function AdminStudents() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Reg No.', 'Name', 'Course', 'Year/Sem', 'Intake', 'Status', 'QR', 'Actions'].map(h => (
+            {['Reg No.', 'Name', 'Course', 'Year/Sem', 'Intake', 'Status', 'Actions'].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -475,12 +460,6 @@ export default function AdminStudents() {
                   {s.enrollment_status}
                 </span>
               </td>
-              <td style={{ padding: '10px 12px' }}>
-                <button onClick={() => setQrFor({ id: s.student_id, name: s.full_name })}
-                  style={{ padding: '4px 10px', border: '1px solid #e2e8f0', borderRadius: 4, cursor: 'pointer', fontSize: 12, background: '#fff' }}>
-                  Show QR
-                </button>
-              </td>
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => setEditStudent(s)}
                   style={{ padding: '4px 10px', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 4, cursor: 'pointer', fontSize: 12, background: '#eef2ff', marginRight: 6 }}>
@@ -495,7 +474,7 @@ export default function AdminStudents() {
           ))}
           {status === 'ok' && list.length === 0 && (
             <tr>
-              <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+              <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
                 {(students ?? []).length === 0
                   ? 'No students registered yet. Click "+ Register Student" to add one.'
                   : 'No students match the search.'}
@@ -511,7 +490,6 @@ export default function AdminStudents() {
         </p>
       )}
 
-      {qrFor && <QrModal tenantId={tenantId!} student={qrFor} onClose={() => setQrFor(null)} />}
       {editStudent && (
         <EditStudentModal
           tenantId={tenantId!}
@@ -601,43 +579,6 @@ function EditStudentModal({ tenantId, student, offerings, intakeOptions, onClose
 
 const editLabel: React.CSSProperties = { display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', margin: '12px 0 4px' }
 const editSelect: React.CSSProperties = { width: '100%', padding: '9px 10px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', background: '#fff' }
-
-// Live student QR — rendered server-side in the tenant brand colour; the tenant
-// logo is overlaid in the centre via CSS. The QR opens the student portal and
-// logs the student in passwordlessly when scanned.
-function QrModal({ tenantId, student, onClose }: { tenantId: string; student: { id: string; name: string }; onClose: () => void }) {
-  const [data, setData] = useState<{ image: string; logo_url: string; url: string } | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => {
-    api.post<{ image: string; logo_url: string; url: string }>(`/api/v1/qr/token`, { student_id: student.id, tenant_id: tenantId })
-      .then(setData).catch(e => setErr(e instanceof Error ? e.message : 'Failed to load QR'))
-  }, [student.id, tenantId])
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, textAlign: 'center', maxWidth: 380, width: '100%' }}>
-        <h3 style={{ margin: '0 0 4px' }}>{student.name}</h3>
-        <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 16 }}>{student.id}</div>
-        {err && <div style={errorBox}>{err}</div>}
-        {!data && !err && <p style={{ color: 'var(--muted)' }}>Generating QR…</p>}
-        {data && (
-          <>
-            <div style={{ position: 'relative', display: 'inline-block' }}>
-              <img src={data.image} alt="Student QR" style={{ width: 280, height: 280, display: 'block' }} />
-              {data.logo_url && (
-                <img src={data.logo_url} alt="" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 56, height: 56, objectFit: 'contain', background: '#fff', borderRadius: 8, padding: 4, boxShadow: '0 0 0 3px #fff' }} />
-              )}
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0 16px' }}>Scan with a phone camera to open the attendance portal.</p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-              <a href={data.image} download={`qr-${student.id}.png`} style={{ ...btnPrimary, textDecoration: 'none' }}>Download</a>
-              <button onClick={onClose} style={btnGhost}>Close</button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
 
 function FilterSelect({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]

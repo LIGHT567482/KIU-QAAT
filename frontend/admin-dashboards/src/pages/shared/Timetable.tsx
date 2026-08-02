@@ -112,8 +112,7 @@ export default function Timetable() {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
-        <h2 style={{ margin: '4px 0 2px' }}>Timetable</h2>
+        <h2 style={{ margin: '0 0 2px' }}>Timetable</h2>
         <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>Weekly lecture schedule per cohort. Import the whole institution's timetable, or edit a cohort below.</p>
       </div>
 

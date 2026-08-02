@@ -19,7 +19,6 @@ import (
 // reverse-proxies to.
 type Upstreams struct {
 	AuthService    string
-	QRGenerator    string
 	SessionManager string
 	SyncReceiver   string
 }
@@ -35,7 +34,6 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	// JWT + tenant are verified at the gateway; the proxy forwards identity as
 	// headers (X-Tenant-ID / X-User-ID / X-Role) to the service.
 	authProxy := mustProxy(upstreams.AuthService)
-	qrProxy := mustProxy(upstreams.QRGenerator)
 	sessionProxy := mustProxy(upstreams.SessionManager)
 	syncProxy := mustProxy(upstreams.SyncReceiver)
 
@@ -58,18 +56,6 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.Post("/internal/cron/notify-no-shows", handlers.CronNotifyNoShows(adminPool))
 	r.Get("/metrics", promhttp.Handler().ServeHTTP) // Prometheus scrape endpoint
 
-	// Student check-in is public: students have no JWT. It is authenticated by
-	// the signed QR + rotating room code inside the handler. A per-IP limiter
-	// blunts scripted abuse / room-code brute force.
-	r.With(middleware.PublicIPRateLimit(5, 10)).
-		Post("/api/v1/checkin", handlers.Checkin(pool))
-	r.Get("/checkin", handlers.CheckinPage)
-
-	// Passwordless portal login by scanning the student's personal QR (public:
-	// the QR is the credential, cryptographically verified inside the handler).
-	r.With(middleware.PublicIPRateLimit(5, 20)).
-		Post("/api/v1/student/qr-login", handlers.StudentQRLogin(adminPool))
-
 	// Single passwordless student progress portal: enter reg-no → see attendance.
 	r.With(middleware.PublicIPRateLimit(10, 40)).
 		Get("/api/v1/student/progress", handlers.StudentProgressByReg(adminPool))
@@ -90,8 +76,8 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		Post("/api/v1/lecturer/gate-scan", handlers.LecturerGateScan(adminPool, rdb))
 	r.Get("/lecturer/checkin", handlers.LecturerCheckinPage)
 	r.Get("/lecturer/enroll", handlers.LecturerEnrollPage)
-		r.With(middleware.PublicIPRateLimit(10, 60)).
-			Get("/api/v1/lecturer/session-info", handlers.LecturerSessionInfo(adminPool))
+	r.With(middleware.PublicIPRateLimit(10, 60)).
+		Get("/api/v1/lecturer/session-info", handlers.LecturerSessionInfo(adminPool))
 
 	// Lecturer biometric (WebAuthn phone passkey) — enrol once, verify per scan.
 	r.With(middleware.PublicIPRateLimit(10, 60)).Post("/api/v1/lecturer/webauthn/enroll/begin", handlers.LecturerEnrollBegin(adminPool, rdb))
@@ -99,22 +85,12 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.With(middleware.PublicIPRateLimit(20, 60)).Post("/api/v1/lecturer/webauthn/assert/begin", handlers.LecturerAssertBegin(adminPool, rdb))
 	r.With(middleware.PublicIPRateLimit(20, 60)).Post("/api/v1/lecturer/webauthn/assert/finish", handlers.LecturerAssertFinish(adminPool, rdb))
 
-	// Lecturer passwordless dashboard login by scanning their personal QR (public:
-	// the HMAC-signed QR is the credential, verified inside the handler).
-	r.With(middleware.PublicIPRateLimit(10, 60)).
-		Post("/api/v1/lecturer/qr-login", handlers.LecturerQRLogin(adminPool))
-
 	// Lecturer PORTAL — passwordless, read-only. Enter institution + staff ID and
 	// search the attendance logs of your own units (rate-limited to slow enumeration).
 	r.With(middleware.PublicIPRateLimit(30, 60)).
 		Get("/api/v1/lecturer-portal/overview", handlers.LecturerPortalOverview(adminPool))
 	r.With(middleware.PublicIPRateLimit(30, 60)).
 		Get("/api/v1/lecturer-portal/attendance", handlers.LecturerPortalAttendance(adminPool))
-
-	// Coordinator passwordless dashboard login by scanning their personal QR (public:
-	// the HMAC-signed QR encodes coordinator_id|offering_id|tenant_id).
-	r.With(middleware.PublicIPRateLimit(10, 60)).
-		Post("/api/v1/coordinator/qr-login", handlers.CoordinatorQRLogin(adminPool))
 
 	// Emergency standby coordinator login: a student exchanges code + reg-no for a
 	// COORDINATOR token (issued for the absent coordinator) to run that day's session.
@@ -188,23 +164,19 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// ── Cross-dimension lecturer-teaching report (QA oversight) ───────────
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep)).
 			Get("/api/v1/reports/lecturer-teaching", handlers.LecturerTeachingReport(pool))
+		// Same report, same filters, taken away as a spreadsheet or a PDF.
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			Get("/api/v1/reports/lecturer-teaching/export.xlsx", handlers.LecturerTeachingExport(pool, "xlsx"))
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			Get("/api/v1/reports/lecturer-teaching/export.csv", handlers.LecturerTeachingExport(pool, "csv"))
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC, middleware.RoleAdmin, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			Get("/api/v1/reports/lecturer-teaching/export.pdf", handlers.LecturerTeachingExport(pool, "pdf"))
 
 		// ── Employee biometric no-shows (detect + notify by email + WhatsApp) ─
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleAdmin)).
 			Get("/api/v1/qa/employee-no-shows", handlers.EmployeeNoShows(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleAdmin)).
 			Post("/api/v1/qa/notify-no-shows", handlers.NotifyNoShows(adminPool))
-
-		// ── QR Management (→ qr-generator) ────────────────────────────────────
-		r.With(middleware.RequireRole(middleware.RoleDQADirector, middleware.RoleAdmin)).
-			Post("/api/v1/qr/generate/batch", qrProxy)
-
-		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
-			Post("/api/v1/qr/reissue", qrProxy)
-
-		// Live QR token for display in the admin students table (no email).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
-			Post("/api/v1/qr/token", qrProxy)
 
 		// ── Session Management (→ session-manager) ────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
@@ -224,10 +196,6 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Live/active sessions the student may attend right now (#4a).
 		r.With(middleware.RequireRole(middleware.RoleStudent)).
 			Get("/api/v1/student/live-sessions", handlers.StudentLiveSessions(pool))
-		// Student's own QR code (signed token + image) for download from the portal.
-		r.With(middleware.RequireRole(middleware.RoleStudent)).
-			Get("/api/v1/student/my-qr", handlers.StudentMyQR(adminPool))
-
 		// ── Synchronisation (→ sync-receiver) ─────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Post("/api/v1/sync/init", syncProxy)
@@ -269,7 +237,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// ── Super-admin ELIMINATED (single-institution build) ────────────────
 		// Tenant lifecycle + branding routes are gone: there is ONE institution, and
 		// branding now comes from brand.json (served by GetBranding/GetPublicBranding),
-		// not a runtime editor. The SUPER_ADMIN role + its handlers are left dormant.
+		// not a runtime editor.
 
 		// ── Tenant ADMIN: own-tenant settings ────────────────────────────────
 		// Attendance threshold stays editable inside the tenant — by the tenant
@@ -318,62 +286,62 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Post("/api/v1/admin/settings/users-passcode/verify", handlers.VerifyUsersPasscode(pool))
 
-		// ── Per-tenant admin sub-resources (ADMIN for own tenant; SUPER_ADMIN any).
+		// ── Per-tenant admin sub-resources (ADMIN, confined to their own tenant).
 		// RequireOwnTenant blocks a tenant ADMIN from managing another tenant by
 		// changing the {tenant_id} in the path (these run on the no-RLS adminPool).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/users", handlers.ListTenantUsers(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/users", handlers.CreateUser(adminPool))
 		// ── Schools/colleges + departments (org foundation) ───────────────────
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/schools", handlers.ListSchools(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/schools", handlers.CreateSchool(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/schools/{school_id}", handlers.DeleteSchool(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/departments", handlers.ListDepartments(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/departments", handlers.CreateDepartment(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/departments/{department_id}", handlers.DeleteDepartment(adminPool))
 
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/courses", handlers.ListCourses(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/courses", handlers.CreateCourse(adminPool))
 		// Curriculum bulk import/export (courses · units/roadmap · lecturer mapping).
 		// Each export.xlsx doubles as the import template.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/courses/import", handlers.ImportCourses(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/courses/export.xlsx", handlers.ExportCoursesXLSX(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/course-units/import", handlers.ImportCourseUnits(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/course-units/export.xlsx", handlers.ExportCourseUnitsXLSX(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturer-assignments/import", handlers.ImportLecturerAssignmentsFile(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturer-assignments/export.xlsx", handlers.ExportLecturerAssignmentsXLSX(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Patch("/api/v1/admin/tenants/{tenant_id}/academic-period", handlers.UpdateTenantAcademicPeriod(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/academic-period/advance", handlers.AdvanceAcademicPeriod(adminPool))
 		// End-of-semester clear: intake-scoped, archive-first wipe (password-gated).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/clear-semester-data", handlers.ClearSemesterData(adminPool))
 		// Semester archives (zips created by the clear) — list / download / delete.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/semester-archives", handlers.ListSemesterArchives(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id}/download", handlers.DownloadSemesterArchive(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id}", handlers.DeleteSemesterArchive(adminPool))
 		// ── Rooms / room codes (the venues registry) ──────────────────────────
 		// /venues stays as the legacy alias of /rooms so older clients keep working.
-		adminOwn := chi.Middlewares{middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant}
+		adminOwn := chi.Middlewares{middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant}
 		for _, base := range []string{"/api/v1/admin/tenants/{tenant_id}/rooms", "/api/v1/admin/tenants/{tenant_id}/venues"} {
 			r.With(adminOwn...).Get(base, handlers.ListRooms(adminPool))
 			r.With(adminOwn...).Post(base, handlers.CreateRoom(adminPool))
@@ -382,104 +350,104 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			r.With(adminOwn...).Post(base+"/import", handlers.ImportRooms(adminPool))
 			r.With(adminOwn...).Get(base+"/export.xlsx", handlers.ExportRoomsXLSX(adminPool))
 		}
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/students", handlers.ListStudents(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/students", handlers.CreateStudent(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Patch("/api/v1/admin/tenants/{tenant_id}/students", handlers.UpdateStudent(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Delete("/api/v1/admin/tenants/{tenant_id}/students", handlers.DeleteStudent(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/students/export.xlsx", handlers.ExportStudentsXLSX(adminPool))
 
 		// Coordinators directory (contacts + course/level/session) + Excel import/export.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/coordinators", handlers.ListCoordinators(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/coordinators/export.xlsx", handlers.ExportCoordinatorsXLSX(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/coordinators/import", handlers.ImportCoordinators(adminPool))
-		// The coordinator's personal QR (scan → passwordless dashboard login scoped to their cohort).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-			Get("/api/v1/admin/tenants/{tenant_id}/coordinators/{user_id}/qr", handlers.AdminCoordinatorQR(adminPool))
 
 		// Offerings = (program + study session), each with its own coordinator (own tenant).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/offerings", handlers.ListOfferings(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/offerings", handlers.CreateOffering(adminPool))
 		// Apply one cohort to EVERY course at once (coordinators assigned later).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/cohorts/apply-all", handlers.ApplyCohortAllCourses(adminPool))
 
 		// Admin — lecturers + assignments (own tenant)
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturers", handlers.ListLecturers(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturers", handlers.CreateLecturer(adminPool))
 		// Bulk lecturer import (CSV/XLSX) + filtered export.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturers/import", handlers.ImportLecturers(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturers/export.xlsx", handlers.ExportLecturersXLSX(adminPool))
 		// Issue a one-time biometric-enrolment link the lecturer opens on their phone.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}/enroll-link", handlers.AdminLecturerEnrollLink(adminPool, rdb))
-		// The lecturer's personal QR (scan → passwordless dashboard login).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-			Get("/api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}/qr", handlers.AdminLecturerQR(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturer-assignments", handlers.ListLecturerAssignments(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturer-assignments", handlers.CreateLecturerAssignment(adminPool))
 
 		// Admin — resource-by-id routes (no {tenant_id} in path). The resource IDs
 		// are unguessable and cannot be enumerated across tenants via the now
 		// own-tenant-scoped listing endpoints above.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/users/{user_id}/status", handlers.SetUserStatus(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/users/{user_id}", handlers.UpdateUser(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Delete("/api/v1/admin/users/{user_id}", handlers.DeleteUser(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Get("/api/v1/admin/courses/{course_id}/units", handlers.ListCourseUnits(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Post("/api/v1/admin/courses/{course_id}/units", handlers.CreateCourseUnit(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/courses/{course_id}", handlers.UpdateCourse(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/courses/{course_id}/units/{unit_id}", handlers.UpdateCourseUnit(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Get("/api/v1/admin/courses/{course_id}/roadmap", handlers.GetCourseRoadmap(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Delete("/api/v1/admin/lecturer-assignments/{assignment_id}", handlers.DeleteLecturerAssignment(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Delete("/api/v1/admin/offerings/{offering_id}", handlers.DeleteOffering(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/offerings/{offering_id}", handlers.UpdateOffering(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Patch("/api/v1/admin/lecturers/{lecturer_id}", handlers.UpdateLecturer(adminPool))
 
-			// Admin — employees (general staff) registry + tablet attendance (own tenant).
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Get("/api/v1/admin/tenants/{tenant_id}/employees", handlers.ListEmployees(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Post("/api/v1/admin/tenants/{tenant_id}/employees", handlers.CreateEmployee(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Post("/api/v1/admin/tenants/{tenant_id}/employees/import", handlers.ImportEmployees(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Get("/api/v1/admin/tenants/{tenant_id}/employees/export.xlsx", handlers.ExportEmployeesXLSX(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
-				Patch("/api/v1/admin/employees/{id}", handlers.UpdateEmployee(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin)).
-				Delete("/api/v1/admin/employees/{id}", handlers.DeleteEmployee(adminPool))
-			// Tablet punch import + the admin attendance report (with auto-comments).
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Post("/api/v1/admin/tenants/{tenant_id}/employee-attendance/import", handlers.ImportEmployeePunches(adminPool))
-			r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
-				Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance", handlers.EmployeeAttendanceReport(adminPool))
+		// Admin — employees (general staff) registry + tablet attendance (own tenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employees", handlers.ListEmployees(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/employees", handlers.CreateEmployee(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/employees/import", handlers.ImportEmployees(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employees/export.xlsx", handlers.ExportEmployeesXLSX(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Patch("/api/v1/admin/employees/{id}", handlers.UpdateEmployee(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin)).
+			Delete("/api/v1/admin/employees/{id}", handlers.DeleteEmployee(adminPool))
+		// Tablet punch import + the admin attendance report (with auto-comments).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/employee-attendance/import", handlers.ImportEmployeePunches(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance", handlers.EmployeeAttendanceReport(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance/export.xlsx", handlers.EmployeeAttendanceExport(adminPool, "xlsx"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance/export.csv", handlers.EmployeeAttendanceExport(adminPool, "csv"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance/export.pdf", handlers.EmployeeAttendanceExport(adminPool, "pdf"))
 
 		// Coordinator — lecturer dropdown for a course unit
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
@@ -552,9 +520,9 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/coordinator/lecturers", handlers.CoordinatorLecturers(adminPool))
 
 		// Admin — lecturer attendance logs + summary (own tenant)
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturer-attendance", handlers.GetLecturerAttendanceLogs(adminPool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturer-attendance/summary", handlers.GetLecturerAttendanceSummary(adminPool))
 
 		// ── Exports ──────────────────────────────────────────────────────────
@@ -569,7 +537,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Post("/api/v1/import/trigger", handlers.ImportTrigger(pool))
 		// Bulk timetable import (CSV/XLSX → weekly slots, auto-resolves offering/unit/lecturer).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/timetable/import", handlers.ImportTimetable(adminPool))
 
 		// ── Dashboards ────────────────────────────────────────────────────────
@@ -615,8 +583,6 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Delete("/api/v1/dashboard/timetable/slots/{slot_id}", handlers.DeleteTimetableSlot(pool))
 
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
-			Get("/api/v1/dashboard/qa/live-sessions", handlers.QALiveSessions(pool))
-		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
 			Post("/api/v1/dashboard/qa/device-reset", handlers.QADeviceReset(pool))
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
 			Post("/api/v1/dashboard/qa/attendance-correction", handlers.QAManualCorrection(pool))
@@ -626,11 +592,15 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Student attendance (ADMIN + QA + VC + DQA): filterable summary + Excel export/import.
 		// ADMIN reaches this from the Reports hub; it supports course_id/unit_id/session/
 		// year/semester filters so the report drills into real courses and their units.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/qa/student-attendance", handlers.QAStudentAttendance(pool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
-			Get("/api/v1/dashboard/qa/student-attendance/export.xlsx", handlers.QAStudentAttendanceExport(pool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleSuperAdmin, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/qa/student-attendance/export.xlsx", handlers.QAStudentAttendanceReport(pool, "xlsx"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/qa/student-attendance/export.csv", handlers.QAStudentAttendanceReport(pool, "csv"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/qa/student-attendance/export.pdf", handlers.QAStudentAttendanceReport(pool, "pdf"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Post("/api/v1/dashboard/qa/student-attendance/import", handlers.QAStudentAttendanceImport(pool))
 
 		// Lecturer attendance for the oversight dashboards (QA, VC, DQA Director).
@@ -638,6 +608,26 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/dashboard/lecturer-attendance", handlers.LecturerAttendanceLogsForCaller(pool))
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/lecturer-attendance/summary", handlers.LecturerAttendanceSummaryForCaller(pool))
+		// ADMIN is included here (unlike the JSON routes above, which the admin console
+		// reaches through its own /admin/tenants/{id} pair): the export is caller-tenant
+		// scoped from the JWT, so an admin downloading it can only ever get their own.
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/export.xlsx", handlers.LecturerAttendanceExport(pool, "xlsx"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/export.csv", handlers.LecturerAttendanceExport(pool, "csv"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/export.pdf", handlers.LecturerAttendanceExport(pool, "pdf"))
+
+		// The SECOND, independent record of the same lectures: the QA patroller's spot-checks.
+		// Kept on its own endpoint (and its own page) so it can contradict the coordinator's.
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/patrol", handlers.LecturerPatrolAttendance(pool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/patrol/export.xlsx", handlers.LecturerPatrolExport(pool, "xlsx"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/patrol/export.csv", handlers.LecturerPatrolExport(pool, "csv"))
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleVC, middleware.RoleDVC, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/lecturer-attendance/patrol/export.pdf", handlers.LecturerPatrolExport(pool, "pdf"))
 
 		// ── Session roster (coordinator: who is present in a live session) ────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).

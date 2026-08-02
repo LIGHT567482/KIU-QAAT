@@ -19,16 +19,16 @@ import (
 )
 
 type studentAttendanceRow struct {
-	StudentID   string  `json:"student_id"`
-	FullName    string  `json:"full_name"`
-	Course      string  `json:"course"`
-	Level       string  `json:"level"`
-	Session     string  `json:"session"`
-	Year        int     `json:"year"`
-	Semester    int     `json:"semester"`
-	Held        int     `json:"sessions_held"`
-	Attended    int     `json:"sessions_attended"`
-	Percentage  float64 `json:"attendance_percentage"`
+	StudentID  string  `json:"student_id"`
+	FullName   string  `json:"full_name"`
+	Course     string  `json:"course"`
+	Level      string  `json:"level"`
+	Session    string  `json:"session"`
+	Year       int     `json:"year"`
+	Semester   int     `json:"semester"`
+	Held       int     `json:"sessions_held"`
+	Attended   int     `json:"sessions_attended"`
+	Percentage float64 `json:"attendance_percentage"`
 }
 
 // queryStudentAttendance aggregates held vs attended sessions per student, scoped
@@ -87,7 +87,12 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 		LEFT JOIN course_offerings o ON o.offering_id = se.offering_id
 		LEFT JOIN course_units cu ON cu.course_id = se.course_id AND cu.tenant_id = se.tenant_id` + unitArg + `
 		LEFT JOIN sessions s ON s.unit_id = cu.unit_id AND s.tenant_id = se.tenant_id
-		     AND (se.offering_id IS NULL OR s.offering_id = se.offering_id)
+		     -- COHORT ISOLATION: only count the sessions of the student's OWN study
+		     -- session (Day / Evening / Weekend…). Sharing a course is not enough — a
+		     -- Weekend student must never be measured against Day sessions. Sessions
+		     -- predating the cohort model (offering_id NULL) fall back to the student's
+		     -- own offering being unset, so neither side guesses.
+		     AND s.offering_id IS NOT DISTINCT FROM se.offering_id
 		LEFT JOIN attendance_logs al ON al.session_id = s.session_id AND al.student_id = se.student_id
 		WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'` + where + `
 		GROUP BY se.student_id, se.full_name, c.name, c.level, o.session_type, se.current_year, se.semester

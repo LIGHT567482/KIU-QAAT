@@ -60,7 +60,7 @@ QAAT Platform
 
 | Member | Primary Role |
 |---|---|
-| C1 | PWA architecture, Service Worker, IndexedDB, BLE integration |
+| C1 | PWA architecture, Service Worker, IndexedDB, LAN proximity integration |
 | C2 | QR validation engine, session state machine UI, sync queue UI |
 
 ### Team D — Frontend Dashboards (2 developers)
@@ -169,8 +169,8 @@ W1 Infrastructure
 | 4 | IndexedDB schema (Dexie.js): all stores, AES-256-GCM encryption wrapper using SubtleCrypto | Encrypted local storage working |
 | 4–5 | Daily Fetch flow: download + decrypt + store manifest, UI screen with sync status | Daily Fetch screen working |
 | 5–6 | Session State Machine: IDLE → PENDING_LECTURER → ACTIVE → CLOSED/AUTO_CLOSED, all timers (T+15 Gate-Open TTL, T+120 check-in window, T+180 auto-kill) | Full state machine working locally |
-| 5–6 | BLE Scanner Module: Web Bluetooth API, 10-second weighted RSSI rolling average, session initialisation gate | BLE proximity check working |
-| 6–7 | QR Validation Engine (full 5-step sequence): RSA verify → roster lookup → BLE check → fingerprint binding → duplicate check | QR scan validates or rejects correctly |
+| 5–6 | Proximity Module: same-LAN egress-IP match against `sessions.coordinator_ip` + rotating room code (HMAC TOTP), session initialisation gate | Proximity check working |
+| 6–7 | QR Validation Engine (full 5-step sequence): RSA verify → roster lookup → proximity check → fingerprint binding → duplicate check | QR scan validates or rejects correctly |
 | 6–7 | Hardware Fingerprint Engine: compute fingerprint, bind on first scan, compare on subsequent, DEVICE_MISMATCH flag | Fingerprint binding working |
 | 7–8 | Local LAN server (port 8080): student scan URL generated per session, served by Service Worker | Students can scan from their phones |
 | 8 | Session sealing: AES-256 encrypt + HMAC sign session package, place in IndexedDB outbox queue | Session package sealed on close |
@@ -188,7 +188,7 @@ W1 Infrastructure
 **Phase 2 Exit Criteria:**
 - [ ] QR codes generated, signed, and emailed to test students
 - [ ] Coordinator PWA can scan a real student QR and accept/reject correctly (offline)
-- [ ] BLE beacon proximity check gates session correctly
+- [ ] Same-LAN + rotating room code proximity check gates session correctly
 - [ ] Session lifecycle (all states + auto-timers) working end-to-end
 - [ ] Chunked sync uploads a sealed session package to the cloud
 - [ ] All dashboards display real data from the API
@@ -206,7 +206,7 @@ W1 Infrastructure
 | 10 | A | Exam eligibility computation end-to-end: sync → materialized view refresh → student portal updates within 60 seconds |
 | 10 | B | Clearance token flow: DQA generates → student shows QR → invigilator scans → verified without dashboard access |
 | 10 | A+B | Multi-tenant isolation testing: verify RLS prevents cross-tenant data leakage with two active test tenants |
-| 11 | All | **Security Review:** RSA key management audit, JWT replay attack test, rate limiter stress test (>50 req/s per coordinator), BLE spoofing resistance test |
+| 11 | All | **Security Review:** RSA key management audit, JWT replay attack test, rate limiter stress test (>50 req/s per coordinator), proximity spoofing resistance test (X-Forwarded-For injection, room-code replay) |
 | 11 | A | TLS 1.3 enforcement, CSP headers, CORS lockdown on all API endpoints |
 | 11 | C | Offline resilience test: kill internet mid-session, verify no data loss, verify sync resumes correctly on reconnection |
 | 12 | QA | Load testing: 300 concurrent student scans/minute on PWA; 500 concurrent students in single venue; 10,000 concurrent sync operations on API |
@@ -227,9 +227,9 @@ W1 Infrastructure
 
 | Week | Activities |
 |---|---|
-| 13 | Staging environment deployment (Kubernetes); BLE beacon UUID registration for pilot venues; Coordinator PWA distributed to pilot Coordinators |
+| 13 | Staging environment deployment (Kubernetes); hotspot/room-code dry run for pilot venues; Coordinator PWA distributed to pilot Coordinators |
 | 14 | Controlled pilot in one department: live sessions, real students, real QR scans — monitor sync pipeline, fraud detection, anomaly flags |
-| 15 | Collect pilot feedback; resolve P1 bugs; RSSI threshold calibration per venue; Warden delegation drill |
+| 15 | Collect pilot feedback; resolve P1 bugs; hotspot coverage check per venue; Warden delegation drill |
 | 16 | Full campus rollout preparation: all tenant onboarding, all Coordinator training (target: <2 hours), VC and DQA dashboard activation, live monitoring |
 
 ---
@@ -252,7 +252,7 @@ Week 4-8 (after Auth is done):
 │  Team A             │  │  Team B              │  │  Team C              │  │  Team D          │
 │  Policy Engine      │  │  QR Service          │  │  IndexedDB vault     │  │  VC Dashboard    │
 │  SIS Integration    │  │  Email Delivery      │  │  Session State Mach. │  │  DQA Dashboard   │
-│  Manifest Service   │  │  Sync Receiver       │  │  BLE Engine          │  │  QA Dashboard    │
+│  Manifest Service   │  │  Sync Receiver       │  │  Proximity Engine    │  │  QA Dashboard    │
 │  Audit Log          │  │  Eligibility Engine  │  │  QR Validator        │  │  Student Portal  │
 └─────────────────────┘  └─────────────────────┘  └──────────────────────┘  └──────────────────┘
 ```
@@ -272,7 +272,7 @@ The following tasks are on the **critical path** — any delay here delays the e
          ↓
 [W3: TOTP MFA + Refresh + Logout] (Week 3)
          ↓
-[W5-C: PWA QR Validation Engine + BLE] (Weeks 6–7)
+[W5-C: PWA QR Validation Engine + Proximity] (Weeks 6–7)
          ↓
 [W6-B: Sync Receiver (chunked upload + dedup)] (Weeks 7–8)
          ↓
@@ -310,8 +310,8 @@ The following tasks are on the **critical path** — any delay here delays the e
 | Exam Clearance Token Generator | B2 | B3 | Eligibility Engine |
 | SIS Import Pipeline (CSV + CRON) | A3 | A2 | DB |
 | **Coordinator PWA — Core** | C1 | C2 | Auth (JWT) |
-| PWA BLE Engine | C1 | C2 | PWA Core |
-| PWA QR Validator | C2 | C1 | PWA Core, BLE |
+| PWA Proximity Engine | C1 | C2 | PWA Core |
+| PWA QR Validator | C2 | C1 | PWA Core, Proximity |
 | PWA Session State Machine | C2 | C1 | QR Validator |
 | PWA Sync Queue (Service Worker) | C1 | C2 | Sync Receiver |
 | VC Dashboard | D1 | D2 | Auth, Reporting API |
@@ -326,9 +326,9 @@ The following tasks are on the **critical path** — any delay here delays the e
 
 | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
-| **Web Bluetooth API not supported** on some Coordinator devices (iOS Safari restriction) | High | High | Test early on target devices; provide fallback GPS-only mode for unsupported browsers; document iOS PWA limitations |
+| **Hotspot Wi-Fi drops** mid-session on Coordinator devices | Medium | High | Test early on target devices; session state survives reconnection; logs are written locally the instant they are accepted |
 | **Auth Service slips** and blocks all teams | Medium | Critical | Auth is Phase 1 Week 2–3 priority; teams A2+A3 dedicated entirely to it; daily standups on auth progress |
-| **BLE RSSI signal unreliable** in large lecture halls (reflection/interference) | Medium | High | Phase 4 pilot includes RSSI calibration per venue; weighted rolling average in code reduces noise |
+| **Hotspot client limit** reached in large lecture halls (many phones on one AP) | Medium | High | Phase 4 pilot includes per-venue coverage checks; students may check in over the session window rather than all at once |
 | **IndexedDB quota exceeded** on low-storage Coordinator devices | Low | Medium | Monitor storage usage; 500MB minimum requirement; implement storage quota warnings |
 | **SIS API non-compliant** or unavailable at client institution | High | Medium | CSV upload fallback always available; integration adaptor per institution |
 | **TOTP MFA friction** causes VC/DQA Director adoption resistance | Medium | Low | One-time enrolment flow; backup codes; recovery via Platform Admin |
@@ -357,7 +357,7 @@ A workstream is considered **done** when:
 | **M1: Dev Environment Ready** | End of Week 1 | All developers running full stack locally |
 | **M2: Auth Service Complete** | End of Week 3 | JWT + TOTP MFA + RBAC fully working |
 | **M3: First QR Generated & Emailed** | End of Week 5 | Real student QR delivered to test inbox |
-| **M4: First Offline Session** | End of Week 7 | Full session run on PWA with BLE + QR scan, no internet |
+| **M4: First Offline Session** | End of Week 7 | Full session run on PWA with proximity + QR scan, no internet |
 | **M5: First Cloud Sync** | End of Week 8 | Session data synced from PWA to PostgreSQL |
 | **M6: Full End-to-End UC-01** | End of Week 10 | Standard session — all steps verified with real devices |
 | **M7: Security & Load Tests Passed** | End of Week 12 | All NFRs verified under load |

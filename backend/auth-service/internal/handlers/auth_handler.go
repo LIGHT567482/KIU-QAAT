@@ -79,7 +79,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/v1/auth/change-email ──────────────────────────────────────────
 //
 // Any signed-in user changes their OWN sign-in email after re-entering their
-// password. Tenant users must keep the institution domain; the SUPER_ADMIN
+// password. Every user must keep the institution domain; there is no longer any
 // (platform owner) may use any address.
 func (h *AuthHandler) ChangeEmail(w http.ResponseWriter, r *http.Request) {
 	tokenStr := extractBearer(r)
@@ -115,15 +115,12 @@ func (h *AuthHandler) ChangeEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "password is incorrect")
 		return
 	}
-	// Tenant users keep the institution domain; the platform owner is exempt.
-	if user.Role != models.RoleSuperAdmin {
-		domain, _ := h.users.TenantDomain(r.Context(), user.TenantID)
-		domain = strings.ToLower(strings.TrimSpace(domain))
-		d := email[at+1:]
-		if domain == "" || (d != domain && !strings.HasSuffix(d, "."+domain)) {
-			writeError(w, http.StatusBadRequest, "EMAIL_DOMAIN_MISMATCH", "email must use the institution domain @"+domain)
-			return
-		}
+	// Every user keeps the institution domain — the platform-owner exemption is gone.
+	domain, _ := h.users.TenantDomain(r.Context(), user.TenantID)
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if d := email[at+1:]; domain == "" || (d != domain && !strings.HasSuffix(d, "."+domain)) {
+		writeError(w, http.StatusBadRequest, "EMAIL_DOMAIN_MISMATCH", "email must use the institution domain @"+domain)
+		return
 	}
 	if err := h.users.UpdateEmail(r.Context(), user.UserID, email); err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
@@ -267,15 +264,15 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	AccessToken      string `json:"access_token"`
-	TokenType        string `json:"token_type"`
-	ExpiresIn        int64  `json:"expires_in"`
-	JTI              string `json:"jti"`
-	Role             string `json:"role"`
-	UserID           string `json:"user_id"`
-	FullName         string `json:"full_name,omitempty"`
-	Title            string `json:"title,omitempty"`
-	RegistrationNo   string `json:"registration_number,omitempty"`
+	AccessToken         string `json:"access_token"`
+	TokenType           string `json:"token_type"`
+	ExpiresIn           int64  `json:"expires_in"`
+	JTI                 string `json:"jti"`
+	Role                string `json:"role"`
+	UserID              string `json:"user_id"`
+	FullName            string `json:"full_name,omitempty"`
+	Title               string `json:"title,omitempty"`
+	RegistrationNo      string `json:"registration_number,omitempty"`
 	TenantID            string `json:"tenant_id"`
 	DeviceBindingKey    string `json:"device_binding_key,omitempty"`
 	ForcePasswordChange bool   `json:"force_password_change"`
@@ -286,8 +283,8 @@ type refreshRequest struct {
 }
 
 type enrollTOTPResponse struct {
-	OTPAuthURL    string `json:"otpauth_url"`
-	BackupCodes   []string `json:"backup_codes"`
+	OTPAuthURL  string   `json:"otpauth_url"`
+	BackupCodes []string `json:"backup_codes"`
 }
 
 type verifyTOTPRequest struct {
@@ -389,15 +386,15 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, loginResponse{
-		AccessToken:      tokenStr,
-		TokenType:        "Bearer",
-		ExpiresIn:        int64(time.Until(expiresAt).Seconds()),
-		JTI:              jti,
-		Role:             string(user.Role),
-		UserID:           user.UserID,
-		FullName:         user.FullName,
-		Title:            user.Title,
-		RegistrationNo:   user.RegistrationNumber,
+		AccessToken:         tokenStr,
+		TokenType:           "Bearer",
+		ExpiresIn:           int64(time.Until(expiresAt).Seconds()),
+		JTI:                 jti,
+		Role:                string(user.Role),
+		UserID:              user.UserID,
+		FullName:            user.FullName,
+		Title:               user.Title,
+		RegistrationNo:      user.RegistrationNumber,
 		TenantID:            user.TenantID,
 		DeviceBindingKey:    bindingKey,
 		ForcePasswordChange: user.ForcePasswordChange,
@@ -620,4 +617,3 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"error": code, "message": message})
 }
-

@@ -98,7 +98,6 @@ func main() {
 		cfg.Env,
 		router.Upstreams{
 			AuthService:    cfg.AuthServiceURL,
-			QRGenerator:    cfg.QRGeneratorURL,
 			SessionManager: cfg.SessionManagerURL,
 			SyncReceiver:   cfg.SyncReceiverURL,
 		},

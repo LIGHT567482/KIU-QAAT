@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
+import ExportButtons from '../../components/ExportButtons'
+import RecordTabs from '../../components/RecordTabs'
+import PatrolLecturerAttendance from '../shared/PatrolLecturerAttendance'
 
 interface SummaryRow {
   lecturer_id:         string
@@ -28,7 +31,18 @@ interface LogRow {
   session_status: string
 }
 
+// Two independent records of the same lectures, on two pages of one feature — the coordinator's
+// session log and the QA patroller's spot-check. Kept apart so a disagreement stays visible.
 export default function AdminLecturerAttendance() {
+  return (
+    <RecordTabs title="Lecturer Attendance" tabs={[
+      { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
+      { id: 'patrol',      label: 'QA patrol record',   render: () => <PatrolLecturerAttendance /> },
+    ]} />
+  )
+}
+
+function CoordinatorRecord() {
   const { tenantId } = useParams<{ tenantId: string }>()
 
   const { status: sumStatus, data: summary } = useQuery<SummaryRow[]>(
@@ -75,10 +89,13 @@ export default function AdminLecturerAttendance() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
-        <h2 style={{ margin: '4px 0 2px' }}>Lecturer Attendance</h2>
-        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>Tenant: {tenantId}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13, maxWidth: 620 }}>
+          Proof-of-presence from the session itself — the lecturer's own start/end and the contact
+          hours between them.
+        </p>
+        <ExportButtons base="/api/v1/dashboard/lecturer-attendance/export" filename="lecturer-attendance"
+          disabled={(summary ?? []).length === 0} />
       </div>
 
       {sumStatus === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}

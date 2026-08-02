@@ -37,14 +37,14 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Fetch session audit data.
 		type sessionRow struct {
-			SessionID   string
-			UnitName    string
-			VenueID     string
-			CoordID     string
-			Date        string
-			Status      string
+			SessionID    string
+			UnitName     string
+			VenueID      string
+			CoordID      string
+			Date         string
+			Status       string
 			StudentCount int
-			AuditFlags  string
+			AuditFlags   string
 		}
 
 		rows, err := conn.Query(r.Context(), `
@@ -88,7 +88,7 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Table header.
 		headers := []string{"Date", "Unit", "Venue", "Coordinator", "Status", "Students", "Flags"}
-		widths  := []float64{22, 70, 28, 40, 28, 22, 57}
+		widths := []float64{22, 70, 28, 40, 28, 22, 57}
 
 		pdf.SetFont("Helvetica", "B", 8)
 		pdf.SetFillColor(30, 41, 59)

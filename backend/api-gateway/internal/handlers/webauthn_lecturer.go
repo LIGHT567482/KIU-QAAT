@@ -162,7 +162,9 @@ func resolveEnrollToken(ctx context.Context, rdb *redis.Client, pool *pgxpool.Po
 
 func LecturerEnrollBegin(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Token string `json:"token"` }
+		var body struct {
+			Token string `json:"token"`
+		}
 		_ = decodeJSON(r, &body)
 		lid, tid, name, ok := resolveEnrollToken(r.Context(), rdb, pool, body.Token)
 		if !ok {

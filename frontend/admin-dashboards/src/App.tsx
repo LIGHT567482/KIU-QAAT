@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
 import { RoleLayout } from './layouts/RoleLayout'
 import Login from './pages/Login'
 import Unauthorized from './pages/Unauthorized'
@@ -13,7 +12,6 @@ import DQAEligibility from './pages/dqa/DQAEligibility'
 import DQACourseHealth from './pages/dqa/DQACourseHealth'
 import DQATrends from './pages/dqa/DQATrends'
 import DQAPunctuality from './pages/dqa/DQAPunctuality'
-import QALiveSessions from './pages/qa/QALiveSessions'
 import QADeviceReset from './pages/qa/QADeviceReset'
 import QAManualCorrection from './pages/qa/QAManualCorrection'
 import QACoordinatorHealth from './pages/qa/QACoordinatorHealth'
@@ -47,8 +45,6 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <WelcomeToast />
-        <CoordinatorQRBoot />
-        <LecturerQRBoot />
         <Routes>
           <Route path="/login"        element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
@@ -78,7 +74,6 @@ export default function App() {
 
           {/* ── QA Officer ─────────────────────────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['QA_OFFICER']} />}>
-            <Route path="/qa/live"              element={<QALiveSessions />} />
             <Route path="/qa/reports"           element={<QAReports />} />
             <Route path="/qa/device-reset"      element={<QADeviceReset />} />
             <Route path="/qa/correction"        element={<QAManualCorrection />} />
@@ -143,64 +138,4 @@ export default function App() {
       </BrowserRouter>
     </AuthProvider>
   )
-}
-
-// When a lecturer scans their QR it opens this app at /?lqr=<token>. We exchange the
-// token for a LECTURER session (passwordless) and drop them on their dashboard.
-const API = (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL
-  ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
-
-// When a coordinator scans their QR it opens this app at /?cqr=<token>. We exchange the
-// token for a COORDINATOR session (passwordless) and drop them on their dashboard.
-function CoordinatorQRBoot() {
-  const { login } = useAuth()
-  const navigate = useNavigate()
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => {
-    const cqr = new URLSearchParams(location.search).get('cqr')
-    if (!cqr) return
-    ;(async () => {
-      try {
-        const res = await fetch(`${API}/api/v1/coordinator/qr-login`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qr: cqr }),
-        })
-        const d = await res.json()
-        if (!res.ok || !d.access_token) throw new Error(d.message || 'QR sign-in failed')
-        const p = JSON.parse(atob(d.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-        login(d.access_token, { userId: p.sub, tenantId: p.tenant_id, role: p.role, expiresAt: p.exp })
-        window.history.replaceState({}, '', location.pathname)
-        navigate('/coordinator', { replace: true })
-      } catch (e) { setErr(e instanceof Error ? e.message : 'QR sign-in failed') }
-    })()
-  }, [login, navigate])
-  if (err) return <div style={{ padding: 16, background: '#fef2f2', color: '#b91c1c', fontSize: 14 }}>Coordinator QR sign-in: {err}</div>
-  return null
-}
-
-function LecturerQRBoot() {
-  const { login } = useAuth()
-  const navigate = useNavigate()
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => {
-    const lqr = new URLSearchParams(location.search).get('lqr')
-    if (!lqr) return
-    ;(async () => {
-      try {
-        const res = await fetch(`${API}/api/v1/lecturer/qr-login`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qr: lqr }),
-        })
-        const d = await res.json()
-        if (!res.ok || !d.access_token) throw new Error(d.message || 'QR sign-in failed')
-        const p = JSON.parse(atob(d.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-        login(d.access_token, { userId: p.sub, tenantId: p.tenant_id, role: p.role, expiresAt: p.exp })
-        // Drop the token from the URL, then land on the lecturer dashboard.
-        window.history.replaceState({}, '', location.pathname)
-        navigate('/lecturer', { replace: true })
-      } catch (e) { setErr(e instanceof Error ? e.message : 'QR sign-in failed') }
-    })()
-  }, [login, navigate])
-  if (err) return <div style={{ padding: 16, background: '#fef2f2', color: '#b91c1c', fontSize: 14 }}>Lecturer QR sign-in: {err}</div>
-  return null
 }

@@ -1,10 +1,16 @@
 import { useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
+import ExportButtons from '../../components/ExportButtons'
+import RecordTabs from '../../components/RecordTabs'
+import PatrolLecturerAttendance from './PatrolLecturerAttendance'
 
-// Lecturer attendance for the oversight dashboards (QA / VC / DQA). One row per
-// lecturer with an inline "View logs" expander — same shape as the admin page but
-// fed by the caller-tenant endpoints.
+// Lecturer attendance for the oversight dashboards (QA / VC / DQA).
+//
+// Two independent records of the same lectures, on two pages of one feature:
+//   • Coordinator record — what the lecturer started and ended in the session (contact hours).
+//   • QA patrol record  — what a patroller saw on walking into the room.
+// They are never merged: where they disagree is the finding.
 
 interface SummaryRow {
   lecturer_id: string; lecturer_name: string; department: string; email: string
@@ -16,6 +22,15 @@ interface LogRow {
 }
 
 export default function DashLecturerAttendance() {
+  return (
+    <RecordTabs title="Lecturer Attendance" tabs={[
+      { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
+      { id: 'patrol',      label: 'QA patrol record',   render: () => <PatrolLecturerAttendance /> },
+    ]} />
+  )
+}
+
+function CoordinatorRecord() {
   const { data: summary, status } = useQuery<SummaryRow[]>(() => api.get('/api/v1/dashboard/lecturer-attendance/summary'))
   const { data: logs } = useQuery<LogRow[]>(() => api.get('/api/v1/dashboard/lecturer-attendance'))
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -30,8 +45,14 @@ export default function DashLecturerAttendance() {
 
   return (
     <div style={{ color: 'var(--text)' }}>
-      <h2 style={{ margin: '0 0 4px' }}>Lecturer Attendance</h2>
-      <p style={{ color: 'var(--muted)', margin: '0 0 16px', fontSize: 13 }}>Proof-of-presence — one row per lecturer; click “View logs” for each session.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13, maxWidth: 620 }}>
+          Proof-of-presence from the session itself — the lecturer's own start/end and the contact
+          hours between them. One row per lecturer; click “View logs” for each session.
+        </p>
+        <ExportButtons base="/api/v1/dashboard/lecturer-attendance/export" filename="lecturer-attendance"
+          disabled={(summary ?? []).length === 0} />
+      </div>
       {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'ok' && (summary ?? []).length === 0 && <p style={{ color: 'var(--muted)' }}>No lecturer attendance recorded yet.</p>}
       <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by lecturer name, department or email…"

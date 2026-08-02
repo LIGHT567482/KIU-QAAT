@@ -362,8 +362,8 @@ who submits their own signed QR + that code within the window → marked `PRESEN
 The device-fingerprint bind (validator steps 6/8) is the only remaining barrier,
 and the fingerprint is a **client-supplied string** (`req.Fingerprint`), so it is
 spoofable and, for a never-seen device, simply bound on first use. Net: **remote
-proxy attendance is achievable.** This is the documented trade-off of moving off
-BLE, but it must be treated as an open security risk, not a solved one. Consider
+proxy attendance is achievable.** This is the documented trade-off of code-based
+proximity, and must be treated as an open security risk, not a solved one. Consider
 shortening the window, binding to server-observed signals, or a
 coordinator-side ghost-lecture check.
 

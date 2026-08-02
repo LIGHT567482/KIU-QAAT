@@ -11,22 +11,22 @@ import (
 )
 
 type Config struct {
-	Port          string
-	DBURL         string
-	RedisURL      string
-	JWT           JWTConfig
-	LogLevel      string
-	Env           string
-	DisableMFA    bool   // set DISABLE_MFA=true to skip TOTP in dev
-	InternalKey   string // shared secret for internal service-to-service calls (QR login)
+	Port        string
+	DBURL       string
+	RedisURL    string
+	JWT         JWTConfig
+	LogLevel    string
+	Env         string
+	DisableMFA  bool   // set DISABLE_MFA=true to skip TOTP in dev
+	InternalKey string // shared secret for internal service-to-service calls (QR login)
 }
 
 type JWTConfig struct {
-	PrivateKey  *rsa.PrivateKey
-	PublicKey   *rsa.PublicKey
-	Issuer      string
-	Audience    string
-	TTL         time.Duration
+	PrivateKey *rsa.PrivateKey
+	PublicKey  *rsa.PublicKey
+	Issuer     string
+	Audience   string
+	TTL        time.Duration
 }
 
 func Load() (*Config, error) {
@@ -56,8 +56,8 @@ func Load() (*Config, error) {
 			Audience:   env("JWT_AUDIENCE", "qaat-api"),
 			TTL:        time.Duration(ttlSecs) * time.Second,
 		},
-		LogLevel:   env("LOG_LEVEL", "info"),
-		Env:        env("ENVIRONMENT", "production"),
+		LogLevel:    env("LOG_LEVEL", "info"),
+		Env:         env("ENVIRONMENT", "production"),
 		DisableMFA:  env("DISABLE_MFA", "") == "true",
 		InternalKey: env("INTERNAL_SVC_KEY", ""),
 	}, nil

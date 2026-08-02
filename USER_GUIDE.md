@@ -75,17 +75,16 @@ What happens, step by step:
 | 3 | Tenant match (via the signature) | A QR from another university |
 | 4 | On the active roster | Someone not enrolled in the unit |
 | 4b | Serial number matches current issue | A QR that was reissued/revoked (lost card) |
-| 5 | **Rotating room code** (replaces the old Bluetooth check) | Checking in from outside the room — you must see the live screen |
+| 5 | **Rotating room code** | Checking in from outside the room — you must see the live screen |
 | 5b | **Same network** — must be on the coordinator's hotspot LAN (egress IP matches the session) | Checking in from off-site (`NOT_SAME_NETWORK`) |
 | 6 | Device fingerprint binding | One phone checking in several students |
 | 7 | Duplicate check | Checking in twice |
 | 8 | One device per session (`DEVICE_ALREADY_USED`) | A shared "proxy phone" |
 
-**Why the rotating code instead of Bluetooth?** A student's web browser cannot read
-Bluetooth signal strength (iPhones block it entirely). The rotating code is the
-practical equivalent: because it changes every 15 seconds and is only shown on the
-room's screen, possessing the current code is proof you're physically there. A
-relayed code is stale within seconds.
+**Why a rotating code?** It needs no extra hardware and works on every phone.
+Because the code changes every 15 seconds and is only ever shown on the room's
+screen, possessing the current code is proof you're physically there. A relayed
+code is stale within seconds.
 
 ### 2.4 Course roadmap + semester management
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import { QASubmissionsPanel } from './QAOrgDashboard'
+import ExportButtons from '../../components/ExportButtons'
 
 // QA reports: (1) cross-dimension lecturer-teaching report from patrol data (filterable), and
 // (2) today's employee biometric no-shows with a one-click email + WhatsApp notify.
@@ -34,7 +35,11 @@ export default function QAReports() {
       <h2 style={{ margin: '0 0 16px' }}>QA Reports</h2>
 
       {/* ── Lecturer teaching report ─────────────────────────────────────── */}
-      <h3 style={{ margin: '0 0 8px' }}>Lecturer teaching (from patrols)</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: '0 0 8px' }}>Lecturer teaching (from patrols)</h3>
+        <ExportButtons base="/api/v1/reports/lecturer-teaching/export" filename="lecturer-teaching"
+          query={qs} disabled={rows.length === 0} />
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <Field label="From"><input type="date" value={f.from} onChange={e => setF({ ...f, from: e.target.value })} style={inp} /></Field>
         <Field label="To"><input type="date" value={f.to} onChange={e => setF({ ...f, to: e.target.value })} style={inp} /></Field>

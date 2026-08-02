@@ -3,13 +3,11 @@
 
 ---
 
-> **⚠️ Proximity model changed since this checklist was written.** BLE beacons /
-> RSSI were **removed** (migration 039). Ignore every "beacon"/"RSSI"/"Bluetooth"
-> step below — there is **no beacon hardware to place, power, or calibrate**.
-> Instead, proximity is proven by the phone being **on the coordinator's Wi-Fi
-> hotspot LAN** plus the **live rotating room code**. The only "hardware" is the
-> coordinator's laptop, which is the room hotspot + offline server. See
-> [`../flow.md`](../flow.md) and [`FLOWCHART.md`](FLOWCHART.md).
+> **Proximity model.** There is **no proximity hardware to place, power, or
+> calibrate.** A student is proven in the room by their phone being **on the
+> coordinator's Wi-Fi hotspot LAN** plus the **live rotating room code**. The only
+> "hardware" is the coordinator's laptop, which is the room hotspot + offline
+> server. See [`../flow.md`](../flow.md) and [`FLOWCHART.md`](FLOWCHART.md).
 
 ---
 
@@ -25,16 +23,16 @@
 - [ ] TLS certificate provisioned (cert-manager or Cloudflare origin cert)
 - [ ] Prometheus scraping all services; Grafana accessible at monitoring URL
 
-### Beacon Setup
-- [ ] BLE beacon UUIDs registered in `ble_beacons` table for pilot venues
-- [ ] RSSI threshold calibrated per venue (aim for ≥-65 dBm at ~3 m)
-- [ ] Beacon battery levels checked (`battery_level` field populated)
+### Room / Hotspot Setup
+- [ ] Coordinator laptop hotspot reaches every seat in each pilot venue
+- [ ] Rotating room code legible from the back row (projector or screen share)
+- [ ] Hotspot handles the expected class size concurrently
 
 ### Coordinator Setup
 - [ ] Coordinator accounts created in `users` table for pilot department
 - [ ] Coordinator PWA installed on pilot Coordinator devices (Chrome Android recommended)
 - [ ] Daily Manifest fetch tested from each Coordinator device
-- [ ] BLE scan confirmed in each pilot venue (at least 3 readings before session start)
+- [ ] Hotspot join confirmed in each pilot venue from a test phone before session start
 - [ ] Offline mode verified: disconnect device from internet, run full session, reconnect and confirm sync
 
 ### Student Setup  
@@ -56,7 +54,7 @@
 
 ### Session 1 (Day 1 — supervised)
 - [ ] Coordinator performs full Daily Fetch before session
-- [ ] BLE beacon detected in venue before session start
+- [ ] Hotspot up and rotating room code displayed before session start
 - [ ] Lecturer scans Gate-Open QR (PENDING_LECTURER → ACTIVE transition)
 - [ ] 5+ students check in successfully via QR scan
 - [ ] At least 1 DEVICE_MISMATCH test performed (known test device)
@@ -67,7 +65,7 @@
 
 ### Session 2 (Day 2 — Coordinator unassisted)
 - [ ] Coordinator runs session independently without support
-- [ ] All validation steps pass (BLE + QR + fingerprint)
+- [ ] All validation steps pass (same-LAN + room code + QR + fingerprint)
 - [ ] Sync completes without errors
 
 ### Warden Delegation Test
@@ -86,15 +84,18 @@
 
 ---
 
-## RSSI Calibration Protocol (per venue)
+## Hotspot Coverage Protocol (per venue)
 
-Walk the venue with a beacon and record RSSI at:
-1. Coordinator desk (expected ≥ -55 dBm)
-2. 5 m from Coordinator (expected ≥ -65 dBm)
-3. Classroom door (expected < -70 dBm — outside boundary)
+Walk the venue with a test phone and confirm at each point that it can join the
+coordinator's hotspot and submit a check-in:
+1. Coordinator desk
+2. Middle of the room
+3. Back row / far corner
 
-Set `rssi_threshold_dbm` to the minimum recorded value at the 5 m mark.
-Update via: `PUT /api/v1/dashboard/dqa/thresholds`
+Also confirm the rotating room code on the projector is readable from the back row.
+From **outside** the closed classroom door the hotspot should be unusable — if a phone
+in the corridor can still check in, reposition the laptop or lower the hotspot's
+transmit range before the pilot.
 
 ---
 

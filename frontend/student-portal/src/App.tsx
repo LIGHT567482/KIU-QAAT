@@ -5,8 +5,6 @@ import WelcomeToast from './components/WelcomeToast'
 
 const API = (import.meta as unknown as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
-const URL_QR  = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('qr') ?? '').trim() : ''
-
 interface Brand { name: string; logo_url: string; motto: string; brand_color: string; sidebar_color: string; background_color: string; footer_color: string }
 
 interface Unit {
@@ -29,15 +27,7 @@ interface Progress {
   units:         Unit[]
 }
 
-interface QRData {
-  student_id:    string
-  serial_number: string
-  token:         string
-  url:           string
-  image:         string
-}
-
-type View = 'login' | 'progress' | 'qr' | 'scan'
+type View = 'login' | 'progress'
 
 export default function App() {
   const { theme, toggle } = useTheme()
@@ -47,11 +37,7 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
-  // QR-login state
-  const [jwt, setJwt]         = useState<string | null>(null)
-  const [qrData, setQrData]   = useState<QRData | null>(null)
-  const [qrLoading, setQrLoading] = useState(false)
-  const [view, setView]       = useState<View>(URL_QR ? 'scan' : 'login')
+  const [view, setView]       = useState<View>('login')
 
   useEffect(() => {
     // Single institution — no org needed; the backend serves brand.json.
@@ -60,75 +46,6 @@ export default function App() {
       .then((b: Brand | null) => { if (b) { setBrand(b); applyPalette(b) } })
       .catch(() => {})
   }, [])
-
-  // Auto QR login: when the portal is opened via ?qr=TOKEN, exchange it for a JWT.
-  useEffect(() => {
-    if (!URL_QR) return
-    ;(async () => {
-      setLoading(true); setError(null)
-      try {
-        const res = await fetch(`${API}/api/v1/student/qr-login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qr: URL_QR }),
-        })
-        if (!res.ok) {
-          const d = await res.json().catch(() => ({}))
-          throw new Error(d.message || 'QR login failed')
-        }
-        const authData = await res.json()
-        const token = authData.access_token
-        if (!token) throw new Error('No access token returned')
-        setJwt(token)
-        setView('progress')
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not log in with QR code.')
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [])
-
-  async function fetchProgress(token: string) {
-    setLoading(true); setError(null)
-    try {
-      // Resolve student info from the JWT.
-      const meRes = await fetch(`${API}/api/v1/student/my-qr`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!meRes.ok) throw new Error('Could not load student profile')
-      const me = await meRes.json()
-      const pRes = await fetch(`${API}/api/v1/student/progress?reg=${encodeURIComponent(me.student_id)}`)
-      if (!pRes.ok) {
-        const d = await pRes.json().catch(() => ({}))
-        throw new Error(d.message || 'No attendance records found.')
-      }
-      setData(await pRes.json())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load data.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function loadMyQR(token: string) {
-    setQrLoading(true)
-    try {
-      const res = await fetch(`${API}/api/v1/student/my-qr`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error('Could not load QR code')
-      setQrData(await res.json())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load QR code.')
-    } finally {
-      setQrLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (jwt && view === 'progress' && !data) fetchProgress(jwt)
-  }, [jwt, view])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -152,12 +69,6 @@ export default function App() {
     }
   }
 
-  async function handleQRLogin(jwtToken: string) {
-    setJwt(jwtToken)
-    setView('progress')
-    fetchProgress(jwtToken)
-  }
-
   const title = brand?.name || data?.institution || 'QAAT Student Portal'
 
   return (
@@ -178,15 +89,7 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {jwt && view !== 'qr' && (
-            <button onClick={() => { loadMyQR(jwt); setView('qr') }}
-              style={navBtn}>My QR</button>
-          )}
-          {jwt && view === 'progress' && (
-            <button onClick={() => { setView('qr'); loadMyQR(jwt) }}
-              style={navBtn}>My QR</button>
-          )}
-          {view !== 'login' && !jwt && (
+          {view !== 'login' && (
             <button onClick={() => { setView('login'); setError(null) }}
               style={navBtn}>Back</button>
           )}
@@ -195,7 +98,7 @@ export default function App() {
       </header>
 
       <div style={{ flex: 1, maxWidth: 600, margin: '0 auto', width: '100%', padding: '24px 16px', boxSizing: 'border-box', fontFamily: 'system-ui', color: 'var(--text)' }}>
-        {view === 'login' && !jwt && (
+        {view === 'login' && (
           <form onSubmit={submit} style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={reg} onChange={e => setReg(e.target.value)} autoFocus
@@ -207,61 +110,15 @@ export default function App() {
           </form>
         )}
 
-        {view === 'scan' && URL_QR && (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>{loading ? '\u231B' : '\u2705'}</div>
-            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>
-              {loading ? 'Signing in with your QR code\u2026' : 'QR login successful'}
-            </div>
-            {error && <div style={errorBox}>{error}</div>}
-          </div>
-        )}
+        {error && <div style={errorBox}>{error}</div>}
 
-        {error && view !== 'scan' && <div style={errorBox}>{error}</div>}
-
-        {view === 'qr' && qrData && (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <h2 style={{ fontWeight: 700, fontSize: 20, marginBottom: 8 }}>Your QR Code</h2>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
-              Scan this QR to sign in to attendance sessions. You can download or screenshot it.
-            </p>
-            <div style={{
-              display: 'inline-block', padding: 16, borderRadius: 12,
-              background: '#fff', boxShadow: '0 2px 12px rgba(0,0,0,.1)', marginBottom: 16,
-            }}>
-              <img src={qrData.image} alt="Your QR code"
-                style={{ width: 260, height: 260, display: 'block' }} />
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-              Serial: {qrData.serial_number}
-            </div>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <a href={qrData.image} download={`qr-${qrData.serial_number}.png`}
-                style={{ ...btn, textDecoration: 'none', display: 'inline-block' }}>
-                Download QR
-              </a>
-              <button onClick={() => { setQrData(null); setView('progress') }}
-                style={{ ...btn, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}>
-                Back to progress
-              </button>
-            </div>
-          </div>
-        )}
-
-        {view === 'qr' && qrLoading && !qrData && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)' }}>
-            Loading your QR code\u2026
-          </div>
-        )}
-
-        {view === 'login' && !jwt && !data && !error && !loading && (
+        {view === 'login' && !data && !error && !loading && (
           <p style={{ color: 'var(--muted)', textAlign: 'center', marginTop: 48 }}>
             Type your registration number above and submit to see your attendance and exam eligibility.
           </p>
         )}
 
-        {data && view !== 'qr' && <Results data={data} onBack={() => { setData(null); setError(null); setReg('') }}
-          onShowQR={jwt ? () => { loadMyQR(jwt); setView('qr') } : undefined} />}
+        {data && <Results data={data} onBack={() => { setData(null); setError(null); setReg(''); setView('login') }} />}
       </div>
 
       <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '10px 16px', fontSize: 11, textAlign: 'center' }}>
@@ -271,7 +128,7 @@ export default function App() {
   )
 }
 
-function Results({ data, onBack, onShowQR }: { data: Progress; onBack?: () => void; onShowQR?: () => void }) {
+function Results({ data, onBack }: { data: Progress; onBack?: () => void }) {
   const allEligible = data.units.length > 0 && data.units.every(u => u.status === 'ELIGIBLE')
   return (
     <div>
@@ -282,11 +139,6 @@ function Results({ data, onBack, onShowQR }: { data: Progress; onBack?: () => vo
             fontSize: 13, fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4,
           }}>
             \u2190 Check another number
-          </button>
-        )}
-        {onShowQR && (
-          <button onClick={onShowQR} style={navBtn}>
-            My QR Code
           </button>
         )}
       </div>

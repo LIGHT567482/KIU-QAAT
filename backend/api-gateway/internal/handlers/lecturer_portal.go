@@ -167,7 +167,8 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 		sessWhere = fmt.Sprintf(" AND s.coordinator_id = $%d", len(sessArgs))
 	}
 	sRows, err := pool.Query(ctx, `
-		SELECT s.session_id::text, s.session_date::text, COALESCE(u.full_name, '')
+		SELECT s.session_id::text, s.session_date::text, COALESCE(u.full_name, ''),
+		       COALESCE(s.offering_id::text,'')
 		FROM sessions s
 		LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
 		WHERE s.tenant_id = $1 AND s.unit_id = $2`+sessWhere+`
@@ -178,14 +179,27 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 	sessions := []sess{}
 	sessIndex := map[string]int{}
 	sessionIDs := []string{}
+	// The cohorts these sessions belong to — the roster below is scoped to them.
+	seenOfferings := map[string]bool{}
 	for sRows.Next() {
 		var s sess
-		sRows.Scan(&s.SessionID, &s.Date, &s.Coordinator) //nolint:errcheck
+		var offID string
+		sRows.Scan(&s.SessionID, &s.Date, &s.Coordinator, &offID) //nolint:errcheck
 		sessIndex[s.SessionID] = len(sessions)
 		sessionIDs = append(sessionIDs, s.SessionID)
 		sessions = append(sessions, s)
+		seenOfferings[offID] = true
 	}
 	sRows.Close()
+	// nil (not an empty slice) means "no session held yet" — show the whole
+	// programme roster rather than nobody, so the lecturer still sees their class.
+	var shownOfferings []string
+	if len(seenOfferings) > 0 {
+		shownOfferings = make([]string, 0, len(seenOfferings))
+		for id := range seenOfferings {
+			shownOfferings = append(shownOfferings, id)
+		}
+	}
 
 	type student struct {
 		StudentID string `json:"student_id"`
@@ -201,6 +215,10 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 		stIndex[id] = len(students)
 		students = append(students, student{StudentID: id, FullName: name, Present: make([]bool, len(sessions))})
 	}
+	// COHORT ISOLATION: the roster is only the students of the study sessions whose
+	// logs are actually on screen. Matching on (course, year, semester) alone pulled
+	// in every cohort of the programme, so a Weekend student surfaced in the Day
+	// cohort's logs. Anyone who genuinely checked in is still added below.
 	stRows, err := pool.Query(ctx, `
 		SELECT se.student_id, se.full_name
 		FROM students_extended se
@@ -208,7 +226,12 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 		  AND se.course_id    = (SELECT course_id FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
 		  AND se.current_year = (SELECT year      FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
 		  AND se.semester     = (SELECT semester  FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
-		ORDER BY se.full_name`, tenantID, unitID)
+		  AND (
+		        $3::text[] IS NULL
+		        OR se.offering_id::text = ANY($3::text[])
+		        OR (se.offering_id IS NULL AND '' = ANY($3::text[]))
+		      )
+		ORDER BY se.full_name`, tenantID, unitID, shownOfferings)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}

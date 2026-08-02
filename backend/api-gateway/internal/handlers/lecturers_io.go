@@ -130,12 +130,6 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		} else {
 			res.Updated++
 		}
-		// Email the permanent career QR when an address was supplied.
-		if email != "" && lecturerID != "" && httpReq != nil {
-			emailLecturerQR(httpReq.Header.Get("Authorization"),
-				lecturerScanURL(httpReq, makeLecturerQRToken(lecturerID, tenantID)),
-				email, fullName, staffID)
-		}
 	}
 	return res, nil
 }

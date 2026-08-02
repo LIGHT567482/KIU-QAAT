@@ -135,7 +135,7 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		case "DQA": // message the DQA directors
 			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'DQA_DIRECTOR'`
 		case "ADMIN": // message the admins
-			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role IN ('ADMIN','SUPER_ADMIN')`
+			sql = `SELECT user_id::text FROM users WHERE tenant_id = $1 AND role = 'ADMIN'`
 		default:
 			return nil, nil
 		}

@@ -1,13 +1,8 @@
 package handlers
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -113,7 +108,7 @@ func ListCourseUnits(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		courseID := chi.URLParam(r, "course_id")
 
-		// IDOR guard: a non-SUPER_ADMIN may only list units of their own tenant's course.
+		// IDOR guard: a caller may only list units of their own tenant's course.
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT unit_id, name, COALESCE(year,0), COALESCE(semester,1), COALESCE(academic_year,'')
 			FROM course_units
@@ -211,12 +206,12 @@ func UpdateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 		courseID := chi.URLParam(r, "course_id")
 
 		var req struct {
-			Name        *string `json:"name"`
-			Department  *string `json:"department"`
-			School      *string `json:"school"`
-			Level       *string         `json:"level"`
-			TotalYears  *int            `json:"total_years"`
-			LevelYears  *map[string]int `json:"level_years"` // per-level years for THIS course
+			Name       *string         `json:"name"`
+			Department *string         `json:"department"`
+			School     *string         `json:"school"`
+			Level      *string         `json:"level"`
+			TotalYears *int            `json:"total_years"`
+			LevelYears *map[string]int `json:"level_years"` // per-level years for THIS course
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
@@ -230,16 +225,24 @@ func UpdateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 		n := 1
 
 		if req.Name != nil {
-			setClauses = append(setClauses, fmt.Sprintf("name = $%d", n)); args = append(args, *req.Name); n++
+			setClauses = append(setClauses, fmt.Sprintf("name = $%d", n))
+			args = append(args, *req.Name)
+			n++
 		}
 		if req.Department != nil {
-			setClauses = append(setClauses, fmt.Sprintf("department = $%d", n)); args = append(args, *req.Department); n++
+			setClauses = append(setClauses, fmt.Sprintf("department = $%d", n))
+			args = append(args, *req.Department)
+			n++
 		}
 		if req.School != nil {
-			setClauses = append(setClauses, fmt.Sprintf("school = $%d", n)); args = append(args, *req.School); n++
+			setClauses = append(setClauses, fmt.Sprintf("school = $%d", n))
+			args = append(args, *req.School)
+			n++
 		}
 		if req.Level != nil {
-			setClauses = append(setClauses, fmt.Sprintf("level = $%d", n)); args = append(args, *req.Level); n++
+			setClauses = append(setClauses, fmt.Sprintf("level = $%d", n))
+			args = append(args, *req.Level)
+			n++
 		}
 		if req.LevelYears != nil {
 			// Clamp each level's years to 1–10 before storing the JSONB map.
@@ -252,17 +255,21 @@ func UpdateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 				}
 				clean[strings.TrimSpace(k)] = v
 			}
-			setClauses = append(setClauses, fmt.Sprintf("level_years = $%d", n)); args = append(args, clean); n++
+			setClauses = append(setClauses, fmt.Sprintf("level_years = $%d", n))
+			args = append(args, clean)
+			n++
 		}
 		if req.TotalYears != nil {
-			setClauses = append(setClauses, fmt.Sprintf("total_years = $%d", n)); args = append(args, *req.TotalYears); n++
+			setClauses = append(setClauses, fmt.Sprintf("total_years = $%d", n))
+			args = append(args, *req.TotalYears)
+			n++
 		}
 		if len(setClauses) == 0 {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "no fields to update"))
 			return
 		}
 
-		// IDOR guard: confine non-SUPER_ADMIN callers to their own tenant's course.
+		// IDOR guard: confine callers to their own tenant's course.
 		query := "UPDATE courses SET " + joinComma(setClauses) +
 			fmt.Sprintf(" WHERE course_id = $%d AND ($%d = '' OR tenant_id::text = $%d)", n, n+1, n+1)
 		args = append(args, courseID, tenantScope(r))
@@ -294,7 +301,7 @@ func UpdateCourseUnit(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Level           *string `json:"level"`
 			AcademicYear    *string `json:"academic_year"`
 			DefaultVenueID  *string `json:"default_venue_id"`
-			SessionStart    *string `json:"session_start"`             // "HH:MM"; admin override (#2)
+			SessionStart    *string `json:"session_start"` // "HH:MM"; admin override (#2)
 			DurationMinutes *int    `json:"session_duration_minutes"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
@@ -307,33 +314,49 @@ func UpdateCourseUnit(adminPool *pgxpool.Pool) http.HandlerFunc {
 		n := 1
 
 		if req.Name != nil {
-			setClauses = append(setClauses, fmt.Sprintf("name = $%d", n)); args = append(args, *req.Name); n++
+			setClauses = append(setClauses, fmt.Sprintf("name = $%d", n))
+			args = append(args, *req.Name)
+			n++
 		}
 		if req.Year != nil {
-			setClauses = append(setClauses, fmt.Sprintf("year = $%d", n)); args = append(args, *req.Year); n++
+			setClauses = append(setClauses, fmt.Sprintf("year = $%d", n))
+			args = append(args, *req.Year)
+			n++
 		}
 		if req.Semester != nil {
-			setClauses = append(setClauses, fmt.Sprintf("semester = $%d", n)); args = append(args, *req.Semester); n++
+			setClauses = append(setClauses, fmt.Sprintf("semester = $%d", n))
+			args = append(args, *req.Semester)
+			n++
 		}
 		if req.Level != nil {
-			setClauses = append(setClauses, fmt.Sprintf("level = $%d", n)); args = append(args, *req.Level); n++
+			setClauses = append(setClauses, fmt.Sprintf("level = $%d", n))
+			args = append(args, *req.Level)
+			n++
 		}
 		if req.AcademicYear != nil {
-			setClauses = append(setClauses, fmt.Sprintf("academic_year = $%d", n)); args = append(args, *req.AcademicYear); n++
+			setClauses = append(setClauses, fmt.Sprintf("academic_year = $%d", n))
+			args = append(args, *req.AcademicYear)
+			n++
 		}
 		if req.DefaultVenueID != nil {
 			val := interface{}(nil)
 			if *req.DefaultVenueID != "" {
 				val = *req.DefaultVenueID
 			}
-			setClauses = append(setClauses, fmt.Sprintf("default_venue_id = $%d", n)); args = append(args, val); n++
+			setClauses = append(setClauses, fmt.Sprintf("default_venue_id = $%d", n))
+			args = append(args, val)
+			n++
 		}
 		// Admin can change the schedule even when locked (keeps schedule_locked=true).
 		if req.SessionStart != nil {
-			setClauses = append(setClauses, fmt.Sprintf("session_start = NULLIF($%d,'')::time", n)); args = append(args, *req.SessionStart); n++
+			setClauses = append(setClauses, fmt.Sprintf("session_start = NULLIF($%d,'')::time", n))
+			args = append(args, *req.SessionStart)
+			n++
 		}
 		if req.DurationMinutes != nil {
-			setClauses = append(setClauses, fmt.Sprintf("session_duration_minutes = $%d", n)); args = append(args, *req.DurationMinutes); n++
+			setClauses = append(setClauses, fmt.Sprintf("session_duration_minutes = $%d", n))
+			args = append(args, *req.DurationMinutes)
+			n++
 		}
 		if req.SessionStart != nil || req.DurationMinutes != nil {
 			setClauses = append(setClauses, "schedule_locked = true")
@@ -343,7 +366,7 @@ func UpdateCourseUnit(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// IDOR guard: confine non-SUPER_ADMIN callers to their own tenant's unit.
+		// IDOR guard: confine callers to their own tenant's unit.
 		query := "UPDATE course_units SET " + joinComma(setClauses) +
 			fmt.Sprintf(" WHERE unit_id = $%d AND ($%d = '' OR tenant_id::text = $%d)", n, n+1, n+1)
 		args = append(args, unitID, tenantScope(r))
@@ -912,13 +935,6 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 				return
 			}
 		}
-		// Dispatch the lecturer's permanent career QR by email when one was given
-		// (optional — email is only used for QR delivery, not for login).
-		if strings.TrimSpace(req.Email) != "" {
-			emailLecturerQR(r.Header.Get("Authorization"),
-				lecturerScanURL(r, makeLecturerQRToken(lecturerID, tenantID)),
-				req.Email, req.FullName, staffID)
-		}
 		writeJSON(w, http.StatusCreated, map[string]string{"lecturer_id": lecturerID, "staff_id": staffID, "status": "CREATED"})
 	}
 }
@@ -1080,7 +1096,7 @@ func DeleteLecturerAssignment(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		assignmentID := chi.URLParam(r, "assignment_id")
 
-		// IDOR guard: confine non-SUPER_ADMIN callers to their own tenant's assignment.
+		// IDOR guard: confine callers to their own tenant's assignment.
 		tag, err := adminPool.Exec(r.Context(),
 			`DELETE FROM lecturer_assignments WHERE assignment_id = $1::uuid AND ($2 = '' OR tenant_id::text = $2)`,
 			assignmentID, tenantScope(r))
@@ -1160,7 +1176,7 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Password        string `json:"password"`
 			CourseID        string `json:"course_id"`
 			OfferingID      string `json:"offering_id"` // session the student joins (course+session)
-			Level           string `json:"level"`        // the student's level of study in this course
+			Level           string `json:"level"`       // the student's level of study in this course
 			CurrentYear     int    `json:"current_year"`
 			Semester        int    `json:"semester"`
 			AcademicYear    string `json:"academic_year"`
@@ -1190,9 +1206,6 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-		// Track whether a genuine address was supplied — the QR is emailed only then
-		// (email is optional, used solely for QR dispatch; identity is the reg-no).
-		realEmail := req.Email != ""
 
 		var domain string
 		if err := adminPool.QueryRow(r.Context(),
@@ -1203,8 +1216,8 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 		domain = strings.ToLower(strings.TrimSpace(domain))
 
 		// Students are identified by their reg-no; we no longer ask for email/password.
-		// Synthesise an in-domain login from the reg-no so the QR + check-in path (which
-		// resolve identity through the users table) keep working unchanged. An explicit
+		// Synthesise an in-domain login from the reg-no so the check-in path (which
+		// resolves identity through the users table) keeps working unchanged. An explicit
 		// email is still accepted for back-compat and must match the domain.
 		if req.Email == "" {
 			req.Email = synthEmail(req.StudentID, domain)
@@ -1273,20 +1286,10 @@ func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Generate + email the student's QR only when a real destination exists (the
-		// registered email or an explicit additional address). Fire-and-forget so
-		// registration is never blocked by mail latency; qr-generator verifies the
-		// forwarded JWT and derives the tenant itself (#4c). Reg-no-only students
-		// need no email — their identity (and portal) is the reg-no.
-		if realEmail || strings.TrimSpace(req.AdditionalEmail) != "" {
-			issueStudentQR(r.Header.Get("Authorization"), req.StudentID, req.AdditionalEmail)
-		}
-
 		writeJSON(w, http.StatusCreated, map[string]string{
-			"student_id":  req.StudentID,
-			"user_id":     userID,
-			"status":      "CREATED",
-			"qr_delivery": "QUEUED",
+			"student_id": req.StudentID,
+			"user_id":    userID,
+			"status":     "CREATED",
 		})
 	}
 }
@@ -1311,44 +1314,6 @@ func synthEmail(studentID, domain string) string {
 		s = "student"
 	}
 	return s + "@" + domain
-}
-
-// issueStudentQR asks qr-generator to mint + email the student's QR code right
-// after registration. Best-effort and asynchronous: failures are logged, never
-// surfaced to the registrar, so a mail hiccup can't fail a registration (#4c).
-func issueStudentQR(authHeader, studentID, additionalEmail string) {
-	if authHeader == "" || studentID == "" {
-		return
-	}
-	base := os.Getenv("QR_GENERATOR_URL")
-	if base == "" {
-		base = "http://qr-generator:3002"
-	}
-	body, _ := json.Marshal(map[string]string{
-		"student_id":       studentID,
-		"additional_email": additionalEmail,
-	})
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(base, "/")+"/api/v1/qr/issue", bytes.NewReader(body))
-		if err != nil {
-			log.Printf("[qr-issue] build request failed for %s: %v", studentID, err)
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", authHeader)
-		resp, err := http.DefaultClient.Do(httpReq)
-		if err != nil {
-			log.Printf("[qr-issue] request failed for %s: %v", studentID, err)
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			log.Printf("[qr-issue] qr-generator returned %d for %s", resp.StatusCode, studentID)
-		}
-	}()
 }
 
 // ─── Lecturer Attendance ──────────────────────────────────────────────────────
@@ -1387,17 +1352,17 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type logRow struct {
-			LogID          string  `json:"log_id"`
-			LecturerID     string  `json:"lecturer_id"`
-			LecturerName   string  `json:"lecturer_name"`
-			Department     string  `json:"department"`
-			UnitID         string  `json:"unit_id"`
-			UnitName       string  `json:"unit_name"`
-			SessionDate    string  `json:"session_date"`
-			GateOpenTime   string  `json:"gate_open_time"`
-			GateCloseTime  string  `json:"gate_close_time"`
-			ContactHours   float64 `json:"contact_hours"`
-			SessionStatus  string  `json:"session_status"`
+			LogID         string  `json:"log_id"`
+			LecturerID    string  `json:"lecturer_id"`
+			LecturerName  string  `json:"lecturer_name"`
+			Department    string  `json:"department"`
+			UnitID        string  `json:"unit_id"`
+			UnitName      string  `json:"unit_name"`
+			SessionDate   string  `json:"session_date"`
+			GateOpenTime  string  `json:"gate_open_time"`
+			GateCloseTime string  `json:"gate_close_time"`
+			ContactHours  float64 `json:"contact_hours"`
+			SessionStatus string  `json:"session_status"`
 		}
 		var list []logRow
 		for rows.Next() {
@@ -1409,9 +1374,9 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			rows.Scan(&lr.LogID, &lr.LecturerID, &lr.LecturerName, &lr.Department,
 				&lr.UnitID, &lr.UnitName, &sessionDate,
 				&gateOpen, &gateClose, &contactHours, &lr.SessionStatus) //nolint:errcheck
-			lr.SessionDate   = sessionDate.Format("2006-01-02")
-			lr.GateOpenTime  = gateOpen.Format(time.RFC3339)
-			lr.ContactHours  = contactHours
+			lr.SessionDate = sessionDate.Format("2006-01-02")
+			lr.GateOpenTime = gateOpen.Format(time.RFC3339)
+			lr.ContactHours = contactHours
 			if gateClose != nil {
 				lr.GateCloseTime = gateClose.Format(time.RFC3339)
 			}

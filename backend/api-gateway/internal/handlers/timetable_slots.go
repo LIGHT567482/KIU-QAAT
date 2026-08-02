@@ -232,7 +232,9 @@ func DeleteTimetableSlot(pool *pgxpool.Pool) http.HandlerFunc {
 
 // POST /api/v1/admin/tenants/{tenant_id}/timetable/import  (multipart field "roster")
 // Columns: course_id, level, study_year, semester, session_type, unit_id, unit_name,
-//          day, start_time, duration_minutes (or end_time), room, staff_id (lecturer).
+//
+//	day, start_time, duration_minutes (or end_time), room, staff_id (lecturer).
+//
 // Resolves/creates the offering + unit, links the lecturer if found, upserts slots.
 func ImportTimetable(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

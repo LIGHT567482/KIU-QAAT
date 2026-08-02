@@ -76,10 +76,29 @@ ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS offering_id UUID REFERENCES course_offerings(offering_id) ON DELETE SET NULL;
 
 -- ── Backfill existing data: one 'Day' offering per existing course ───────────
+-- Guarded with NOT EXISTS rather than ON CONFLICT. Two unique indexes govern this table —
+-- ux_offerings_course_session (tenant, course, session_type) and ux_offerings_tenant_coordinator
+-- (tenant, coordinator) — and the original clause named only the first, so a course whose
+-- coordinator already ran a non-'Day' offering violated the second and aborted the migration on any
+-- database that already held cohort data. Naming both is not possible either: migration 036 later
+-- makes the cohort index DEFERRABLE, and a deferrable constraint cannot be an ON CONFLICT arbiter.
+-- Explicit guards sidestep arbiters entirely. A course that cannot be given a 'Day' offering is
+-- simply left as it is.
+--
+-- On a fresh database both tables are empty here, so this inserts exactly what it always did.
 INSERT INTO course_offerings (tenant_id, course_id, session_type, coordinator_id)
-SELECT tenant_id, course_id, 'Day', NULLIF(coordinator_id, '')
-FROM courses
-ON CONFLICT (tenant_id, course_id, session_type) DO NOTHING;
+SELECT DISTINCT ON (c.tenant_id, COALESCE(NULLIF(c.coordinator_id, ''), c.course_id))
+       c.tenant_id, c.course_id, 'Day', NULLIF(c.coordinator_id, '')
+FROM courses c
+WHERE NOT EXISTS (   -- this course already has a 'Day' offering
+        SELECT 1 FROM course_offerings o
+        WHERE o.tenant_id = c.tenant_id AND o.course_id = c.course_id AND o.session_type = 'Day')
+  AND NOT EXISTS (   -- this coordinator already runs some offering (one per coordinator per tenant)
+        SELECT 1 FROM course_offerings o
+        WHERE o.tenant_id = c.tenant_id AND o.coordinator_id = NULLIF(c.coordinator_id, ''))
+-- …and, among the courses that survive, keep only one per coordinator so the batch cannot
+-- collide with itself. Courses with no coordinator are keyed by course_id, so all of them pass.
+ORDER BY c.tenant_id, COALESCE(NULLIF(c.coordinator_id, ''), c.course_id), c.course_id;
 
 UPDATE students_extended se
 SET offering_id = o.offering_id

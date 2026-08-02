@@ -5,6 +5,11 @@
 --   1. Sets the default ADMIN login to  admin@kiu.ac.ug / Admin1234!
 --   2. Removes the retired SUPER_ADMIN user(s) and the platform tenant.
 --
+-- SUPERSEDED by migration 064, which does the same removal AND drops the value from
+-- user_role_enum. This script is kept only for environments already cleaned by hand.
+-- The role comparisons below are cast to text so it still runs after 064 has removed
+-- the enum label — comparing against a non-existent enum value is a hard error.
+--
 -- Run against PROD Postgres (open the external allow-list temporarily as in light.md §5):
 --   psql "postgres://qaat:<owner-pw>@dpg-…-a.oregon-postgres.render.com/qaat?sslmode=require" \
 --        -f scripts/prod-kiu-cleanup.sql
@@ -39,15 +44,20 @@ END $$;
 -- ── 2. Remove the retired super-admin ─────────────────────────────────────────
 -- Delete SUPER_ADMIN user(s) first (they belong to the platform tenant), then any
 -- RSA keys tied to the platform tenant, then the platform tenant itself.
-DELETE FROM users   WHERE role = 'SUPER_ADMIN';
-DELETE FROM tenant_rsa_keys WHERE tenant_id = '00000000-0000-0000-0000-000000000000';
+DELETE FROM users   WHERE role::text = 'SUPER_ADMIN';
+-- tenant_rsa_keys was dropped with the QR subsystem (migration 063); skip if absent.
+DO $rsa$ BEGIN
+  IF to_regclass('public.tenant_rsa_keys') IS NOT NULL THEN
+    DELETE FROM tenant_rsa_keys WHERE tenant_id = '00000000-0000-0000-0000-000000000000';
+  END IF;
+END $rsa$;
 DELETE FROM tenants WHERE tenant_id = '00000000-0000-0000-0000-000000000000';
 
 -- Verify nothing is left.
 DO $$
 DECLARE sa int; pt int;
 BEGIN
-  SELECT count(*) INTO sa FROM users   WHERE role = 'SUPER_ADMIN';
+  SELECT count(*) INTO sa FROM users   WHERE role::text = 'SUPER_ADMIN';
   SELECT count(*) INTO pt FROM tenants WHERE tenant_id = '00000000-0000-0000-0000-000000000000';
   RAISE NOTICE 'super_admins remaining: %, platform tenant remaining: %', sa, pt;
 END $$;

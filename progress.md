@@ -15,8 +15,8 @@
 >   login; course is level-independent (levels added inside it); cohorts apply across all courses.
 > - **Curriculum + lecturer QR** (2026-06-23): curriculum bulk import; lecturer permanent
 >   career QR → passwordless dashboard; 75% attendance-threshold floor.
-> - **LAN-only proximity** (migration 039): **BLE/beacon/RSSI removed entirely.** Proximity =
->   on the coordinator's hotspot LAN + live rotating room code. The BLE rows below are HISTORICAL.
+> - **LAN-only proximity** (migration 039): proximity = on the coordinator's hotspot LAN
+>   + live rotating room code.
 
 ---
 
@@ -127,7 +127,6 @@
 | Daily Manifest cache bust on threshold change | Team A | `handlers/dqa.go:PutThresholds` | ✅ |
 | Admin audit log middleware (all state-mutating requests) | Team A | `middleware/audit.go` | ✅ |
 | PWA — Daily Fetch (download manifest, decrypt, store in IndexedDB) | Team C | `hooks/useManifest.ts` | ✅ |
-| PWA — BLE scanner (10s weighted RSSI rolling average) | Team C | `ble/scanner.ts` | ✅ |
 | PWA — QR Validation Engine (all 8 steps) | Team C | `qr/validator.ts` | ✅ |
 | PWA — Session State Machine UI (full IDLE→CLOSED flow) | Team C | `pages/SessionPage.tsx` | ✅ |
 | PWA — QR Camera scanner (BarcodeDetector API) | Team C | `components/QRScanner.tsx` | ✅ |
@@ -171,7 +170,7 @@
 
 | Task | Deliverable | Status |
 |---|---|---|
-| Tenant onboarding API — list/create/suspend tenants, create users, register beacons | `handlers/admin.go` (7 endpoints) | ✅ |
+| Tenant onboarding API — list/create/suspend tenants, create users | `handlers/admin.go` | ✅ |
 | Admin panel — Tenant list + create form + user management | `pages/admin/AdminTenants.tsx`, `AdminUsers.tsx` | ✅ |
 | Admin routes wired into dashboard app + sidebar nav | `App.tsx` | ✅ |
 | Notification service — SMTP + Web Push (sync overdue, QR reissued, warden data) | `services/notification-service/` | ✅ |
@@ -301,7 +300,7 @@
 | RSA-2048 QR signing | ✅ |
 | HMAC payload integrity | ✅ |
 | Hardware fingerprint engine | ✅ Implemented |
-| BLE proximity enforcement | ✅ PWA BLE scanner built (`ble/scanner.ts`); wired to session |
+| Proximity enforcement | ✅ Same-LAN egress-IP match + rotating room code; wired to session |
 | Session package sealing (pre-sync) | ✅ Sealer + outbox built (`sync/sealer.ts`, `sync/outbox.ts`) |
 
 ---

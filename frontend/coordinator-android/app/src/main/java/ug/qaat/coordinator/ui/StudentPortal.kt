@@ -9,6 +9,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,7 +46,7 @@ fun StudentPortalScreen(regNo: String?, onClose: () -> Unit) {
                     containerColor = navColor, titleContentColor = onNav!!,
                     navigationIconContentColor = onNav, actionIconContentColor = onNav,
                 ) else TopAppBarDefaults.topAppBarColors(),
-                navigationIcon = { IconButton(onClick = onClose) { Text("‹", fontSize = 26.sp) } },
+                navigationIcon = { IconButton(onClick = onClose) { BarIcon(Icons.Filled.ArrowBack, "Back", onNav ?: MaterialTheme.colorScheme.primary) } },
                 title = { Text("Student portal", fontWeight = FontWeight.Bold) },
                 actions = {
                     TextButton(onClick = {

@@ -1,13 +1,15 @@
-// Package crypto verifies and decrypts session packages uploaded by the
-// Coordinator PWA. It mirrors, byte-for-byte, the WebCrypto operations the PWA
-// performs in apps/coordinator-pwa/src/crypto/vault-crypto.ts and sealer.ts:
+// Package crypto verifies and decrypts session packages uploaded by the coordinator
+// app. It mirrors, byte-for-byte, the operations the client performs in
+// frontend/coordinator-android/crypto-core (VaultCrypto.kt and Sealer.kt).
+// The wire format below is unchanged from the retired coordinator PWA, so packages
+// sealed before the Android app replaced it still decrypt:
 //
 //   - The device binding key is a hex string issued by auth-service and stored
 //     AES-256-GCM encrypted under the shared master key (AAD = user_id).
 //   - From it, HKDF-SHA256 derives an AES-256-GCM vault key (info
 //     "coordinator-vault-key") and an HMAC-SHA256 key (info
 //     "coordinator-vault-hmac"), both with salt "QAAT-IndexedDB-Salt-v1".
-//   - The PWA uploads base64(iv12 || ciphertext || tag) and an HMAC over that
+//   - The client uploads base64(iv12 || ciphertext || tag) and an HMAC over that
 //     base64 text. We authenticate the HMAC, then decrypt.
 package crypto
 

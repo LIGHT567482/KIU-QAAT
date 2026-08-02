@@ -55,7 +55,6 @@ components:
         attendance_threshold:   { type: integer, minimum: 1, maximum: 100 }
         checkin_window_minutes: { type: integer }
         auto_kill_minutes:      { type: integer }
-        rssi_threshold_dbm:     { type: integer }
 
     EligibilityUnit:
       type: object

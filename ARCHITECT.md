@@ -9,7 +9,7 @@
 
 QAAT follows a **Decentralised Edge-Cloud Hybrid Architecture**. The core principle is that all attendance operations during a live session are **fully offline**, executed on the Coordinator's laptop, which is simultaneously the **room Wi-Fi hotspot**, the **LAN server**, and the **local database**. The cloud is only involved in pre-session data provisioning and post-session synchronisation.
 
-> **Proximity model (current):** BLE beacons / RSSI were **removed** (migration 039). Proximity is now proven by the phone **being on the coordinator's hotspot LAN** plus the **live rotating room code**. In the diagram below, read the "beacon" box as the laptop's hotspot — every phone joins it and submits over the LAN.
+> **Proximity model:** proximity is proven by the phone **being on the coordinator's hotspot LAN** plus the **live rotating room code**. In the diagram below, the laptop is the room's hotspot — every phone joins it and submits over the LAN.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -206,7 +206,7 @@ students_extended (1) ─────── (N) attendance_logs
 students_extended (1) ─────── (1) hardware_vault
 sessions (0..1) ────────────── (1) lecturer_attendance_logs
 tenants (1) ──────────────── (N) venues
-sessions (1) ─── stamp ────── coordinator_ip   (same-LAN proximity; ble_beacons dropped — mig 039)
+sessions (1) ─── stamp ────── coordinator_ip   (same-LAN proximity)
 coordinator_delegations (N) ─ (1) course_offerings   (standby coordinator — mig 042)
 ```
 
@@ -423,7 +423,7 @@ PENDING ──► UPLOADING ──► SYNCED
 | PWA Runtime | Browser (Chrome/Safari/Firefox) | Chrome 90+, Safari 14+ | No app store dependency |
 | PWA Storage | IndexedDB | Browser native | Large offline data capacity |
 | PWA Sync | Service Worker + Background Sync | W3C Level 1 | Offline-first sync |
-| PWA proximity | Same-LAN (egress IP) + rotating room code | — | Hardware-free proximity enforcement (replaced Web Bluetooth) |
+| PWA proximity | Same-LAN (egress IP) + rotating room code | — | Hardware-free proximity enforcement |
 | Backend API | Go (Golang) | 1.21+ | High throughput, low latency |
 | QR Service | Node.js | 20+ | Rich cryptography ecosystem |
 | Database | PostgreSQL | 15+ | RLS support, JSON support, sharding |

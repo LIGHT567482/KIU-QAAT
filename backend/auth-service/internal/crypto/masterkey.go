@@ -82,7 +82,7 @@ func DecryptWithMasterKey(ciphertext, aad string) (string, error) {
 }
 
 // GenerateBindingKey returns a fresh 32-byte device binding secret as a 64-char
-// hex string. The Coordinator PWA feeds this into HKDF to derive its vault keys.
+// hex string. The coordinator app feeds this into HKDF to derive its vault keys.
 func GenerateBindingKey() (string, error) {
 	b := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {

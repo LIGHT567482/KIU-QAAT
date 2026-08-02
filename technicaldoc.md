@@ -10,11 +10,9 @@
 > below, **the items below win**, and [`flow.md`](flow.md) +
 > [`docs/FLOWCHART.md`](docs/FLOWCHART.md) are the authoritative current view.
 >
-> - **Proximity is LAN-only, no BLE.** BLE beacons / RSSI / Web Bluetooth were
->   **removed** (migration 039). A student is proven in the room by **being on the
+> - **Proximity is LAN-only.** A student is proven in the room by **being on the
 >   coordinator's Wi-Fi hotspot LAN** (egress IP must match `sessions.coordinator_ip`)
->   **plus** a **live rotating room code**. Anywhere this doc says "BLE/RSSI/beacon
->   proximity," read "same-LAN + rotating room code."
+>   **plus** a **live rotating room code**.
 > - **Attendance is fully offline.** The coordinator's laptop is the room hotspot +
 >   LAN server + database; every log is written locally the instant it is accepted,
 >   then the closed session is **sealed (AES-256-GCM + device-bound HMAC-SHA256 +
@@ -171,7 +169,6 @@ X-Device-Fingerprint: <sha256-hash>
       "unit_id": "CS-301",
       "unit_name": "Database Systems",
       "venue_id": "LH-05",
-      "beacon_uuid": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
       "scheduled_start": "2026-05-26T08:00:00Z",
       "scheduled_end": "2026-05-26T10:00:00Z"
     }
@@ -179,8 +176,7 @@ X-Device-Fingerprint: <sha256-hash>
   "policy": {
     "attendance_threshold": 75,
     "checkin_window_minutes": 120,
-    "auto_kill_minutes": 180,
-    "rssi_threshold_dbm": -65
+    "auto_kill_minutes": 180
   },
   "institution_public_key": "-----BEGIN PUBLIC KEY-----\n...",
   "roster": {
@@ -348,8 +344,7 @@ Read/write institutional policy parameters.
 {
   "attendance_threshold": 80,
   "checkin_window_minutes": 120,
-  "auto_kill_minutes": 180,
-  "rssi_threshold_dbm": -65
+  "auto_kill_minutes": 180
 }
 ```
 
@@ -397,7 +392,6 @@ CREATE TABLE tenants (
   attendance_threshold    SMALLINT DEFAULT 75,
   checkin_window_minutes  SMALLINT DEFAULT 120,
   auto_kill_minutes       SMALLINT DEFAULT 180,
-  rssi_threshold_dbm      SMALLINT DEFAULT -65,
   logo_url          TEXT,
   brand_color       VARCHAR(7),
   created_at        TIMESTAMPTZ DEFAULT now()
@@ -432,18 +426,6 @@ CREATE TABLE venues (
   gps_latitude   DECIMAL(10, 8),
   gps_longitude  DECIMAL(11, 8),
   geofence_radius_meters SMALLINT DEFAULT 50,
-  tenant_id      UUID NOT NULL REFERENCES tenants(tenant_id)
-);
-
--- ⚠️ ble_beacons was DROPPED in migration 039 (LAN-only proximity). Historical only:
-CREATE TABLE ble_beacons (
-  beacon_uuid    UUID PRIMARY KEY,
-  venue_id       VARCHAR(50) NOT NULL REFERENCES venues(venue_id),
-  format         VARCHAR(20) CHECK (format IN ('IBEACON', 'EDDYSTONE_UID')),
-  major          SMALLINT,
-  minor          SMALLINT,
-  battery_level  SMALLINT,
-  last_seen      TIMESTAMPTZ,
   tenant_id      UUID NOT NULL REFERENCES tenants(tenant_id)
 );
 
@@ -501,7 +483,6 @@ CREATE TABLE attendance_logs (
   student_id            VARCHAR(50) NOT NULL,
   checkin_timestamp     TIMESTAMPTZ NOT NULL,
   device_fingerprint_hash VARCHAR(128),
-  beacon_rssi           SMALLINT,
   sequence_number       INTEGER NOT NULL,
   entry_method          entry_method_enum NOT NULL DEFAULT 'QR_SCAN',
   override_officer_id   VARCHAR(50),
@@ -602,7 +583,6 @@ CREATE INDEX ON student_attendance_summary(student_id, unit_id);
 | Local DB | Dexie.js (IndexedDB wrapper with TypeScript support) |
 | Encryption | SubtleCrypto API (Web Crypto — AES-256-GCM) |
 | QR Validation | jsrsasign (RSA-2048 + SHA-256 verification) |
-| BLE | navigator.bluetooth (Web Bluetooth API) |
 | LAN Server | Service Worker intercepts on port 8080 via fetch handler |
 | State Management | Zustand or XState (for session state machine) |
 | Build | Vite + PWA plugin (vite-plugin-pwa) |
@@ -688,9 +668,8 @@ async function validateStudentQR(qrPayload: string, session: ActiveSession): Pro
   if (!session.rosterHashes.includes(studentIdHash)) 
     return { status: 'REJECTED', reason: 'NOT_ON_ROSTER' };
   
-  // Step 5: BLE proximity check (10-second rolling average)
-  const rssi = await getBLERollingAverage(session.beaconUUID, 10000);
-  if (rssi === null || rssi < session.policy.rssiThreshold) 
+  // Step 5: proximity check — same LAN as the coordinator + live rotating room code
+  if (!onSameLAN(clientIP, session) || !verifyRoomCode(submittedCode, session)) 
     return { status: 'REJECTED', reason: 'PROXIMITY_FAILED' };
   
   // Step 6: Hardware fingerprint check
@@ -722,12 +701,11 @@ async function validateStudentQR(qrPayload: string, session: ActiveSession): Pro
     session_id: session.sessionId,
     student_id_hash: studentIdHash,
     device_fingerprint_hash: deviceFingerprint,
-    beacon_rssi: rssi,
     timestamp: new Date().toISOString(),
     sequence_number: await getNextSequence(session.sessionId)
   });
   
-  return { status: 'PRESENT', student_id_hash: studentIdHash, rssi };
+  return { status: 'PRESENT', student_id_hash: studentIdHash };
 }
 ```
 
@@ -769,52 +747,35 @@ async function sealSessionPackage(sessionId: string): Promise<EncryptedPackage> 
 
 ---
 
-## 4. BLE Proximity Engine — ⚠️ SUPERSEDED / REMOVED (migration 039)
-> This entire section is **historical**. BLE / Web Bluetooth / RSSI were removed.
-> Proximity is now: the phone must be **on the coordinator's hotspot LAN** (egress IP
-> matches `sessions.coordinator_ip`) **plus** present the **live rotating room code**.
-> Kept for design history only — none of the code below ships.
+## 4. Proximity Engine — same-LAN + rotating room code
 
-### 4.1 Web Bluetooth Integration
+Proximity is proven without any extra radio hardware, using two independent signals
+that both require the student to be physically in the room.
+
+### 4.1 Same-LAN check
+
+The coordinator's device is the room's Wi-Fi hotspot, LAN server and database. When a
+session opens, the coordinator's address is stamped on the session as
+`sessions.coordinator_ip`. Every check-in is accepted only if the submitting device's
+egress IP matches that stamp — i.e. it is on this room's access point.
 
 ```typescript
-async function startBLEScan(beaconUUID: string): Promise<void> {
-  const device = await navigator.bluetooth.requestDevice({
-    filters: [{ services: [beaconUUID] }],
-    optionalServices: ['0x180F'] // Battery Service
-  });
-  
-  rssiReadings[beaconUUID] = [];
-  
-  // Scan for advertising packets
-  await navigator.bluetooth.requestLEScan({
-    filters: [{ services: [beaconUUID] }],
-    keepRepeatedDevices: true
-  });
-  
-  navigator.bluetooth.addEventListener('advertisementreceived', (event) => {
-    if (event.device.id === device.id) {
-      const reading = { rssi: event.rssi, timestamp: Date.now() };
-      rssiReadings[beaconUUID].push(reading);
-      pruneOldReadings(beaconUUID, 10000); // keep last 10 seconds
-    }
-  });
-}
-
-function getBLERollingAverage(beaconUUID: string, windowMs: number): number | null {
-  const cutoff = Date.now() - windowMs;
-  const recent = rssiReadings[beaconUUID]?.filter(r => r.timestamp > cutoff) ?? [];
-  if (recent.length === 0) return null;
-  
-  // Weighted average: more recent readings have higher weight
-  const weighted = recent.reduce((acc, r, i) => {
-    const weight = (i + 1) / recent.length;
-    return { sum: acc.sum + r.rssi * weight, weights: acc.weights + weight };
-  }, { sum: 0, weights: 0 });
-  
-  return weighted.sum / weighted.weights;
+function onSameLAN(clientIP: string, session: Session): boolean {
+  return normaliseIP(clientIP) === normaliseIP(session.coordinatorIP);
 }
 ```
+
+Caddy is the only front door and is the sole writer of `X-Forwarded-For`, so the
+client IP cannot be spoofed by an upstream hop.
+
+### 4.2 Rotating room code
+
+The coordinator displays a 6-digit code on the projector that changes every
+`StepSeconds`. It is an HMAC-based TOTP (RFC 6238 style) keyed by a per-session secret
+that never leaves the server, so it cannot be precomputed or shared ahead of time — a
+student must read it live off the screen.
+
+See `backend/api-gateway/internal/checkin/roomcode.go` for the implementation.
 
 ---
 
@@ -941,7 +902,7 @@ async function deliverQRCodesBatch(students, tenantConfig) {
 | `QR_EXPIRED` | 422 | QR expiry date is in the past |
 | `TENANT_MISMATCH` | 422 | QR belongs to different institution |
 | `NOT_ON_ROSTER` | 403 | Student not enrolled in this Course Unit |
-| `PROXIMITY_FAILED` | 422 | BLE RSSI below institutional threshold |
+| `PROXIMITY_FAILED` | 422 | Device not on the coordinator's LAN, or wrong room code |
 | `DEVICE_MISMATCH` | 403 | Hardware fingerprint does not match stored binding |
 | `DUPLICATE_SCAN` | 409 | Student already marked present in this session |
 | `DEVICE_ALREADY_USED` | 409 | This device already registered another student |

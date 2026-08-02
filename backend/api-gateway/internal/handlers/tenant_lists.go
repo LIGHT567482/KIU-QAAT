@@ -121,8 +121,9 @@ func PutStaffIDPrefix(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // Router-facing wrappers.
-func GetTitles(pool *pgxpool.Pool) http.HandlerFunc        { return getTenantList(pool, "titles", "titles") }
-func PutTitles(pool *pgxpool.Pool) http.HandlerFunc        { return putTenantList(pool, "titles", "titles") }
+func GetTitles(pool *pgxpool.Pool) http.HandlerFunc { return getTenantList(pool, "titles", "titles") }
+func PutTitles(pool *pgxpool.Pool) http.HandlerFunc { return putTenantList(pool, "titles", "titles") }
+
 // GetLevels returns the level names plus their per-level years of study.
 func GetLevels(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -180,5 +181,9 @@ func PutLevels(pool *pgxpool.Pool) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"levels": clean, "level_years": years})
 	}
 }
-func GetStudySessions(pool *pgxpool.Pool) http.HandlerFunc { return getTenantList(pool, "study_sessions", "study_sessions") }
-func PutStudySessions(pool *pgxpool.Pool) http.HandlerFunc { return putTenantList(pool, "study_sessions", "study_sessions") }
+func GetStudySessions(pool *pgxpool.Pool) http.HandlerFunc {
+	return getTenantList(pool, "study_sessions", "study_sessions")
+}
+func PutStudySessions(pool *pgxpool.Pool) http.HandlerFunc {
+	return putTenantList(pool, "study_sessions", "study_sessions")
+}

@@ -164,21 +164,21 @@ func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.R
 			return strings.TrimSpace(row[i])
 		}
 
-		studentID    := get("student_id")
-		fullName     := get("full_name")
+		studentID := get("student_id")
+		fullName := get("full_name")
 		// Row value first, else the import-target context.
-		courseID     := orDefault(get("course_id"), def.CourseID)
+		courseID := orDefault(get("course_id"), def.CourseID)
 		academicYear := orDefault(get("academic_year"), def.AcademicYr)
-		currentYear  := orDefault(get("current_year"), def.StudyYear)
-		semester     := orDefault(get("semester"), def.Semester)
-		level        := orDefault(get("level"), def.Level)
-		intake       := orDefault(get("intake_session"), def.Intake)
-		offeringID   := orDefault(get("offering_id"), def.OfferingID)
+		currentYear := orDefault(get("current_year"), def.StudyYear)
+		semester := orDefault(get("semester"), def.Semester)
+		level := orDefault(get("level"), def.Level)
+		intake := orDefault(get("intake_session"), def.Intake)
+		offeringID := orDefault(get("offering_id"), def.OfferingID)
 		// Email is synthesised from the reg-no when not supplied (hidden identity).
 		// realEmail tracks whether the row carried a genuine address — only those
 		// students get their QR emailed (optional, QR-dispatch only).
-		realEmail    := get("email")
-		email        := orDefault(realEmail, synthEmail(studentID, domain))
+		realEmail := get("email")
+		email := orDefault(realEmail, synthEmail(studentID, domain))
 
 		if studentID == "" || courseID == "" {
 			res.Errors = append(res.Errors, fmt.Sprintf("line %d: student_id and a course (row or import target) are required", lineNum))
@@ -237,12 +237,6 @@ func processCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string, r io.R
 			res.Inserted++
 		} else {
 			res.Updated++
-		}
-
-		// When the row carried a real email, mint + email this student's QR
-		// (best-effort, async). Rows with only the synthetic identity get none.
-		if realEmail != "" {
-			issueStudentQR(authHeader, studentID, "")
 		}
 	}
 

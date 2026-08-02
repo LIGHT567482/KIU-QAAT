@@ -92,9 +92,7 @@ VALUES (
 )
 ON CONFLICT DO NOTHING;
 
--- ── Student (for SMTP QR email test) ─────────────────────────────────────────
--- qr_serial_number left NULL — the batch endpoint generates and assigns it.
--- Change the email to your own inbox to receive the QR delivery.
+-- ── Student ──────────────────────────────────────────────────────────────────
 INSERT INTO students_extended (
     student_id, tenant_id, course_id, full_name, email,
     academic_year, enrollment_status, current_year, semester, intake_session

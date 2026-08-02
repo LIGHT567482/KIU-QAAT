@@ -148,17 +148,17 @@ func SendQAMessage(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type qaMessageOut struct {
-	MessageID     string  `json:"message_id"`
-	SenderName    string  `json:"sender_name"`
-	SenderRole    string  `json:"sender_role"`
-	Audience      string  `json:"audience"`
-	AudienceValue string  `json:"audience_value"`
-	Subject       string  `json:"subject"`
-	Body          string  `json:"body"`
-	HasAttachment bool    `json:"has_attachment"`
+	MessageID      string `json:"message_id"`
+	SenderName     string `json:"sender_name"`
+	SenderRole     string `json:"sender_role"`
+	Audience       string `json:"audience"`
+	AudienceValue  string `json:"audience_value"`
+	Subject        string `json:"subject"`
+	Body           string `json:"body"`
+	HasAttachment  bool   `json:"has_attachment"`
 	AttachmentName string `json:"attachment_name"`
-	CreatedAt     string  `json:"created_at"`
-	Read          bool    `json:"read"`
+	CreatedAt      string `json:"created_at"`
+	Read           bool   `json:"read"`
 }
 
 // ListQAMessages — GET /api/v1/messages?box=inbox|sent

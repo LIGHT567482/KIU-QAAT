@@ -11,7 +11,6 @@ import (
 	"github.com/qaat/auth-service/internal/models"
 )
 
-
 var ErrNotFound = errors.New("user not found")
 var ErrLocked = errors.New("account locked")
 

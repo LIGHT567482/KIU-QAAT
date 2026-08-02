@@ -13,7 +13,7 @@ import (
 // Non-coordinator roles use a global per-IP limiter (200 req/s, burst 400).
 func CoordinatorRateLimit() func(http.Handler) http.Handler {
 	var (
-		mu         sync.Mutex
+		mu           sync.Mutex
 		coordinators = make(map[string]*rate.Limiter)
 		global       = make(map[string]*rate.Limiter)
 	)
@@ -70,8 +70,8 @@ func CoordinatorRateLimit() func(http.Handler) http.Handler {
 // restricts attempts to holders of a real, enrolled QR).
 func PublicIPRateLimit(perSec rate.Limit, burst int) func(http.Handler) http.Handler {
 	var (
-		mu   sync.Mutex
-		ips  = make(map[string]*rate.Limiter)
+		mu  sync.Mutex
+		ips = make(map[string]*rate.Limiter)
 	)
 	get := func(ip string) *rate.Limiter {
 		mu.Lock()

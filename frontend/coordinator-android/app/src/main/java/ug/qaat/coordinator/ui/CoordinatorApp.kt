@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,15 +37,15 @@ import ug.qaat.coordinator.net.ManifestClient
 import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.sync.SyncManager
 
-private data class Tab(val route: String, val label: String, val icon: String)
+private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    Tab("dashboard", "Home", "🏠"),
-    Tab("session", "Attendance", "▶"),
-    Tab("absentees", "Absentees", "⚠"),
-    Tab("trends", "Trends", "📈"),
-    Tab("alerts", "Alerts", "🔔"),
-    Tab("audit", "Sync", "⟳"),
+    Tab("dashboard", "Home", NavIcons.Home),
+    Tab("session", "Attendance", NavIcons.Session),
+    Tab("absentees", "Absentees", NavIcons.Absentees),
+    Tab("trends", "Trends", NavIcons.Trends),
+    Tab("alerts", "Alerts", NavIcons.Alerts),
+    Tab("audit", "Sync", NavIcons.Sync),
 )
 
 /**
@@ -197,11 +198,12 @@ fun CoordinatorApp() {
                 actions = {
                     // Just two icons — a refresh loop and a profile — to declutter the bar.
                     IconButton(onClick = { scope.launch { withContext(Dispatchers.IO) { runCatching { refreshAll() } } } }, enabled = !AppState.refreshing) {
-                        Text(if (AppState.refreshing) "…" else "⟳", fontSize = 20.sp, color = onNav ?: MaterialTheme.colorScheme.primary)
+                        BarIcon(NavIcons.Sync, if (AppState.refreshing) "Refreshing" else "Refresh",
+                            onNav ?: MaterialTheme.colorScheme.primary)
                     }
                     Box {
                         IconButton(onClick = { showProfile = !showProfile }) {
-                            Icon(Icons.Filled.AccountCircle, contentDescription = "Profile", tint = Color.White)
+                            BarIcon(NavIcons.Account, "Profile", onNav ?: Color.White)
                         }
                         if (showProfile) ProfilePopup(
                             onClose = { showProfile = false },
@@ -225,7 +227,7 @@ fun CoordinatorApp() {
                     NavigationBarItem(
                         selected = selected,
                         onClick = { nav.navigate(t.route) { launchSingleTop = true; restoreState = true } },
-                        icon = { TabGlyph(t.icon) }, label = { Text(t.label) }, colors = itemColors,
+                        icon = { TabGlyph(t.icon, t.label) }, label = { Text(t.label) }, colors = itemColors,
                     )
                 }
             }

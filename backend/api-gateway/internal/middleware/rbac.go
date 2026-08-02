@@ -37,7 +37,6 @@ const (
 	RoleVC          = "VC"
 	RoleDVC         = "DVC" // Deputy Vice-Chancellor (oversight tier, mirrors VC)
 	RoleAdmin       = "ADMIN"
-	RoleSuperAdmin  = "SUPER_ADMIN" // platform owner (registers tenants, configures branding)
 	RoleStudent     = "STUDENT"
 	RoleLecturer    = "LECTURER"     // logs into the lecturer dashboard (read-only attendance)
 	RolePatroller   = "QA_PATROLLER" // QA field patroller — records whether the lecturer is teaching

@@ -434,9 +434,17 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 		if pkg.Session.SessionStatus == "AUTO_CLOSED" {
 			sessionStatus = "AUTO_CLOSED"
 		}
+		// Stamp the coordinator's OFFERING (cohort) on the session, exactly as the online
+		// OpenSession path does. A coordinator owns at most one offering per tenant
+		// (ux_offerings_tenant_coordinator), so this is unambiguous. Without it an
+		// offline-synced session lands with offering_id NULL — and since nearly every
+		// session is held offline, the cohort every dashboard groups by would be missing,
+		// putting a Weekend session's students in among the Day cohort's.
 		if _, err := conn.Exec(ctx, `
-			INSERT INTO sessions (session_id, tenant_id, coordinator_id, unit_id, session_date, session_status)
-			VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5,'')::date, CURRENT_DATE), $6::session_status_enum)
+			INSERT INTO sessions (session_id, tenant_id, coordinator_id, unit_id, session_date, session_status, offering_id)
+			VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5,'')::date, CURRENT_DATE), $6::session_status_enum,
+			        (SELECT o.offering_id FROM course_offerings o
+			          WHERE o.coordinator_id = $3 AND o.tenant_id = $2 LIMIT 1))
 			ON CONFLICT (session_id) DO NOTHING`,
 			pkg.Session.SessionID, tenantID, coordinatorID, pkg.Session.UnitID, pkg.Session.SessionDate, sessionStatus,
 		); err != nil {

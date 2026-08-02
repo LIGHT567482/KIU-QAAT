@@ -22,7 +22,7 @@ need() { [ -n "${!1:-}" ] || { echo "!! missing env: $1"; exit 1; }; }
 deploy_frontends() {
   need VERCEL_TOKEN
   bash scripts/sync-brand.sh
-  for app in admin-dashboards coordinator-pwa student-portal; do
+  for app in admin-dashboards student-portal; do
     echo "── deploying $app ──"
     ( cd "frontend/$app" && npm ci && npm run build \
         && npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN" )

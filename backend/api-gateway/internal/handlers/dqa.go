@@ -203,10 +203,10 @@ func DQATrends(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type weekPoint struct {
-			WeekStart            string  `json:"week_start"`
-			SessionsHeld         int     `json:"sessions_held"`
-			UniqueStudents       int     `json:"unique_students"`
-			TotalCheckins        int     `json:"total_checkins"`
+			WeekStart             string  `json:"week_start"`
+			SessionsHeld          int     `json:"sessions_held"`
+			UniqueStudents        int     `json:"unique_students"`
+			TotalCheckins         int     `json:"total_checkins"`
 			AvgStudentsPerSession float64 `json:"avg_students_per_session"`
 		}
 
@@ -271,13 +271,13 @@ func DQAPunctuality(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type record struct {
-			CoordinatorID    string  `json:"coordinator_id"`
-			CoordinatorName  string  `json:"coordinator_name"`
-			TotalSessions    int     `json:"total_sessions"`
-			GateOpenedCount  int     `json:"gate_opened_count"`
-			NoGateOpenCount  int     `json:"no_gate_open_count"`
-			AvgWaitMinutes   float64 `json:"avg_wait_minutes"`
-			LateOpenCount    int     `json:"late_open_count"`
+			CoordinatorID   string  `json:"coordinator_id"`
+			CoordinatorName string  `json:"coordinator_name"`
+			TotalSessions   int     `json:"total_sessions"`
+			GateOpenedCount int     `json:"gate_opened_count"`
+			NoGateOpenCount int     `json:"no_gate_open_count"`
+			AvgWaitMinutes  float64 `json:"avg_wait_minutes"`
+			LateOpenCount   int     `json:"late_open_count"`
 		}
 
 		var records []record
@@ -340,18 +340,18 @@ func DQABulkIneligible(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		type record struct {
-			StudentID           string  `json:"student_id"`
-			StudentName         string  `json:"student_name"`
-			Email               string  `json:"email"`
-			CourseID            string  `json:"course_id"`
-			CourseName          string  `json:"course_name"`
-			UnitID              string  `json:"unit_id"`
-			UnitName            string  `json:"unit_name"`
-			SessionsHeld        int     `json:"sessions_held"`
-			SessionsAttended    int     `json:"sessions_attended"`
-			AttendancePct       float64 `json:"attendance_percentage"`
-			Threshold           int     `json:"threshold"`
-			DeficitSessions     int     `json:"deficit_sessions"`
+			StudentID        string  `json:"student_id"`
+			StudentName      string  `json:"student_name"`
+			Email            string  `json:"email"`
+			CourseID         string  `json:"course_id"`
+			CourseName       string  `json:"course_name"`
+			UnitID           string  `json:"unit_id"`
+			UnitName         string  `json:"unit_name"`
+			SessionsHeld     int     `json:"sessions_held"`
+			SessionsAttended int     `json:"sessions_attended"`
+			AttendancePct    float64 `json:"attendance_percentage"`
+			Threshold        int     `json:"threshold"`
+			DeficitSessions  int     `json:"deficit_sessions"`
 		}
 
 		var records []record

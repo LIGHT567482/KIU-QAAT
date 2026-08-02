@@ -62,10 +62,10 @@ func PrometheusMiddleware(next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
 
-		role   := GetRole(r.Context())
-		path   := sanitisePath(r.URL.Path)
+		role := GetRole(r.Context())
+		path := sanitisePath(r.URL.Path)
 		status := strconv.Itoa(rec.status)
-		dur    := time.Since(start).Seconds()
+		dur := time.Since(start).Seconds()
 
 		httpRequestsTotal.WithLabelValues(r.Method, path, status, role).Inc()
 		httpRequestDuration.WithLabelValues(r.Method, path, role).Observe(dur)

@@ -7,17 +7,25 @@ import brand from '../brand.json'
 
 const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8443` : 'http://localhost:8443')
 
-const ROLE_REDIRECT: Record<Role, string> = {
+// Where each role lands after signing in. A role missing from this map has no web dashboard at
+// all — see NO_WEB_DASHBOARD below.
+const ROLE_REDIRECT: Partial<Record<Role, string>> = {
   VC:           '/vc',
   DQA_DIRECTOR: '/dqa/thresholds',
-  QA_OFFICER:   '/qa/live',
-  COORDINATOR:  '/coordinator',
+  QA_OFFICER:   '/qa/reports',
   ADMIN:        '/admin',
   LECTURER:     '/lecturer',
   HOD:          '/hod',
   DEAN:         '/dean',
   QA_SCHOOL_HANDLER: '/qa-school',
   QA_DEPT_REP:       '/qa-dept',
+}
+
+// Roles that work from a phone rather than this console. Their credentials are valid — sending
+// them to a route that does not exist would bounce them back here looking like a failed login, so
+// say plainly which app to open instead.
+const NO_WEB_DASHBOARD: Partial<Record<Role, string>> = {
+  COORDINATOR: 'Coordinators run sessions from the KIU QAAT mobile app — there is no web dashboard for this account. Sign in there with the same details, or with your coordinator code.',
 }
 
 export default function Login() {
@@ -72,6 +80,16 @@ export default function Login() {
         return
       }
 
+      // Resolve the landing page BEFORE storing the session: a role with no web dashboard should
+      // be told so, not signed in and then bounced back to this page by the catch-all route.
+      const dest = ROLE_REDIRECT[data.role as Role]
+      if (!dest) {
+        setError(NO_WEB_DASHBOARD[data.role as Role]
+          ?? 'This account has no dashboard in the web console.')
+        setLoading(false)
+        return
+      }
+
       sessionStorage.setItem('qaat_welcome', data.full_name || form.email)
       login(data.access_token, {
         userId:    data.user_id,
@@ -79,7 +97,7 @@ export default function Login() {
         role:      data.role as Role,
         expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
       })
-      navigate(ROLE_REDIRECT[data.role as Role] ?? '/')
+      navigate(dest)
     } catch {
       setError('Network error')
     } finally {

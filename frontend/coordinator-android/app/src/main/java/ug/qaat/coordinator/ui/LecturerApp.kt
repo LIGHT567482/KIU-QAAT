@@ -57,7 +57,9 @@ fun LecturerApp() {
                 },
                 actions = {
                     IconButton(onClick = { AppState.darkTheme = !AppState.darkTheme; SessionStore.saveTheme(AppState.darkTheme) }) {
-                        Text(if (AppState.darkTheme) "☀" else "☾", fontSize = 18.sp, color = onNav ?: MaterialTheme.colorScheme.primary)
+                        BarIcon(if (AppState.darkTheme) NavIcons.LightMode else NavIcons.DarkMode,
+                            if (AppState.darkTheme) "Switch to light theme" else "Switch to dark theme",
+                            onNav ?: MaterialTheme.colorScheme.primary)
                     }
                 },
             )
@@ -69,11 +71,11 @@ fun LecturerApp() {
                     unselectedIconColor = onNav.copy(alpha = .65f), unselectedTextColor = onNav.copy(alpha = .65f),
                     indicatorColor = onNav.copy(alpha = .18f),
                 ) else NavigationBarItemDefaults.colors()
-                NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph("▶") }, label = { Text("Session") }, colors = itemColors)
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph("👥") }, label = { Text("Roster") }, colors = itemColors)
+                NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Session, "Session") }, label = { Text("Session") }, colors = itemColors)
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Roster, "Roster") }, label = { Text("Roster") }, colors = itemColors)
                 NavigationBarItem(tab == 2, { tab = 2 }, colors = itemColors, label = { Text("Alerts") },
-                    icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph("🔔") } else TabGlyph("🔔") })
-                NavigationBarItem(tab == 3, { tab = 3 }, icon = { TabGlyph("☰") }, label = { Text("Profile") }, colors = itemColors)
+                    icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph(NavIcons.Alerts, "Alerts") } else TabGlyph(NavIcons.Alerts, "Alerts") })
+                NavigationBarItem(tab == 3, { tab = 3 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
             }
         },
     ) { pad ->

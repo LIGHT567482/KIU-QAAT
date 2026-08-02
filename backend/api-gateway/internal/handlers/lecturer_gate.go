@@ -65,7 +65,6 @@ func requestBaseURL(r *http.Request) string {
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSpace(host))
 }
 
-
 // ── Handler: GET /api/v1/sessions/{session_id}/lecturer-gate-qr ──────────────
 
 // LecturerGateQR generates a signed URL for the coordinator to display as a QR

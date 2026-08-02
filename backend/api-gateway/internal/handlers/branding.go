@@ -4,7 +4,7 @@ package handlers
 //
 //   - GetBranding         GET  /api/v1/branding              (any authenticated role; own tenant)
 //   - GetPublicBranding   GET  /api/v1/branding/public?...   (public; captive portals)
-//   - UpdateTenantBranding PATCH /api/v1/admin/tenants/{id}/branding (SUPER_ADMIN)
+//   - UpdateTenantBranding PATCH /api/v1/admin/tenants/{id}/branding (ADMIN)
 //
 // The logo + motto feed the top-left header on every dashboard; the captive-portal
 // pages use the public variant (no JWT) keyed by the tenant_id in the QR token.
@@ -153,7 +153,7 @@ func GetPublicBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// PATCH /api/v1/admin/tenants/{tenant_id}/branding — SUPER_ADMIN updates a tenant's
+// PATCH /api/v1/admin/tenants/{tenant_id}/branding — an ADMIN updates their tenant's
 // identity/branding. Runs on the privileged adminPool (cross-tenant platform op).
 func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -163,23 +163,23 @@ func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			InstitutionID   string `json:"institution_id"`
-			LogoURL         string `json:"logo_url"`
-			BrandColor      string `json:"brand_color"`
-			SidebarColor    string `json:"sidebar_color"`
-			BackgroundColor string `json:"background_color"`
-			BackgroundImage string `json:"background_image"`
+			InstitutionID      string `json:"institution_id"`
+			LogoURL            string `json:"logo_url"`
+			BrandColor         string `json:"brand_color"`
+			SidebarColor       string `json:"sidebar_color"`
+			BackgroundColor    string `json:"background_color"`
+			BackgroundImage    string `json:"background_image"`
 			BackgroundBlur     int    `json:"background_blur"`
 			BackgroundBright   int    `json:"background_brightness"`
 			BackgroundContrast int    `json:"background_contrast"`
 			BackgroundOverlay  string `json:"background_overlay_color"`
 			BackgroundOverlayO int    `json:"background_overlay_opacity"`
-			FooterColor     string `json:"footer_color"`
-			TextColorLight  string `json:"text_color_light"`
-			TextColorDark   string `json:"text_color_dark"`
-			Motto           string `json:"motto"`
-			Slogan          string `json:"slogan"`
-			Address         string `json:"address"`
+			FooterColor        string `json:"footer_color"`
+			TextColorLight     string `json:"text_color_light"`
+			TextColorDark      string `json:"text_color_dark"`
+			Motto              string `json:"motto"`
+			Slogan             string `json:"slogan"`
+			Address            string `json:"address"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))

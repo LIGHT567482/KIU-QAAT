@@ -24,7 +24,7 @@ func SecurityHeaders(env string) func(http.Handler) http.Handler {
 
 			// Permissions Policy — disable unnecessary browser features.
 			h.Set("Permissions-Policy",
-				"camera=(), microphone=(), geolocation=(self), bluetooth=(self), usb=()")
+				"camera=(), microphone=(), geolocation=(self), bluetooth=(), usb=()")
 
 			// Content-Security-Policy — strict by default; relax only what's needed.
 			// 'nonce' approach deferred to Phase 3 hardening sprint;
@@ -49,9 +49,9 @@ func SecurityHeaders(env string) func(http.Handler) http.Handler {
 			}
 
 			// Cross-Origin policies.
-			h.Set("Cross-Origin-Opener-Policy",   "same-origin")
-			h.Set("Cross-Origin-Embedder-Policy",  "require-corp")
-			h.Set("Cross-Origin-Resource-Policy",  "same-site")
+			h.Set("Cross-Origin-Opener-Policy", "same-origin")
+			h.Set("Cross-Origin-Embedder-Policy", "require-corp")
+			h.Set("Cross-Origin-Resource-Policy", "same-site")
 
 			next.ServeHTTP(w, r)
 		})

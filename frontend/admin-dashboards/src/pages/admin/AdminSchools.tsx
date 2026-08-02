@@ -4,8 +4,11 @@ import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
 // Manage the org hierarchy: schools/colleges, and the departments under each. Courses inherit
-// from these (the course form picks a school → department). Support departments (finance, ICT,
-// library…) can live under a "Support Services" school with kind = SUPPORT.
+// from these (the course form picks a school → department).
+//
+// SUPPORT departments — Finance, Admissions, Bursary, Library, ICT, Estates… — are
+// institution-wide and belong to NO school. They get their own section below, and are stored with
+// school_id NULL (migration 066) rather than parked under a fictional "Support Services" school.
 
 interface School { school_id: string; name: string; dept_count: number }
 interface Dept { department_id: string; school_id: string; name: string; kind: string }
@@ -19,9 +22,14 @@ export default function AdminSchools() {
 
   const [newSchool, setNewSchool] = useState('')
   const [deptName, setDeptName] = useState<Record<string, string>>({})
-  const [deptKind, setDeptKind] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Standalone support departments (no school).
+  const [supportName, setSupportName] = useState('')
+
+  // school_id === '' is the marker for a department that belongs to no school.
+  const academicDepts = depts.filter(d => d.school_id !== '')
+  const supportDepts = depts.filter(d => d.school_id === '')
 
   function reload() { schoolsQ.refetch(); deptsQ.refetch() }
 
@@ -42,8 +50,20 @@ export default function AdminSchools() {
     if (!name) return
     setBusy(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/departments`, { school_id: schoolId, name, kind: deptKind[schoolId] || 'ACADEMIC' })
+      await api.post(`/api/v1/admin/tenants/${tenantId}/departments`, { school_id: schoolId, name, kind: 'ACADEMIC' })
       setDeptName(m => ({ ...m, [schoolId]: '' })); reload()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to add department') }
+    finally { setBusy(false) }
+  }
+
+  // A support department is posted with no school_id at all.
+  async function addSupportDept() {
+    const name = supportName.trim()
+    if (!name) return
+    setBusy(true); setError(null)
+    try {
+      await api.post(`/api/v1/admin/tenants/${tenantId}/departments`, { name, kind: 'SUPPORT' })
+      setSupportName(''); reload()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to add department') }
     finally { setBusy(false) }
   }
@@ -76,7 +96,7 @@ export default function AdminSchools() {
 
       <div style={{ display: 'grid', gap: 16 }}>
         {schools.map(s => {
-          const myDepts = depts.filter(d => d.school_id === s.school_id)
+          const myDepts = academicDepts.filter(d => d.school_id === s.school_id)
           return (
             <div key={s.school_id} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -98,15 +118,45 @@ export default function AdminSchools() {
                 <input value={deptName[s.school_id] ?? ''} onChange={e => setDeptName(m => ({ ...m, [s.school_id]: e.target.value }))}
                   placeholder="New department name" style={{ ...inputStyle, maxWidth: 260 }}
                   onKeyDown={e => { if (e.key === 'Enter') addDept(s.school_id) }} />
-                <select value={deptKind[s.school_id] ?? 'ACADEMIC'} onChange={e => setDeptKind(m => ({ ...m, [s.school_id]: e.target.value }))} style={inputStyle}>
-                  <option value="ACADEMIC">Academic</option>
-                  <option value="SUPPORT">Support (finance, ICT, library…)</option>
-                </select>
                 <button onClick={() => addDept(s.school_id)} disabled={busy} style={btnPrimary}>+ Add department</button>
               </div>
             </div>
           )
         })}
+      </div>
+
+      {/* ── Support departments: institution-wide, under no school ─────────── */}
+      <div style={{ marginTop: 28, border: '1px solid #e2e8f0', borderRadius: 10, padding: 16, background: '#fcfdff' }}>
+        <h3 style={{ margin: '0 0 2px' }}>
+          Support departments
+          <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}> · {supportDepts.length}</span>
+        </h3>
+        <p style={{ color: 'var(--muted)', margin: '0 0 12px', fontSize: 13 }}>
+          Finance, Admissions, Bursary, Library, ICT, Estates, Security and the like. These serve the
+          whole institution and sit under <strong>no school</strong> — they are not part of any faculty.
+          Their staff are managed under <a href="../employees" style={{ color: 'var(--brand)' }}>Employees</a>.
+        </p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {supportDepts.map(d => (
+            <span key={d.department_id} style={{ ...chip, background: '#ecfeff', color: '#155e75' }}>
+              {d.name}
+              <button onClick={() => delDept(d.department_id)} style={chipX} title="Remove">×</button>
+            </span>
+          ))}
+          {supportDepts.length === 0 && (
+            <span style={{ color: 'var(--muted)', fontSize: 13 }}>None yet — add one below.</span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, maxWidth: 520 }}>
+          <input value={supportName} onChange={e => setSupportName(e.target.value)}
+            placeholder="e.g. Finance, Admissions, Library, ICT" style={inputStyle}
+            onKeyDown={e => { if (e.key === 'Enter') addSupportDept() }} />
+          <button onClick={addSupportDept} disabled={busy || !supportName.trim()} style={btnPrimary}>
+            + Add support department
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -77,11 +78,18 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
     }
 }
 
-/** Bottom-nav tab icon: just the tab's own glyph. (The app logo used to be drawn beside every
- *  glyph; that was removed so the nav bar shows only the clean per-tab icon.) */
+/** Bottom-nav tab icon. Draws a flat vector silhouette in the bar's own content colour — solid
+ *  white on the branded bars — rather than an emoji, which every OEM renders as its own small
+ *  multicolour picture. See [NavIcons]. */
 @Composable
-fun TabGlyph(glyph: String) {
-    Text(glyph, fontSize = 15.sp)
+fun TabGlyph(icon: ImageVector, label: String? = null) {
+    Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+}
+
+/** Top-bar action icon: same silhouette treatment, forced to the bar's content colour. */
+@Composable
+fun BarIcon(icon: ImageVector, label: String?, tint: Color) {
+    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
 }
 
 /** A faint, centered institution-logo watermark for EVERY app screen. It's a plain Image with

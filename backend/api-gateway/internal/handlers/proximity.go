@@ -7,12 +7,12 @@ import "net"
 //
 // The coordinator's laptop is the room's Wi-Fi (hotspot, no internet uplink), so
 // the ONLY way to reach the system is from that local network. The rule, in order:
-//   1. unparseable client → allow (never block on a parse failure)
-//   2. identical egress IP (campus-NAT-to-cloud model) → same place
-//   3. same /24 subnet (hotspot: coordinator 10.42.0.1, students 10.42.0.x) → same LAN
-//   4. client is a private/loopback address → on a local network (the hotspot case,
-//      robust even when the coordinator's own IP shows as loopback)
-//   5. otherwise (a public/remote client) → reject as off-network proxy
+//  1. unparseable client → allow (never block on a parse failure)
+//  2. identical egress IP (campus-NAT-to-cloud model) → same place
+//  3. same /24 subnet (hotspot: coordinator 10.42.0.1, students 10.42.0.x) → same LAN
+//  4. client is a private/loopback address → on a local network (the hotspot case,
+//     robust even when the coordinator's own IP shows as loopback)
+//  5. otherwise (a public/remote client) → reject as off-network proxy
 func onSameLAN(clientIP, coordinatorIP string) bool {
 	c := net.ParseIP(stripPort(clientIP))
 	if c == nil {

@@ -91,7 +91,7 @@ services:
       DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:-changeme_app}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
       ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:-changeme_db}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_redis}@redis:6379/0
-      CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003}
+      CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3001,http://localhost:3002,http://localhost:3003}
       # Dedicated student/captive-portal origin, kept independent from the
       # coordinator/admin console. Used to build the lecturer-gate captive URL.
       STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-}
@@ -118,43 +118,6 @@ services:
       auth-service:
         condition: service_started
 
-  qr-generator:
-    build:
-      context: ../backend/qr-generator
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      PORT: "3002"
-      # Connects as qaat_app (RLS-enforced); every query is run under a
-      # tenant-scoped GUC by db.withTenant().
-      DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:-changeme_app}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      SMTP_HOST: mailhog
-      SMTP_PORT: "1025"
-      # qr-generator verifies the RS256 JWT itself (update.md H1).
-      RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
-      JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
-      JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
-      # Required — must be a real 32-byte hex key; no all-zeros fallback.
-      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY}
-      # Dedicated student origin baked into the QR check-in URL, independent from
-      # the coordinator/admin console (e.g. http://attend.uni.edu). Falls back to
-      # CHECKIN_BASE_URL, then to a relative path when unset.
-      STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-}
-      CHECKIN_BASE_URL: ${CHECKIN_BASE_URL:-}
-      # Preferred QR destination: the student portal. When set, the QR encodes
-      # <portal>/?qr=<token> so scanning opens the portal (attend + track), not the
-      # single-session captive page.
-      STUDENT_PORTAL_URL: ${STUDENT_PORTAL_URL:-}
-      LOG_LEVEL: ${LOG_LEVEL:-debug}
-    volumes:
-      - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
-    ports:
-      - "3012:3002"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  # Atomic sync of closed-session attendance packages from the coordinator PWA.
   sync-receiver:
     build:
       context: ../backend/sync-receiver
@@ -233,11 +196,6 @@ services:
     restart: unless-stopped
     expose: ["3001"]
 
-  coordinator-pwa:
-    build: { context: ../frontend/coordinator-pwa, dockerfile: Dockerfile }
-    restart: unless-stopped
-    expose: ["3000"]
-
   student-portal:
     build: { context: ../frontend/student-portal, dockerfile: Dockerfile }
     restart: unless-stopped
@@ -249,7 +207,6 @@ services:
     restart: unless-stopped
     ports:
       - "8443:8443"
-      - "3000:3000"
       - "3001:3001"
       - "3003:3003"
     volumes:
@@ -260,7 +217,6 @@ services:
     depends_on:
       - api-gateway
       - admin-dashboards
-      - coordinator-pwa
       - student-portal
 
   # ─── Dev tooling ─────────────────────────────────────────────────────────

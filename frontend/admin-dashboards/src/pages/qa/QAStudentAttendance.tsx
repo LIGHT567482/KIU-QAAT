@@ -1,7 +1,8 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import { useAuth } from '../../contexts/AuthContext'
+import ExportButtons from '../../components/ExportButtons'
 
 interface Row {
   student_id: string; full_name: string; course: string; level: string
@@ -53,34 +54,14 @@ export default function QAStudentAttendance() {
     (!filters.year || String(r.year) === filters.year) &&
     (!filters.semester || String(r.semester) === filters.semester))
 
-  const [importing, setImporting] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImporting(true); setMsg(null)
-    try {
-      const fd = new FormData(); fd.append('roster', file)
-      const r = await api.upload<{ inserted: number; skipped: number; errors: string[] }>(
-        '/api/v1/dashboard/qa/student-attendance/import', fd)
-      setMsg(`Imported: ${r.inserted} attendance records added, ${r.skipped} skipped${r.errors?.length ? ` · ${r.errors.length} error(s)` : ''}`)
-    } catch (e) { setMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed') }
-    finally { setImporting(false); if (fileRef.current) fileRef.current.value = '' }
-  }
-
-  function exportXlsx() {
-    const suffix = isAdmin ? qs : (() => {
-      const p = new URLSearchParams()
-      if (filters.session) p.set('session', filters.session)
-      if (filters.year) p.set('year', filters.year)
-      if (filters.semester) p.set('semester', filters.semester)
-      return p.toString() ? `?${p}` : ''
-    })()
-    api.download(`/api/v1/dashboard/qa/student-attendance/export.xlsx${suffix}`, 'student-attendance.xlsx')
-      .catch(e => alert(e instanceof Error ? e.message : 'Export failed'))
-  }
+  // Whatever is filtered on screen is what downloads, in either format.
+  const exportQuery = isAdmin ? qs : (() => {
+    const p = new URLSearchParams()
+    if (filters.session) p.set('session', filters.session)
+    if (filters.year) p.set('year', filters.year)
+    if (filters.semester) p.set('semester', filters.semester)
+    return p.toString() ? `?${p}` : ''
+  })()
 
   const anyAdminFilter = isAdmin && (sf.course_id || sf.unit_id || sf.session || sf.year || sf.semester)
 
@@ -92,13 +73,10 @@ export default function QAStudentAttendance() {
           <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>Summarised progress per student. Filter by course, its units, session, year &amp; semester.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={exportXlsx} style={btnGhost}>Export Excel</button>
-          <input ref={fileRef} type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
-          <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost} title="Import attendance records (columns: session_id, student_id)">{importing ? 'Importing…' : 'Import (CSV/Excel)'}</button>
+          <ExportButtons base="/api/v1/dashboard/qa/student-attendance/export"
+            filename="student-attendance" query={exportQuery} />
         </div>
       </div>
-
-      {msg && <div style={{ background: msg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: msg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{msg}</div>}
 
       {isAdmin ? (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>

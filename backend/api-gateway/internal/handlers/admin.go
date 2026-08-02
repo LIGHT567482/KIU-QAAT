@@ -127,20 +127,20 @@ func ListTenants(pool *pgxpool.Pool) http.HandlerFunc {
 func CreateTenant(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Name                  string `json:"name"`
-			Domain                string `json:"domain"`
-			InstitutionID         string `json:"institution_id"`
-			AttendanceThreshold   int    `json:"attendance_threshold"`
-			CheckinWindowMinutes  int    `json:"checkin_window_minutes"`
-			AutoKillMinutes       int    `json:"auto_kill_minutes"`
-			LogoURL               string `json:"logo_url"`
-			BrandColor            string `json:"brand_color"`
-			SidebarColor          string `json:"sidebar_color"`
-			BackgroundColor       string `json:"background_color"`
-			FooterColor           string `json:"footer_color"`
-			Motto                 string `json:"motto"`
-			Slogan                string `json:"slogan"`
-			Address               string `json:"address"`
+			Name                 string `json:"name"`
+			Domain               string `json:"domain"`
+			InstitutionID        string `json:"institution_id"`
+			AttendanceThreshold  int    `json:"attendance_threshold"`
+			CheckinWindowMinutes int    `json:"checkin_window_minutes"`
+			AutoKillMinutes      int    `json:"auto_kill_minutes"`
+			LogoURL              string `json:"logo_url"`
+			BrandColor           string `json:"brand_color"`
+			SidebarColor         string `json:"sidebar_color"`
+			BackgroundColor      string `json:"background_color"`
+			FooterColor          string `json:"footer_color"`
+			Motto                string `json:"motto"`
+			Slogan               string `json:"slogan"`
+			Address              string `json:"address"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
@@ -166,10 +166,18 @@ func CreateTenant(pool *pgxpool.Pool) http.HandlerFunc {
 				return
 			}
 		}
-		if req.AttendanceThreshold < 75 { req.AttendanceThreshold = 75 } // 75% floor — never lower
-		if req.AttendanceThreshold > 100 { req.AttendanceThreshold = 100 }
-		if req.CheckinWindowMinutes == 0 { req.CheckinWindowMinutes = 120 }
-		if req.AutoKillMinutes == 0      { req.AutoKillMinutes = 180 }
+		if req.AttendanceThreshold < 75 {
+			req.AttendanceThreshold = 75
+		} // 75% floor — never lower
+		if req.AttendanceThreshold > 100 {
+			req.AttendanceThreshold = 100
+		}
+		if req.CheckinWindowMinutes == 0 {
+			req.CheckinWindowMinutes = 120
+		}
+		if req.AutoKillMinutes == 0 {
+			req.AutoKillMinutes = 180
+		}
 
 		var tenantID string
 		err := pool.QueryRow(r.Context(), `
@@ -200,10 +208,10 @@ func CreateTenant(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, map[string]string{
-			"tenant_id":  tenantID,
-			"name":       req.Name,
-			"domain":     req.Domain,
-			"status":     "CREATED",
+			"tenant_id": tenantID,
+			"name":      req.Name,
+			"domain":    req.Domain,
+			"status":    "CREATED",
 		})
 	}
 }
@@ -212,7 +220,9 @@ func CreateTenant(pool *pgxpool.Pool) http.HandlerFunc {
 func SetTenantStatus(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/status")
-		var req struct{ IsActive bool `json:"is_active"` }
+		var req struct {
+			IsActive bool `json:"is_active"`
+		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
 			return
@@ -222,7 +232,7 @@ func SetTenantStatus(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// DELETE /api/v1/admin/tenants/{tenant_id} — SUPER_ADMIN permanently removes a
+// DELETE /api/v1/admin/tenants/{tenant_id} — an ADMIN permanently removes their own
 // tenant. All tenant-scoped rows cascade via the tenant_id FKs (ON DELETE CASCADE).
 func DeleteTenant(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +241,7 @@ func DeleteTenant(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_TENANT", "valid tenant_id required"))
 			return
 		}
-		// Never delete the sentinel platform tenant — it owns the SUPER_ADMIN account.
+		// Never delete the sentinel platform tenant.
 		if tenantID == "00000000-0000-0000-0000-000000000000" {
 			writeJSON(w, http.StatusForbidden, errBody("PROTECTED", "the platform tenant cannot be deleted"))
 			return
@@ -495,7 +505,9 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 func SetUserStatus(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := extractPathID(r.URL.Path, "/api/v1/admin/users/", "/status")
-		var req struct{ IsActive bool `json:"is_active"` }
+		var req struct {
+			IsActive bool `json:"is_active"`
+		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
 			return
@@ -519,7 +531,7 @@ func SetUserStatus(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // DELETE /api/v1/admin/users/{user_id} — permanently delete a user (own tenant for
-// ADMIN; any tenant for SUPER_ADMIN). For STUDENT users the linked enrolment row
+// ADMIN, confined to their own tenant). For STUDENT users the linked enrolment row
 // (students_extended, joined by email) is removed too. If the user is still
 // referenced (e.g. a coordinator with sessions), the FK blocks it and we tell the
 // caller to deactivate instead — so the DB stays consistent.
@@ -553,18 +565,16 @@ func DeleteUser(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// tenantScope returns the tenant a non-SUPER_ADMIN caller is confined to, or ""
-// for SUPER_ADMIN (cross-tenant). Pair it with tenantScopeClause in a WHERE.
+// tenantScope returns the tenant the caller is confined to — always their own, now
+// that the cross-tenant platform-owner role is gone. Pair it with tenantScopeClause.
 func tenantScope(r *http.Request) string {
-	if middleware.GetRole(r.Context()) == middleware.RoleSuperAdmin {
-		return ""
-	}
 	return middleware.GetTenantID(r.Context())
 }
 
-// tenantScopeClause builds a predicate that is a no-op when the bound value is ''
-// (SUPER_ADMIN) and otherwise restricts to tenant_id. Prevents cross-tenant IDOR
-// on by-id admin routes that run on the no-RLS adminPool.
+// tenantScopeClause restricts a query to tenant_id. It still tolerates an empty
+// bound value as a no-op so the shape is unchanged, but no role produces one any
+// more. Prevents cross-tenant IDOR on by-id admin routes, which run on the
+// no-RLS adminPool.
 func tenantScopeClause(param string) string {
 	return param + " = '' OR tenant_id::text = " + param
 }

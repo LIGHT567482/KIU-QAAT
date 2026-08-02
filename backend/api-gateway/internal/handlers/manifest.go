@@ -48,8 +48,7 @@ type manifestSession struct {
 }
 
 type rosterEntry struct {
-	StudentIDHash  string `json:"student_id_hash"`
-	QRSerialNumber string `json:"qr_serial_number"`
+	StudentIDHash string `json:"student_id_hash"`
 	// Reg-no + name so the coordinator can see WHO is absent (incl. never-present students) even
 	// offline — the privacy hash alone can't be reversed on-device. The durable ledger still keys
 	// on the hash; these are display fields only.
@@ -64,12 +63,11 @@ type manifestPolicy struct {
 }
 
 type dailyManifest struct {
-	ManifestVersion      string            `json:"manifest_version"`
-	GeneratedAt          string            `json:"generated_at"`
-	ExpiresAt            string            `json:"expires_at"`
-	Sessions             []manifestSession `json:"sessions"`
-	Policy               manifestPolicy    `json:"policy"`
-	InstitutionPublicKey string            `json:"institution_public_key"`
+	ManifestVersion string            `json:"manifest_version"`
+	GeneratedAt     string            `json:"generated_at"`
+	ExpiresAt       string            `json:"expires_at"`
+	Sessions        []manifestSession `json:"sessions"`
+	Policy          manifestPolicy    `json:"policy"`
 	// StudentHashKey is the per-tenant secret the Coordinator uses to recompute
 	// keyed student-id hashes (HMAC-SHA256). Delivered over TLS and stored only
 	// inside the AES-encrypted manifest vault on the device (F-07).
@@ -175,22 +173,18 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	}
 
 	var policy manifestPolicy
-	var publicKeyPEM, studentHashKey string
+	var studentHashKey string
 	var activeAcademicYear string
 	var activeSemester int
 	err = conn.QueryRow(ctx, `
 		SELECT t.attendance_threshold, t.checkin_window_minutes,
 		       t.auto_kill_minutes, t.student_hash_key,
-		       COALESCE(k.rsa_public_key_pem, ''),
 		       COALESCE(t.active_academic_year, ''),
 		       COALESCE(t.active_semester, 0)
 		FROM tenants t
-		LEFT JOIN tenant_rsa_keys k
-		       ON k.tenant_id = t.tenant_id AND k.revoked_at IS NULL
-		WHERE t.tenant_id = $1
-		ORDER BY k.created_at DESC LIMIT 1`, tenantID).
+		WHERE t.tenant_id = $1`, tenantID).
 		Scan(&policy.AttendanceThreshold, &policy.CheckinWindowMinutes,
-			&policy.AutoKillMinutes, &studentHashKey, &publicKeyPEM,
+			&policy.AutoKillMinutes, &studentHashKey,
 			&activeAcademicYear, &activeSemester)
 	if err != nil {
 		return nil, fmt.Errorf("fetch tenant policy: %w", err)
@@ -293,7 +287,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		// (their offering) — not every student of the shared course. Two coordinators of
 		// the same course but different cohorts therefore never see each other's students.
 		rRows, err := conn.Query(ctx, `
-			SELECT s.student_id, COALESCE(s.qr_serial_number,''), COALESCE(s.full_name,'')
+			SELECT s.student_id, COALESCE(s.full_name,'')
 			FROM students_extended s
 			JOIN course_offerings o ON o.offering_id = s.offering_id
 			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
@@ -307,15 +301,14 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		// (a null roster value crashes strict clients that expect a JSON array).
 		entries := make([]rosterEntry, 0)
 		for rRows.Next() {
-			var studentID, serial, fullName string
-			if err := rRows.Scan(&studentID, &serial, &fullName); err != nil {
+			var studentID, fullName string
+			if err := rRows.Scan(&studentID, &fullName); err != nil {
 				continue
 			}
 			entries = append(entries, rosterEntry{
-				StudentIDHash:  hashStudentID(studentHashKey, studentID),
-				QRSerialNumber: serial,
-				StudentID:      studentID,
-				FullName:       fullName,
+				StudentIDHash: hashStudentID(studentHashKey, studentID),
+				StudentID:     studentID,
+				FullName:      fullName,
 			})
 		}
 		rRows.Close()
@@ -328,14 +321,13 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		idPrefix = idPrefix[:8]
 	}
 	return &dailyManifest{
-		ManifestVersion:      fmt.Sprintf("%s-%s", date, idPrefix),
-		GeneratedAt:          now.Format(time.RFC3339),
-		ExpiresAt:            now.Truncate(24 * time.Hour).Add(24 * time.Hour).Format(time.RFC3339),
-		Sessions:             sessions,
-		Policy:               policy,
-		InstitutionPublicKey: publicKeyPEM,
-		StudentHashKey:       studentHashKey,
-		Roster:               roster,
+		ManifestVersion: fmt.Sprintf("%s-%s", date, idPrefix),
+		GeneratedAt:     now.Format(time.RFC3339),
+		ExpiresAt:       now.Truncate(24 * time.Hour).Add(24 * time.Hour).Format(time.RFC3339),
+		Sessions:        sessions,
+		Policy:          policy,
+		StudentHashKey:  studentHashKey,
+		Roster:          roster,
 		// WindowOpen/WindowMessage are set by the ManifestDaily handler (live).
 	}, nil
 }
@@ -395,7 +387,7 @@ func getOrCreateDailyCode(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 
 // hashStudentID returns HMAC-SHA256(student_hash_key, student_id) as hex. Keying
 // the hash with a per-tenant secret prevents reversing a low-entropy registration
-// number by brute force or rainbow table (F-07). The Coordinator PWA computes the
+// number by brute force or rainbow table (F-07). The coordinator app computes the
 // same value from the key delivered in the manifest.
 func hashStudentID(key, id string) string {
 	mac := hmac.New(sha256.New, []byte(key))

@@ -1,6 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
@@ -39,20 +38,6 @@ export default function AdminCoordinators() {
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Coordinator>>({})
-
-  const [qr, setQr] = useState<{ name: string; url: string; coordCode: string } | null>(null)
-  const [qrImg, setQrImg] = useState('')
-  async function showQR(c: Coordinator) {
-    try {
-      const res = await api.get<{ full_name: string; url: string; coordinator_code: string }>(
-        `/api/v1/admin/tenants/${tenantId}/coordinators/${c.user_id}/qr`)
-      setQr({ name: res.full_name, url: res.url, coordCode: res.coordinator_code })
-    } catch (e) { alert(e instanceof Error ? e.message : 'Could not load QR') }
-  }
-  useEffect(() => {
-    if (!qr) { setQrImg(''); return }
-    QRCode.toDataURL(qr.url, { width: 320, margin: 2, errorCorrectionLevel: 'H' }).then(setQrImg).catch(() => setQrImg(''))
-  }, [qr])
 
   const all = status === 'ok' ? (data ?? []) : []
   const q = search.toLowerCase()
@@ -175,7 +160,6 @@ export default function AdminCoordinators() {
               <td style={{ padding: '8px 10px', color: 'var(--muted)' }}>{c.intake || '—'}</td>
               <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(c)} style={{ ...btnTiny, marginRight: 4 }}>Edit</button>
-                <button onClick={() => showQR(c)} style={{ ...btnTiny, marginRight: 4, background: '#fef9c3', borderColor: '#fde68a', color: '#854d0e' }} title="Show this coordinator's QR — scan to open their cohort dashboard">QR</button>
                 <button onClick={() => del(c)} style={{ ...btnTiny, color: '#b91c1c', borderColor: '#fecaca', background: '#fef2f2' }}>Delete</button>
               </td>
             </tr>
@@ -188,23 +172,6 @@ export default function AdminCoordinators() {
         </tbody>
       </table>
 
-      {qr && (
-        <div onClick={() => setQr(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 20 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 380, width: '100%', textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 2px' }}>{qr.name}</h3>
-            {qr.coordCode && <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'monospace', marginBottom: 12 }}>{qr.coordCode}</div>}
-            {qrImg
-              ? <img src={qrImg} alt="Coordinator QR" style={{ width: 280, height: 280 }} />
-              : <p style={{ color: 'var(--muted)' }}>Generating QR…</p>}
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '12px 0' }}>The coordinator scans this with their phone to open their cohort dashboard — scoped to just their cohort. No password needed.</p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-              {qrImg && <a href={qrImg} download={`coordinator-qr-${qr.coordCode || qr.name}.png`} style={{ ...btnGhost, textDecoration: 'none', fontWeight: 600, background: '#1e293b', color: '#fff' }}>Download</a>}
-              <button onClick={() => { navigator.clipboard?.writeText(qr.url) }} style={btnGhost}>Copy link</button>
-              <button onClick={() => setQr(null)} style={btnGhost}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

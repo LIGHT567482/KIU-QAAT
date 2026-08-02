@@ -1,13 +1,10 @@
-// Package checkin implements the online student check-in: rotating room codes
-// (this file) and signed-QR verification (qr.go).
+// Package checkin implements the online student check-in: rotating room codes.
 //
-// The rotating room code is the proximity proof that replaces per-student BLE
-// RSSI (which is impossible to read from a student's browser — iOS Safari has
-// no Web Bluetooth). The coordinator displays a 6-digit code on the projector
-// that changes every StepSeconds; a student must read it off the screen and
-// submit it, which proves they are physically in the room. The code is an
-// HMAC-based TOTP (RFC 6238 style) keyed by a per-session secret that never
-// leaves the server.
+// The rotating room code is the proximity proof. The coordinator displays a
+// 6-digit code on the projector that changes every StepSeconds; a student must
+// read it off the screen and submit it, which proves they are physically in the
+// room. The code is an HMAC-based TOTP (RFC 6238 style) keyed by a per-session
+// secret that never leaves the server.
 package checkin
 
 import (

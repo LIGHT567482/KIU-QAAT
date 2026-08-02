@@ -25,6 +25,18 @@ type studentCheckinRequest struct {
 	DeviceFingerprint string `json:"device_fingerprint"` // hash of the student's device
 }
 
+// checkinResponse is the wire shape every check-in path answers with — shared with
+// the in-room hub's sync payloads so a phone and the cloud speak the same language.
+type checkinResponse struct {
+	Status            string `json:"status"`
+	Reason            string `json:"reason,omitempty"`
+	StudentName       string `json:"student_name,omitempty"`
+	UnitName          string `json:"unit_name,omitempty"`
+	LecturerName      string `json:"lecturer_name,omitempty"`
+	SessionDate       string `json:"session_date,omitempty"`
+	AttendancePercent int    `json:"attendance_percent,omitempty"`
+}
+
 func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
@@ -70,11 +82,11 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Fetch active session and validate it belongs to this tenant.
 		var (
-			secret       []byte
-			status       string
-			coordID      string
-			windowStart  *time.Time
-			windowEnd    *time.Time
+			secret        []byte
+			status        string
+			coordID       string
+			windowStart   *time.Time
+			windowEnd     *time.Time
 			coordinatorIP string
 		)
 		err = conn.QueryRow(r.Context(), `

@@ -15,7 +15,6 @@ type Config struct {
 	AdminDBURL        string
 	RedisURL          string
 	AuthServiceURL    string
-	QRGeneratorURL    string
 	SessionManagerURL string
 	SyncReceiverURL   string
 	CORSOrigins       []string
@@ -48,10 +47,9 @@ func Load() (*Config, error) {
 		// ADMIN-RBAC-gated handlers (admin.go), which legitimately operate across
 		// tenants (onboarding tenants, creating users).
 		// Defaults to DB_URL if unset.
-		AdminDBURL: env("ADMIN_DB_URL", env("DB_URL", "")),
-		RedisURL:   mustEnv("REDIS_URL"),
+		AdminDBURL:        env("ADMIN_DB_URL", env("DB_URL", "")),
+		RedisURL:          mustEnv("REDIS_URL"),
 		AuthServiceURL:    env("AUTH_SERVICE_URL", "http://auth-service:8081"),
-		QRGeneratorURL:    env("QR_GENERATOR_URL", "http://qr-generator:3002"),
 		SessionManagerURL: env("SESSION_MANAGER_URL", "http://session-manager:8082"),
 		SyncReceiverURL:   env("SYNC_RECEIVER_URL", "http://sync-receiver:8083"),
 		CORSOrigins:       origins,

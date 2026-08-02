@@ -137,8 +137,7 @@ export default function AdminCourses() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Tenants</a>
-          <h2 style={{ margin: '4px 0 0' }}>Courses & Sessions</h2>
+          <h2 style={{ margin: '0' }}>Courses & Sessions</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>A course can run several sessions (e.g. Morning, Evening), each with its own coordinator. A student's level of study is set when registering the student.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

@@ -54,13 +54,19 @@ func LecturerOverview(adminPool *pgxpool.Pool) http.HandlerFunc {
 		var name string
 		_ = adminPool.QueryRow(r.Context(), `SELECT full_name FROM lecturers WHERE lecturer_id=$1::uuid`, lecturerID).Scan(&name)
 
+		// session_count / last_session let the dashboard label each collapsed unit
+		// without having to open it first.
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT DISTINCT cu.unit_id, cu.name, COALESCE(cu.year,1), COALESCE(cu.semester,1),
-			       COALESCE(c.name,'')
+			SELECT cu.unit_id, cu.name, COALESCE(cu.year,1), COALESCE(cu.semester,1),
+			       COALESCE(c.name,''),
+			       COUNT(DISTINCT s.session_id),
+			       COALESCE(MAX(s.session_date)::text,'')
 			FROM lecturer_assignments la
 			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
 			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN sessions s ON s.unit_id = cu.unit_id AND s.tenant_id = cu.tenant_id
 			WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
+			GROUP BY cu.unit_id, cu.name, cu.year, cu.semester, c.name
 			ORDER BY COALESCE(c.name,''), COALESCE(cu.year,1), COALESCE(cu.semester,1), cu.name`, tenantID, lecturerID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -68,16 +74,18 @@ func LecturerOverview(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 		type unit struct {
-			UnitID     string `json:"unit_id"`
-			Name       string `json:"name"`
-			Year       int    `json:"year"`
-			Semester   int    `json:"semester"`
-			CourseName string `json:"course_name"`
+			UnitID       string `json:"unit_id"`
+			Name         string `json:"name"`
+			Year         int    `json:"year"`
+			Semester     int    `json:"semester"`
+			CourseName   string `json:"course_name"`
+			SessionCount int    `json:"session_count"`
+			LastSession  string `json:"last_session_date"`
 		}
 		units := []unit{}
 		for rows.Next() {
 			var u unit
-			rows.Scan(&u.UnitID, &u.Name, &u.Year, &u.Semester, &u.CourseName) //nolint:errcheck
+			rows.Scan(&u.UnitID, &u.Name, &u.Year, &u.Semester, &u.CourseName, &u.SessionCount, &u.LastSession) //nolint:errcheck
 			units = append(units, u)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -88,9 +96,41 @@ func LecturerOverview(adminPool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // GET /api/v1/lecturer/attendance?unit_id=
-// The attendance matrix for one of the lecturer's units: students (rows) × session
-// dates (columns) with present/absent, plus the coordinator who ran each session.
+//
+// The session logs for ONE of the lecturer's units, split per COHORT. A unit is
+// shared across the study sessions a course runs (Day, Evening, Weekend…), and each
+// of those is a separate `course_offerings` row with its own coordinator, its own
+// timetable and its own students. Returning one flat roster mixed them together —
+// a Weekend student showed up in the Day cohort's logs because they share a course.
+// Each cohort here therefore carries only its own sessions and only its own
+// students, plus anyone who actually checked in to one of those sessions (a genuine
+// attendee is never dropped, whichever cohort they came from).
 func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
+	type sess struct {
+		SessionID   string `json:"session_id"`
+		Date        string `json:"session_date"`
+		Coordinator string `json:"coordinator_name"`
+		Status      string `json:"session_status"`
+	}
+	type student struct {
+		StudentID string `json:"student_id"`
+		FullName  string `json:"full_name"`
+		Present   []bool `json:"present"`
+		// True when the student is not enrolled in this cohort but did check in to one
+		// of its sessions (shared unit / late transfer) — the UI marks them as a guest.
+		Guest bool `json:"guest"`
+	}
+	type cohort struct {
+		OfferingID  string    `json:"offering_id"`
+		Label       string    `json:"label"`
+		SessionType string    `json:"session_type"`
+		Level       string    `json:"level"`
+		Intake      string    `json:"intake"`
+		Coordinator string    `json:"coordinator_name"`
+		Sessions    []sess    `json:"sessions"`
+		Students    []student `json:"students"`
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
@@ -114,102 +154,137 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// A unit can be SHARED across coordinators/cohorts — let the lecturer filter
-		// by the coordinator who ran the sessions.
-		coordFilter := strings.TrimSpace(r.URL.Query().Get("coordinator"))
+		// The unit's own (course, year, semester) — the cohort year/semester a student
+		// must be sitting in to be on this unit's roster.
+		var courseID string
+		var unitYear, unitSem int
+		_ = adminPool.QueryRow(r.Context(),
+			`SELECT COALESCE(course_id,''), COALESCE(year,0), COALESCE(semester,0)
+			 FROM course_units WHERE unit_id=$1 AND tenant_id=$2`, unitID, tenantID).
+			Scan(&courseID, &unitYear, &unitSem)
 
-		// Coordinators who have ever run this unit (the filter's options).
-		type coordOpt struct {
-			CoordinatorID   string `json:"coordinator_id"`
-			CoordinatorName string `json:"coordinator_name"`
-		}
-		coordinators := []coordOpt{}
-		cRows, _ := adminPool.Query(r.Context(), `
-			SELECT DISTINCT COALESCE(s.coordinator_id,''), COALESCE(u.full_name,'')
-			FROM sessions s
-			LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
-			WHERE s.tenant_id = $1 AND s.unit_id = $2 AND COALESCE(s.coordinator_id,'') <> ''
-			ORDER BY 2`, tenantID, unitID)
-		if cRows != nil {
-			for cRows.Next() {
-				var c coordOpt
-				cRows.Scan(&c.CoordinatorID, &c.CoordinatorName) //nolint:errcheck
-				coordinators = append(coordinators, c)
-			}
-			cRows.Close()
-		}
-
-		type sess struct {
-			SessionID   string `json:"session_id"`
-			Date        string `json:"session_date"`
-			Coordinator string `json:"coordinator_name"`
-		}
-		sessArgs := []interface{}{tenantID, unitID}
-		sessWhere := ""
-		if coordFilter != "" {
-			sessArgs = append(sessArgs, coordFilter)
-			sessWhere = fmt.Sprintf(" AND s.coordinator_id = $%d", len(sessArgs))
-		}
-		sRows, err := adminPool.Query(r.Context(), `
-			SELECT s.session_id::text, s.session_date::text, COALESCE(u.full_name, '')
-			FROM sessions s
-			LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
-			WHERE s.tenant_id = $1 AND s.unit_id = $2`+sessWhere+`
-			ORDER BY s.session_date, s.gate_open_time`, sessArgs...)
+		// ── Cohorts: every study session this unit's course runs ────────────────
+		cohorts := []*cohort{}
+		byOffering := map[string]*cohort{}
+		cRows, err := adminPool.Query(r.Context(), `
+			SELECT o.offering_id::text, o.session_type, COALESCE(c.level,''), COALESCE(u.full_name,'')
+			FROM course_offerings o
+			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
+			LEFT JOIN users u ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			WHERE o.tenant_id = $1 AND o.course_id = $2
+			ORDER BY o.session_type`, tenantID, courseID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
-		sessions := []sess{}
-		sessIndex := map[string]int{}
-		sessionIDs := []string{}
+		for cRows.Next() {
+			c := &cohort{Sessions: []sess{}, Students: []student{}}
+			cRows.Scan(&c.OfferingID, &c.SessionType, &c.Level, &c.Coordinator) //nolint:errcheck
+			cohorts = append(cohorts, c)
+			byOffering[c.OfferingID] = c
+		}
+		cRows.Close()
+
+		// Sessions predating the cohort model carry no offering_id; keep them visible
+		// in their own bucket rather than silently dropping them from the logs.
+		unassigned := &cohort{OfferingID: "", SessionType: "Unassigned", Sessions: []sess{}, Students: []student{}}
+
+		// ── Sessions held for this unit, filed under their cohort ───────────────
+		sIndex := map[string]struct {
+			c   *cohort
+			row int
+		}{}
+		sRows, err := adminPool.Query(r.Context(), `
+			SELECT s.session_id::text, s.session_date::text, COALESCE(s.offering_id::text,''),
+			       COALESCE(u.full_name, ''), s.session_status::text
+			FROM sessions s
+			LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
+			WHERE s.tenant_id = $1 AND s.unit_id = $2
+			ORDER BY s.session_date, s.gate_open_time`, tenantID, unitID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
 		for sRows.Next() {
-			var s sess
-			sRows.Scan(&s.SessionID, &s.Date, &s.Coordinator) //nolint:errcheck
-			sessIndex[s.SessionID] = len(sessions)
-			sessionIDs = append(sessionIDs, s.SessionID)
-			sessions = append(sessions, s)
+			var sx sess
+			var offID string
+			sRows.Scan(&sx.SessionID, &sx.Date, &offID, &sx.Coordinator, &sx.Status) //nolint:errcheck
+			c, found := byOffering[offID]
+			if !found {
+				c = unassigned
+			}
+			sIndex[sx.SessionID] = struct {
+				c   *cohort
+				row int
+			}{c, len(c.Sessions)}
+			c.Sessions = append(c.Sessions, sx)
 		}
 		sRows.Close()
-
-		// Roster = students enrolled in this unit's (course, year, semester) UNION
-		// anyone who actually attended these sessions — so students of OTHER courses
-		// sharing the unit still appear.
-		type student struct {
-			StudentID string `json:"student_id"`
-			FullName  string `json:"full_name"`
-			Present   []bool `json:"present"`
+		if len(unassigned.Sessions) > 0 {
+			cohorts = append(cohorts, unassigned)
+			byOffering[""] = unassigned
 		}
-		students := []student{}
-		stIndex := map[string]int{}
-		addStudent := func(id, name string) {
-			if _, seen := stIndex[id]; seen || id == "" {
+
+		// ── Roster: each cohort gets ONLY its own enrolled students ─────────────
+		// Bound to the unit's year + semester too, so a Year-1 roster never appears
+		// under a Year-3 unit of the same programme.
+		stIndex := map[*cohort]map[string]int{}
+		addStudent := func(c *cohort, id, name string, guest bool) int {
+			if id == "" {
+				return -1
+			}
+			idx, ok := stIndex[c]
+			if !ok {
+				idx = map[string]int{}
+				stIndex[c] = idx
+			}
+			if i, seen := idx[id]; seen {
+				return i
+			}
+			i := len(c.Students)
+			idx[id] = i
+			c.Students = append(c.Students, student{
+				StudentID: id, FullName: name, Guest: guest,
+				Present: make([]bool, len(c.Sessions)),
+			})
+			return i
+		}
+		offeringIDs := make([]string, 0, len(cohorts))
+		for _, c := range cohorts {
+			if c.OfferingID != "" {
+				offeringIDs = append(offeringIDs, c.OfferingID)
+			}
+		}
+		if len(offeringIDs) > 0 {
+			rRows, err := adminPool.Query(r.Context(), `
+				SELECT se.offering_id::text, se.student_id, se.full_name
+				FROM students_extended se
+				WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'
+				  AND se.offering_id::text = ANY($2)
+				  AND ($3 = 0 OR COALESCE(se.current_year,0) = $3)
+				  AND ($4 = 0 OR COALESCE(se.semester,0)     = $4)
+				ORDER BY se.full_name`, tenantID, offeringIDs, unitYear, unitSem)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 				return
 			}
-			stIndex[id] = len(students)
-			students = append(students, student{StudentID: id, FullName: name, Present: make([]bool, len(sessions))})
+			for rRows.Next() {
+				var offID, id, name string
+				rRows.Scan(&offID, &id, &name) //nolint:errcheck
+				if c, found := byOffering[offID]; found {
+					addStudent(c, id, name, false)
+				}
+			}
+			rRows.Close()
 		}
-		stRows, err := adminPool.Query(r.Context(), `
-			SELECT se.student_id, se.full_name
-			FROM students_extended se
-			WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'
-			  AND se.course_id    = (SELECT course_id FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
-			  AND se.current_year = (SELECT year      FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
-			  AND se.semester     = (SELECT semester  FROM course_units WHERE unit_id=$2 AND tenant_id=$1)
-			ORDER BY se.full_name`, tenantID, unitID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
-			return
-		}
-		for stRows.Next() {
-			var id, name string
-			stRows.Scan(&id, &name) //nolint:errcheck
-			addStudent(id, name)
-		}
-		stRows.Close()
 
-		// Fill the matrix from attendance_logs for the (filtered) sessions, adding any
-		// attendee not already on the enrolled roster (shared-unit / cross-course).
+		// ── Fill the matrix from the ledger ─────────────────────────────────────
+		// A check-in always counts: if the attendee is not on that cohort's roster
+		// they are appended as a guest rather than dropped.
+		sessionIDs := make([]string, 0, len(sIndex))
+		for id := range sIndex {
+			sessionIDs = append(sessionIDs, id)
+		}
 		if len(sessionIDs) > 0 {
 			aRows, err := adminPool.Query(r.Context(), `
 				SELECT al.session_id::text, al.student_id, COALESCE(se.full_name, al.student_id)
@@ -217,36 +292,64 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 				LEFT JOIN students_extended se ON se.student_id = al.student_id AND se.tenant_id = $1
 				WHERE al.session_id = ANY($2)`, tenantID, sessionIDs)
 			if err == nil {
-				type hit struct{ sid, stid string }
+				type hit struct{ sid, stid, name string }
 				hits := []hit{}
 				for aRows.Next() {
-					var sid, stid, name string
-					aRows.Scan(&sid, &stid, &name) //nolint:errcheck
-					addStudent(stid, name) // ensure a row exists (may grow students)
-					hits = append(hits, hit{sid, stid})
+					var h hit
+					aRows.Scan(&h.sid, &h.stid, &h.name) //nolint:errcheck
+					hits = append(hits, h)
 				}
 				aRows.Close()
-				// Present[] slices were sized before late-added attendees; normalise.
-				for i := range students {
-					if len(students[i].Present) != len(sessions) {
-						students[i].Present = make([]bool, len(sessions))
-					}
-				}
 				for _, h := range hits {
-					if si, sok := sessIndex[h.sid]; sok {
-						if ti, tok := stIndex[h.stid]; tok {
-							students[ti].Present[si] = true
-						}
+					loc, ok := sIndex[h.sid]
+					if !ok {
+						continue
 					}
+					ti := addStudent(loc.c, h.stid, h.name, true)
+					if ti < 0 {
+						continue
+					}
+					// Rosters can grow after Present[] was sized — normalise before writing.
+					if len(loc.c.Students[ti].Present) != len(loc.c.Sessions) {
+						grown := make([]bool, len(loc.c.Sessions))
+						copy(grown, loc.c.Students[ti].Present)
+						loc.c.Students[ti].Present = grown
+					}
+					loc.c.Students[ti].Present[loc.row] = true
 				}
 			}
 		}
 
+		// Final normalise + human label, so the UI can render straight through.
+		for _, c := range cohorts {
+			for i := range c.Students {
+				if len(c.Students[i].Present) != len(c.Sessions) {
+					grown := make([]bool, len(c.Sessions))
+					copy(grown, c.Students[i].Present)
+					c.Students[i].Present = grown
+				}
+			}
+			parts := []string{}
+			for _, p := range []string{c.SessionType, c.Level} {
+				if p != "" {
+					parts = append(parts, p)
+				}
+			}
+			if unitYear > 0 {
+				parts = append(parts, fmt.Sprintf("Y%d", unitYear))
+			}
+			if unitSem > 0 {
+				parts = append(parts, fmt.Sprintf("S%d", unitSem))
+			}
+			c.Label = strings.Join(parts, " · ")
+			if c.Coordinator != "" {
+				c.Label += " — " + c.Coordinator
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"unit_id":      unitID,
-			"sessions":     sessions,
-			"students":     students,
-			"coordinators": coordinators, // filter options (a unit may be shared)
+			"unit_id": unitID,
+			"cohorts": cohorts,
 		})
 	}
 }

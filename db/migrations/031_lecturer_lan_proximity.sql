@@ -4,7 +4,7 @@
 -- 10s digit code (screen proximity), the staff-ID, the device fingerprint, the
 -- biometric passkey and the student quorum, we add a NETWORK-proximity check: the
 -- lecturer's gate scan must originate from the same public egress IP as the
--- coordinator's device (the LAN-beacon model — coordinator phone + students +
+-- coordinator's device (the shared-LAN model — coordinator phone + students +
 -- lecturer all share one campus network/NAT). Tenant-toggleable.
 
 -- The coordinator's egress IP, captured when the session is opened and refreshed

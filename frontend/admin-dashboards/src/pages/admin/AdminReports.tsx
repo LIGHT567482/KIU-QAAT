@@ -19,7 +19,10 @@ export default function AdminReports() {
   return (
     <div>
       <h2 style={{ margin: 0 }}>Reports</h2>
-      <p style={{ color: 'var(--muted)', margin: '4px 0 20px', fontSize: 13 }}>Generate and export attendance reports for every group in your institution.</p>
+      <p style={{ color: 'var(--muted)', margin: '4px 0 20px', fontSize: 13 }}>
+        Generate attendance reports for every group in your institution. Each one downloads as an
+        <strong> Excel</strong> workbook or a <strong>PDF</strong>, built from the filters you have applied.
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
         {cards.map(c => (
           <Link key={c.to} to={c.to} style={{ textDecoration: 'none', color: 'inherit' }}>

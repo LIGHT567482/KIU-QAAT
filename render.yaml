@@ -74,8 +74,6 @@ services:
         value: https://qaat-auth.onrender.com
       # Same as auth: these are deployed as PUBLIC web services, so reach them over the public edge.
       # The internal http://qaat-*:port addresses black-hole (→ 502) unless they're private services.
-      - key: QR_GENERATOR_URL
-        value: https://qaat-qr.onrender.com
       - key: SESSION_MANAGER_URL
         value: https://qaat-session.onrender.com
       - key: SYNC_RECEIVER_URL
@@ -188,45 +186,6 @@ services:
         fromGroup: qaat-shared
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
-
-  # ─── qr-generator (private) ────────────────────────────────────────────────
-  - type: pserv
-    name: qaat-qr
-    runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
-    branch: main
-    rootDir: backend/qr-generator
-    dockerfilePath: Dockerfile
-    region: oregon
-    plan: starter
-    envVars:
-      - key: PORT
-        value: "3002"
-      - key: DB_URL
-        sync: false
-      - key: KEY_ENCRYPTION_KEY
-        fromGroup: qaat-shared
-      - key: JWT_ISSUER
-        fromGroup: qaat-shared
-      - key: JWT_AUDIENCE
-        fromGroup: qaat-shared
-      - key: RSA_PUBLIC_KEY_PATH
-        value: /etc/secrets/auth_public.pem
-      - key: STUDENT_CHECKIN_BASE_URL
-        value: https://qaat-gateway.onrender.com
-      - key: STUDENT_PORTAL_URL
-        value: https://student-portal-xi-ruddy.vercel.app
-      # SMTP for QR emails — paste real creds in the dashboard (sync:false)
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        sync: false
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: SMTP_SECURE
-        value: "true"
 
   # ─── notification-service (private) ────────────────────────────────────────
   - type: pserv

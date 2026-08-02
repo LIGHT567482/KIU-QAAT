@@ -6,7 +6,7 @@ QAAT is a multi-tenant, **offline-first** SaaS platform for university attendanc
 
 > **Capacity reality — one access point ≈ one classroom.** A single hotspot holds a limited number of phones at once (**~10 on a stock Android**, ~20–40 on a laptop). So students **rotate**: each turns Wi-Fi **off** the moment they're marked present (the check-in screen says so explicitly), freeing a slot for the next. Large groups are served by this rotation over time, by several coordinators/APs in parallel, or by putting the hub's server on campus Wi-Fi. The Go server scales to thousands; the **Wi-Fi radio is the real limit**, not the software.
 
-> **Note (proximity model):** earlier builds used BLE beacons/RSSI for proximity. That was **removed** (migration 039). Proximity is now proven by **being on the coordinator's hotspot LAN plus the live rotating room code** — simpler, hardware-free, and works on every phone.
+> **Note (proximity model):** proximity is proven by **being on the coordinator's hotspot LAN plus the live rotating room code** — hardware-free, and works on every phone.
 
 ## Features
 
