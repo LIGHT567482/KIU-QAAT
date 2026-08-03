@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
-import { OrgPicker, useOrg } from '../../components/OrgPicker'
 import { useQuery } from '../../lib/useApi'
 
 // email is OPTIONAL — correspondence only; the staff ID is the lecturer's identity.
-const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'department', 'title', 'gender']
+// No `department` column: a lecturer's department comes from the units they are assigned to,
+// so an import cannot set it and a template that offered it would invite the attempt.
+const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'title', 'gender']
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
   const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
@@ -18,8 +19,14 @@ interface Lecturer {
   gender: string
   email: string
   phone: string
-  department: string
   staff_id: string
+  /**
+   * DERIVED, never stored on the lecturer. A lecturer has no department or school of their own —
+   * they can teach across several colleges, so the units they are assigned to are what carry the
+   * org unit, and each department and school reaches them through those. Read-only here.
+   */
+  departments: string[]
+  schools: string[]
 }
 
 const GENDERS = ['', 'Male', 'Female', 'Other']
@@ -29,14 +36,13 @@ export default function AdminLecturers() {
   const { status, data, refetch } = useQuery<Lecturer[]>(
     () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturers`)
   )
-  const org = useOrg(tenantId ?? '')
   const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState({ full_name: '', email: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
+  const [form, setForm] = useState({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [editId, setEditId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ full_name: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
+  const [editForm, setEditForm] = useState({ full_name: '', phone: '', staff_id: '', title: '', gender: '' })
 
   // Biometric enrolment: issue a one-time link the lecturer opens on their phone.
   const [enroll, setEnroll] = useState<{ name: string; url: string } | null>(null)
@@ -67,7 +73,7 @@ export default function AdminLecturers() {
     try {
       await api.post(`/api/v1/admin/tenants/${tenantId}/lecturers`, form)
       setCreating(false)
-      setForm({ full_name: '', email: '', phone: '', department: '', staff_id: '', title: '', gender: '' })
+      setForm({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setSaving(false) }
@@ -75,7 +81,7 @@ export default function AdminLecturers() {
 
   function startEdit(l: Lecturer) {
     setEditId(l.lecturer_id)
-    setEditForm({ full_name: l.full_name, phone: l.phone || '', department: l.department || '', staff_id: l.staff_id || '', title: l.title || '', gender: l.gender || '' })
+    setEditForm({ full_name: l.full_name, phone: l.phone || '', staff_id: l.staff_id || '', title: l.title || '', gender: l.gender || '' })
   }
   async function handleEditSave() {
     if (!editId) return
@@ -88,7 +94,9 @@ export default function AdminLecturers() {
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [dept, setDept] = useState('')
-  const departments = Array.from(new Set((data ?? []).map(l => l.department).filter(Boolean))).sort()
+  // The filter list is the union of the DERIVED departments, so it offers exactly the departments
+  // some lecturer actually teaches in.
+  const departments = Array.from(new Set((data ?? []).flatMap(l => l.departments ?? []).filter(Boolean))).sort()
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -106,9 +114,11 @@ export default function AdminLecturers() {
 
   const [search, setSearch] = useState('')
   const q = search.trim().toLowerCase()
+  // A lecturer teaching in two departments matches BOTH — the point of dropping the single field.
   const lecturers = (status === 'ok' ? (data ?? []) : []).filter(l =>
-    (!dept || l.department === dept) &&
-    (!q || [l.full_name, l.staff_id, l.department, l.phone, l.title].some(v => (v || '').toLowerCase().includes(q))))
+    (!dept || (l.departments ?? []).includes(dept)) &&
+    (!q || [l.full_name, l.staff_id, l.phone, l.title, ...(l.departments ?? [])]
+      .some(v => (v || '').toLowerCase().includes(q))))
 
   return (
     <div>
@@ -154,17 +164,17 @@ export default function AdminLecturers() {
             <Input label="Full name *" value={form.full_name} onChange={v => setForm(f => ({ ...f, full_name: v }))} />
             <Input label="Email (optional)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
             <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+256 700 000000" />
-            {/* Picked, not typed. A lecturer's department is what puts them in their HOD's list and
-                their dean's school; a typo makes them invisible to both. No school field — a
-                lecturer's school follows from their department, which is where it is derived. */}
-            <OrgPicker
-              schools={org.schools} departments={org.departments}
-              department={form.department} school=""
-              onChange={next => setForm(f => ({ ...f, department: next.department }))}
-              showSchool={false}
-            />
             <Input label="Staff ID (optional — auto-generated if left blank)" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} placeholder="leave blank to auto-generate e.g. KIU/STAFF/00001" />
           </div>
+          {/* No department or school here on purpose. A lecturer can teach in several colleges at
+              once, so one field on the person could only ever be wrong for the rest. The units
+              they are assigned to carry the department and the school, and that is how each HOD
+              and dean reaches them — assign the lecturer a unit under Assignments. */}
+          <p style={{ color: 'var(--muted)', fontSize: 12, margin: '14px 0 0', maxWidth: 620 }}>
+            No department or school is set here. A lecturer belongs to the <strong>units they
+            teach</strong> — assign them one under <a href={`/admin/tenants/${tenantId}/lecturer-assignments`} style={{ color: 'var(--brand)' }}>Assignments</a>{' '}
+            and they appear to that unit's HOD and dean automatically, in every school they teach in.
+          </p>
           <button onClick={handleCreate} disabled={saving || !form.full_name} style={{ ...btnPrimary, marginTop: 16, opacity: !form.full_name ? 0.5 : 1 }}>
             {saving ? 'Saving…' : 'Register Lecturer'}
           </button>
@@ -178,7 +188,7 @@ export default function AdminLecturers() {
       )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, staff ID, department or phone…"
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, staff ID, department taught or phone…"
           style={{ flex: 1, minWidth: 260, maxWidth: 420, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
         <select value={dept} onChange={e => setDept(e.target.value)} style={{ ...selectStyle, width: 'auto', minWidth: 180 }}>
           <option value="">All departments</option>
@@ -189,7 +199,7 @@ export default function AdminLecturers() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'Department', ''].map(h => (
+            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'Teaches in', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -210,12 +220,6 @@ export default function AdminLecturers() {
                     </select></label>
                   <Input label="Staff ID" value={editForm.staff_id} onChange={v => setEditForm(f => ({ ...f, staff_id: v }))} />
                   <Input label="Phone" value={editForm.phone} onChange={v => setEditForm(f => ({ ...f, phone: v }))} />
-                  <OrgPicker
-                    schools={org.schools} departments={org.departments}
-                    department={editForm.department} school=""
-                    onChange={next => setEditForm(f => ({ ...f, department: next.department }))}
-                    showSchool={false}
-                  />
                 </div>
                 <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
                   <button onClick={handleEditSave} style={{ ...btnPrimary, background: '#92400e' }}>Save</button>
@@ -230,7 +234,14 @@ export default function AdminLecturers() {
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.gender || '—'}</td>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{l.staff_id || '—'}</td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.phone || '—'}</td>
-              <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.department || '—'}</td>
+              {/* Read-only, and derived: every department the lecturer reaches through a unit they
+                  are assigned to. Blank means no assignment yet — which is exactly why no HOD or
+                  dean can see them, so it is worth saying rather than showing a dash. */}
+              <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 13 }}>
+                {(l.departments ?? []).length > 0
+                  ? (l.departments ?? []).join(', ')
+                  : <span style={{ color: '#b45309' }}>no unit assigned</span>}
+              </td>
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(l)} style={btnSmall}>Edit</button>
                 <button onClick={() => makeEnroll(l)} style={{ ...btnSmall, marginLeft: 6, background: '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}>Enroll FP</button>

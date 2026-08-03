@@ -33,6 +33,12 @@ Thumbs.db
 *.p12
 *.pfx
 keys/
+# Timestamped rotation backups: `qaat.key.bak-1783103535` ends in the timestamp,
+# not in `.key`, so the patterns above sail straight past it. One such key did get
+# committed this way. Match the backups by their own shape instead.
+*.key.bak-*
+*.pem.bak-*
+*.crt.bak-*
 
 # Docker volumes
 pgdata/
@@ -43,7 +49,8 @@ coverage/
 *.out
 next.txt
 coordinator'sapp.md
-HowItWorks.mdinfra/render/secrets.generated.env
+HowItWorks.md
+infra/render/secrets.generated.env
 
 # Gradle build cache (was wrongly tracked) + local Playwright artifacts
 .gradle/

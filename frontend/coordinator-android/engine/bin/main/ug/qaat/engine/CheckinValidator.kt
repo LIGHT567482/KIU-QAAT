@@ -13,6 +13,11 @@ import java.time.ZoneOffset
  */
 class CheckinValidator(
     private val store: Store,
+    // TESTING SWITCH: when false, the device anti-cheat is relaxed so ONE phone can check in MANY
+    // students and a student can switch phones freely — needed to test with few handsets. The
+    // roster check + one-attendance-per-student-per-session (DUPLICATE_SCAN) always stay on. Flip
+    // back to true (via the caller) to re-enable one-student-one-phone before going live.
+    private val enforceDeviceLock: Boolean = true,
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
     private val nowIso: () -> String = { java.time.Instant.ofEpochMilli(System.currentTimeMillis()).toString() },
     private val newUuid: () -> String = { java.util.UUID.randomUUID().toString() },
@@ -40,39 +45,78 @@ class CheckinValidator(
 
         val studentIdHash = VaultCrypto.hmacHex(session.studentHashKey, f.studentId)
 
-        // ── Step 6a: cross-student device lock ───────────────────────────────────
-        store.bindingByFingerprint(device.fingerprintHash)?.let {
-            if (it.studentIdHash != studentIdHash)
-                return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT)
-        }
-
-        // ── Step 4: roster lookup ────────────────────────────────────────────────
-        if (studentIdHash !in session.rosterHashes)
-            return ValidationResult(ValidationStatus.REJECTED, RejectionReason.NOT_ON_ROSTER)
+        // ── Steps 6a + 4: cross-student device lock + roster ─────────────────────
+        rosterAndDeviceLock(studentIdHash, session, device)?.let { return ValidationResult(ValidationStatus.REJECTED, it) }
 
         // ── Step 4b: serial must match the current issued serial ─────────────────
         val currentSerial = session.rosterSerials[studentIdHash]
         if (currentSerial == null || f.serialNumber != currentSerial)
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.SERIAL_REVOKED)
 
-        // ── Step 5: hardware fingerprint (bind on first scan) ────────────────────
+        // ── Steps 5–7 + record ───────────────────────────────────────────────────
+        return bindAndRecord(studentIdHash, session, device)
+    }
+
+    /**
+     * Reg-number check-in (no student QR): presence is proven by the hotspot LAN, identity is the
+     * typed registration number matched against the cached roster. Skips the QR-only steps
+     * (signature/expiry/tenant/serial) but keeps the SAME anti-cheat as [validate] — device binding,
+     * one-attendance-per-student, and one-device-per-session — all enforced on the coordinator phone.
+     */
+    fun validateReg(regNumber: String, session: ActiveSession, device: DeviceContext): ValidationResult {
+        val reg = regNumber.trim()
+        if (reg.isEmpty()) return ValidationResult(ValidationStatus.REJECTED, RejectionReason.NOT_ON_ROSTER)
+        val studentIdHash = VaultCrypto.hmacHex(session.studentHashKey, reg)
+        rosterAndDeviceLock(studentIdHash, session, device)?.let { return ValidationResult(ValidationStatus.REJECTED, it) }
+        return bindAndRecord(studentIdHash, session, device)
+    }
+
+    /** Step 6a (a device is bound to a DIFFERENT student) + Step 4 (on the roster). Null = OK. */
+    private fun rosterAndDeviceLock(studentIdHash: String, session: ActiveSession, device: DeviceContext): RejectionReason? {
+        if (enforceDeviceLock) {
+            store.bindingByFingerprint(device.fingerprintHash)?.let {
+                if (it.studentIdHash != studentIdHash) return RejectionReason.DEVICE_BELONGS_TO_ANOTHER_STUDENT
+            }
+        }
+        if (studentIdHash !in session.rosterHashes) return RejectionReason.NOT_ON_ROSTER
+        return null
+    }
+
+    /**
+     * Steps 5 (bind device on first check-in), 6 (duplicate), 7 (one device), then append PRESENT.
+     *
+     * SYNCHRONIZED, and it has to be. This is a read-modify-write across four separate store calls —
+     * "has this student already checked in?", "has this device been used?", "what is the next
+     * sequence number?", "append" — and a lecture hall is precisely where they run concurrently:
+     * the coordinator opens the gate and forty phones POST to this hub within the same second, each
+     * on its own Ktor request thread.
+     *
+     * Measured before this lock (see InRoomConcurrencyTest): 40 simultaneous scans produced 40
+     * attendance rows but only 37 DISTINCT sequence numbers — three pairs read the same
+     * `attendanceCount` before either had written, and both claimed it. That number is the
+     * append-only ordering the sealed session package is built on, so duplicates there mean the
+     * ledger uploaded to the server is ambiguous about what happened in the room. The duplicate-scan
+     * check has the same shape and the same race: two taps interleaving between the check and the
+     * insert would both be admitted and the student counted twice.
+     *
+     * The lock is cheap and correctly placed: signature verification, expiry and roster checks all
+     * happen BEFORE this call, so the expensive crypto stays outside it and only the few
+     * microseconds of ledger bookkeeping are serialised. One hub, one validator, one SQLite file —
+     * there is nothing to coordinate beyond this process.
+     */
+    @Synchronized
+    private fun bindAndRecord(studentIdHash: String, session: ActiveSession, device: DeviceContext): ValidationResult {
         val stored = store.bindingByStudent(studentIdHash)
         if (stored != null) {
-            if (stored.fingerprintHash != device.fingerprintHash)
+            if (enforceDeviceLock && stored.fingerprintHash != device.fingerprintHash)
                 return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_MISMATCH, auditFlag = "DEVICE_MISMATCH")
         } else {
             store.putBinding(DeviceBinding(studentIdHash, device.fingerprintHash, session.academicYear, nowIso()))
         }
-
-        // ── Step 6: duplicate scan ───────────────────────────────────────────────
         if (store.hasAttendance(session.sessionId, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DUPLICATE_SCAN)
-
-        // ── Step 7: one device per session ───────────────────────────────────────
-        if (store.deviceUsedByOther(session.sessionId, device.fingerprintHash, studentIdHash))
+        if (enforceDeviceLock && store.deviceUsedByOther(session.sessionId, device.fingerprintHash, studentIdHash))
             return ValidationResult(ValidationStatus.REJECTED, RejectionReason.DEVICE_ALREADY_USED)
-
-        // ── PRESENT: append-only record ──────────────────────────────────────────
         store.addAttendance(
             AttendanceRecord(
                 logId = newUuid(),

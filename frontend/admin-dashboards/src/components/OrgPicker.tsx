@@ -48,13 +48,19 @@ interface Props {
   requireSchool?: boolean
   /** Hidden entirely when a role has no use for it (e.g. a lecturer has no school field). */
   showSchool?: boolean
+  /**
+   * Restrict the list to one kind of department. Non-teaching staff belong to SUPPORT departments
+   * — Finance, ICT, Library — and offering them an academic one would file a bursar under a
+   * faculty they do not work in.
+   */
+  kind?: 'SUPPORT' | 'ACADEMIC'
   hint?: string
   disabled?: boolean
 }
 
 export function OrgPicker({
   schools, departments, department, school, onChange,
-  requireDepartment = false, requireSchool = false, showSchool = true, hint, disabled = false,
+  requireDepartment = false, requireSchool = false, showSchool = true, kind, hint, disabled = false,
 }: Props) {
   // The chosen department's own record, which is what decides the school.
   const chosen = useMemo(
@@ -63,16 +69,23 @@ export function OrgPicker({
   )
   const standalone = !!chosen && !chosen.school_id
 
+  // A `kind` restriction applies before anything else: it is what the caller is allowed to file
+  // against at all, not merely a convenience narrowing.
+  const eligible = useMemo(
+    () => (kind ? departments.filter(d => d.kind === kind) : departments),
+    [departments, kind],
+  )
+
   // A school chosen FIRST narrows the departments; otherwise every department is offered, each
   // labelled with its school so two same-named departments in different faculties stay distinct.
   const visibleDepartments = useMemo(() => {
-    if (!school) return departments
+    if (!school) return eligible
     const sid = schools.find(s => s.name === school)?.school_id
-    if (!sid) return departments
+    if (!sid) return eligible
     // Support departments belong to no school, so a school filter must exclude them rather than
     // silently listing them under a faculty they are not part of.
-    return departments.filter(d => d.school_id === sid)
-  }, [departments, schools, school])
+    return eligible.filter(d => d.school_id === sid)
+  }, [eligible, schools, school])
 
   function pickDepartment(name: string) {
     if (!name) { onChange({ department: '', school }); return }
@@ -90,7 +103,9 @@ export function OrgPicker({
     onChange({ department: keep ? department : '', school: name })
   }
 
-  const noOrg = schools.length === 0 && departments.length === 0
+  // With a `kind` restriction it is the eligible list that matters: an institution can have a full
+  // org tree and still have no SUPPORT department, which is the case that must be called out.
+  const noOrg = kind ? eligible.length === 0 : (schools.length === 0 && departments.length === 0)
 
   return (
     <>
@@ -148,9 +163,12 @@ export function OrgPicker({
 
       {noOrg && (
         <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#b45309' }}>
-          No colleges/schools or departments have been created yet. Add them under{' '}
-          <strong>Schools &amp; Departments</strong> first — every org-scoped role is bounded by one,
-          and an account with a unit that does not exist matches nothing.
+          {kind === 'SUPPORT'
+            ? <>No support departments exist yet. Add them under <strong>Schools &amp; Departments</strong>{' '}
+              → <strong>Support departments</strong> — Finance, ICT, Library and the like — then come back.</>
+            : <>No colleges/schools or departments have been created yet. Add them under{' '}
+              <strong>Schools &amp; Departments</strong> first — every org-scoped role is bounded by one,
+              and an account with a unit that does not exist matches nothing.</>}
         </div>
       )}
     </>

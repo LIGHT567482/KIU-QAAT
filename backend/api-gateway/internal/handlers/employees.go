@@ -6,6 +6,8 @@ package handlers
 // Columns: staff_id, title, full_name, department, job_title, email, phone.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +15,34 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// requireSupportDepartment refuses anything that is not one of the tenant's SUPPORT departments,
+// and returns the department's CANONICAL name.
+//
+// The name is matched case- and whitespace-insensitively because it is stored as free text on the
+// employee row. Accepting an academic department here would file a bursar under a faculty they do
+// not work in; accepting a name that does not exist at all would file them under nothing, which
+// reads as a department with no staff rather than as a mistake.
+//
+// WHY THE CANONICAL NAME IS RETURNED, AND MUST BE STORED. `employees.department` is a NAME, and the
+// no-show report GROUPs BY it. Storing whatever casing the caller happened to type — "finance" from
+// a CSV, "Finance" from the form — would split one department into two rows that each show half the
+// staff, with nothing on screen to explain why. Matching loosely and storing exactly is what keeps
+// the group whole.
+func requireSupportDepartment(ctx context.Context, pool *pgxpool.Pool, tenantID, name string) (string, error) {
+	var canonical, kind string
+	err := pool.QueryRow(ctx, `
+		SELECT name, kind::text FROM departments
+		WHERE tenant_id = $1 AND btrim(lower(name)) = btrim(lower($2))
+		LIMIT 1`, tenantID, name).Scan(&canonical, &kind)
+	if err != nil {
+		return "", fmt.Errorf("no department named %q exists — add it under Schools & Departments → Support departments", name)
+	}
+	if kind != "SUPPORT" {
+		return "", errors.New("employees belong to a SUPPORT department (Finance, ICT, Library and the like), not an academic one")
+	}
+	return canonical, nil
+}
 
 // GET /api/v1/admin/tenants/{tenant_id}/employees
 func ListEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
@@ -73,10 +103,24 @@ func CreateEmployee(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		req.StaffID = strings.TrimSpace(req.StaffID)
 		req.FullName = strings.TrimSpace(req.FullName)
+		req.Department = strings.TrimSpace(req.Department)
 		if req.StaffID == "" || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "staff_id and full_name are required"))
 			return
 		}
+		// Enforced here and not only in the form: an employee with no department is invisible to
+		// the no-show report, which exists to say whose office to chase.
+		if req.Department == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+				"a support department is required — Finance, ICT, Library and the like"))
+			return
+		}
+		canonical, derr := requireSupportDepartment(r.Context(), adminPool, tenantID, req.Department)
+		if derr != nil {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", derr.Error()))
+			return
+		}
+		req.Department = canonical
 		var pk string
 		err := adminPool.QueryRow(r.Context(), `
 			INSERT INTO employees (tenant_id, staff_id, title, full_name, department, job_title, email, phone)
@@ -107,6 +151,26 @@ func UpdateEmployee(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
 			return
 		}
+		// Same rule as creation, or an edit would be the way around it. The route carries no
+		// tenant, so it comes from the row being edited.
+		req.Department = strings.TrimSpace(req.Department)
+		if req.Department == "" {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+				"a support department is required — Finance, ICT, Library and the like"))
+			return
+		}
+		var tenantID string
+		if err := adminPool.QueryRow(r.Context(),
+			`SELECT tenant_id::text FROM employees WHERE employee_pk = $1`, id).Scan(&tenantID); err != nil {
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "employee not found"))
+			return
+		}
+		canonical, derr := requireSupportDepartment(r.Context(), adminPool, tenantID, req.Department)
+		if derr != nil {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", derr.Error()))
+			return
+		}
+		req.Department = canonical
 		ct, err := adminPool.Exec(r.Context(), `
 			UPDATE employees SET
 			    staff_id   = COALESCE(NULLIF($2,''), staff_id),
@@ -176,6 +240,29 @@ func ImportEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusUnprocessableEntity, errBody("CSV_PARSE_ERROR", "missing required column: full_name"))
 			return
 		}
+		// A bulk import that could leave the department blank would be the way around the rule the
+		// form enforces, and it is the path most staff actually arrive through.
+		if _, ok := idx["department"]; !ok {
+			writeJSON(w, http.StatusUnprocessableEntity, errBody("CSV_PARSE_ERROR",
+				"missing required column: department — every employee belongs to a support department"))
+			return
+		}
+
+		// The tenant's support departments, resolved once: a per-row query would be a round trip
+		// per line, and the set cannot change mid-import. Maps the loose form to the CANONICAL
+		// name so a file full of "finance" does not create a second group beside "Finance" — the
+		// no-show report groups by this string.
+		support := map[string]string{}
+		if drows, derr := adminPool.Query(r.Context(),
+			`SELECT btrim(lower(name)), name FROM departments WHERE tenant_id = $1 AND kind::text = 'SUPPORT'`, tenantID); derr == nil {
+			for drows.Next() {
+				var lower, canonical string
+				if drows.Scan(&lower, &canonical) == nil {
+					support[lower] = canonical
+				}
+			}
+			drows.Close()
+		}
 
 		res := &importResult{Errors: []string{}}
 		for ln := 1; ln < len(rows); ln++ {
@@ -187,6 +274,20 @@ func ImportEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 				res.Errors = append(res.Errors, fmt.Sprintf("line %d: staff_id and full_name required", ln))
 				continue
 			}
+			dept := strings.TrimSpace(cell(row, idx, "department"))
+			if dept == "" {
+				res.Skipped++
+				res.Errors = append(res.Errors, fmt.Sprintf("line %d: department required", ln))
+				continue
+			}
+			canonical, ok := support[strings.ToLower(dept)]
+			if !ok {
+				res.Skipped++
+				res.Errors = append(res.Errors, fmt.Sprintf(
+					"line %d: %q is not one of this institution's support departments", ln, dept))
+				continue
+			}
+			dept = canonical
 			var inserted bool
 			err := adminPool.QueryRow(r.Context(), `
 				INSERT INTO employees (tenant_id, staff_id, title, full_name, department, job_title, email, phone)
@@ -200,7 +301,7 @@ func ImportEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 				    phone      = COALESCE(NULLIF(EXCLUDED.phone,''), employees.phone)
 				RETURNING (xmax = 0)`,
 				tenantID, staffID, cell(row, idx, "title"), fullName,
-				cell(row, idx, "department"), cell(row, idx, "job_title"),
+				dept, cell(row, idx, "job_title"),
 				cell(row, idx, "email"), cell(row, idx, "phone")).Scan(&inserted)
 			if err != nil {
 				res.Skipped++

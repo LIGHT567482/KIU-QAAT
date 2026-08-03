@@ -850,10 +850,22 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
+		// A lecturer has no department or school of their own. They can teach across several
+		// colleges at once, so a single field on the person could only ever be wrong for the rest —
+		// the units they are assigned to are what carry the org unit, and each department and
+		// school reaches them through those. Derived here, read-only, never stored on the row.
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT lecturer_id::text, COALESCE(title,''), full_name, COALESCE(gender,''),
-			       COALESCE(email,''), COALESCE(phone,''), COALESCE(department,''), COALESCE(staff_id,'')
-			FROM lecturers WHERE tenant_id = $1 ORDER BY full_name`, tenantID)
+			SELECT l.lecturer_id::text, COALESCE(l.title,''), l.full_name, COALESCE(l.gender,''),
+			       COALESCE(l.email,''), COALESCE(l.phone,''), COALESCE(l.staff_id,''),
+			       COALESCE(ARRAY_AGG(DISTINCT c.department) FILTER (WHERE COALESCE(c.department,'') <> ''), '{}') AS departments,
+			       COALESCE(ARRAY_AGG(DISTINCT c.school)     FILTER (WHERE COALESCE(c.school,'')     <> ''), '{}') AS schools
+			FROM lecturers l
+			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			WHERE l.tenant_id = $1
+			GROUP BY l.lecturer_id, l.title, l.full_name, l.gender, l.email, l.phone, l.staff_id
+			ORDER BY l.full_name`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -867,13 +879,17 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Gender     string `json:"gender"`
 			Email      string `json:"email"`
 			Phone      string `json:"phone"`
-			Department string `json:"department"`
 			StaffID    string `json:"staff_id"`
+			// Every department/school the lecturer reaches through a unit they teach. Plural
+			// because teaching across two colleges is ordinary, not an edge case.
+			Departments []string `json:"departments"`
+			Schools     []string `json:"schools"`
 		}
 		var list []lecturer
 		for rows.Next() {
 			var l lecturer
-			rows.Scan(&l.LecturerID, &l.Title, &l.FullName, &l.Gender, &l.Email, &l.Phone, &l.Department, &l.StaffID) //nolint:errcheck
+			rows.Scan(&l.LecturerID, &l.Title, &l.FullName, &l.Gender, &l.Email, &l.Phone, &l.StaffID, //nolint:errcheck
+				&l.Departments, &l.Schools)
 			list = append(list, l)
 		}
 		if list == nil {
@@ -888,14 +904,15 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
+		// No department field: a lecturer belongs to the units they teach, and those carry the
+		// department and school. Assign them a unit to place them under an HOD or a dean.
 		var req struct {
-			FullName   string `json:"full_name"`
-			Email      string `json:"email"`
-			Phone      string `json:"phone"`
-			Department string `json:"department"`
-			StaffID    string `json:"staff_id"`
-			Title      string `json:"title"`
-			Gender     string `json:"gender"`
+			FullName string `json:"full_name"`
+			Email    string `json:"email"`
+			Phone    string `json:"phone"`
+			StaffID  string `json:"staff_id"`
+			Title    string `json:"title"`
+			Gender   string `json:"gender"`
 		}
 		if err := decodeJSON(r, &req); err != nil || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "full_name is required"))
@@ -906,10 +923,10 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 		insert := func(sid string) (string, error) {
 			var id string
 			e := adminPool.QueryRow(r.Context(), `
-				INSERT INTO lecturers (tenant_id, full_name, email, phone, department, staff_id, title, gender)
-				VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''))
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, staff_id, title, gender)
+				VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''))
 				RETURNING lecturer_id::text`,
-				tenantID, req.FullName, req.Email, req.Phone, req.Department, sid, req.Title, req.Gender).Scan(&id)
+				tenantID, req.FullName, req.Email, req.Phone, sid, req.Title, req.Gender).Scan(&id)
 			return id, e
 		}
 
@@ -966,14 +983,15 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lecturerID := chi.URLParam(r, "lecturer_id")
+		// Department is deliberately absent — see CreateLecturer. Editing a lecturer cannot file
+		// them under a department; assigning them a unit is what does that.
 		var req struct {
-			FullName   *string `json:"full_name"`
-			Email      *string `json:"email"`
-			Phone      *string `json:"phone"`
-			Department *string `json:"department"`
-			StaffID    *string `json:"staff_id"`
-			Title      *string `json:"title"`
-			Gender     *string `json:"gender"`
+			FullName *string `json:"full_name"`
+			Email    *string `json:"email"`
+			Phone    *string `json:"phone"`
+			StaffID  *string `json:"staff_id"`
+			Title    *string `json:"title"`
+			Gender   *string `json:"gender"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
@@ -993,7 +1011,6 @@ func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 		add("full_name", req.FullName)
 		add("email", req.Email)
 		add("phone", req.Phone)
-		add("department", req.Department)
 		add("staff_id", req.StaffID)
 		add("title", req.Title)
 		add("gender", req.Gender)
@@ -1369,7 +1386,8 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			    lal.log_id::text,
 			    lal.lecturer_id,
 			    COALESCE(l.full_name, lal.lecturer_id)  AS lecturer_name,
-			    COALESCE(l.department, '')               AS department,
+			    -- The UNIT's department, not the lecturer's: they have none of their own.
+			    COALESCE(c.department, '')               AS department,
 			    lal.unit_id,
 			    COALESCE(cu.name, lal.unit_id)           AS unit_name,
 			    lal.session_date,
@@ -1381,6 +1399,7 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN lecturers  l  ON l.lecturer_id::text = lal.lecturer_id
 			                       AND l.tenant_id = lal.tenant_id
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
+			LEFT JOIN courses      c  ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
 			LEFT JOIN sessions     s  ON s.session_id = lal.session_id
 			WHERE lal.tenant_id = $1
 			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
@@ -1439,7 +1458,10 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SELECT
 			    lal.lecturer_id,
 			    COALESCE(l.full_name, lal.lecturer_id)   AS lecturer_name,
-			    COALESCE(l.department, '')                AS department,
+			    -- Every department this lecturer reaches through the units they taught. Plural,
+			    -- because teaching across two colleges is ordinary rather than an edge case.
+			    COALESCE(STRING_AGG(DISTINCT c.department, ', ')
+			             FILTER (WHERE COALESCE(c.department,'') <> ''), '') AS department,
 			    COALESCE(l.email, '')                     AS email,
 			    COUNT(*)                                   AS total_sessions,
 			    COALESCE(SUM(lal.contact_hours), 0)       AS total_contact_hours,
@@ -1448,8 +1470,10 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id
 			                     AND l.tenant_id = lal.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id AND cu.tenant_id = lal.tenant_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
 			WHERE lal.tenant_id = $1
-			GROUP BY lal.lecturer_id, l.full_name, l.department, l.email
+			GROUP BY lal.lecturer_id, l.full_name, l.email
 			ORDER BY total_sessions DESC`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))

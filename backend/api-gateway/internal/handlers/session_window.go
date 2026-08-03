@@ -146,9 +146,18 @@ func GetUsersPasscodeStatus(pool *pgxpool.Pool) http.HandlerFunc {
 
 type passcodePayload struct {
 	Passcode string `json:"passcode"`
+	// Required when a passcode is already set — this endpoint is both "set the first one" and
+	// "change the existing one", and only the second needs proving you knew the old one.
+	CurrentPasscode string `json:"current_passcode"`
 }
 
-// PUT /api/v1/admin/settings/users-passcode — set/replace the Users-page passcode.
+// PUT /api/v1/admin/settings/users-passcode — set the Administration passcode, or change it.
+//
+// WHY THE CURRENT ONE IS DEMANDED. The passcode is a second gate in front of the Administration
+// page, sitting behind the ADMIN role that everyone on this endpoint already holds. If a change
+// needed only the new value, an unlocked browser left alone for a minute would be enough to
+// replace it — and the person locked out afterwards would be the administrator. Proving knowledge
+// of the current passcode is the only thing that makes the gate worth having once it is set.
 func PutUsersPasscode(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
@@ -157,6 +166,21 @@ func PutUsersPasscode(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "passcode must be 4–128 characters"))
 			return
 		}
+
+		var existing *string
+		_ = pool.QueryRow(r.Context(),
+			`SELECT users_passcode_hash FROM tenants WHERE tenant_id = $1`, tenantID).Scan(&existing)
+		if existing != nil && *existing != "" {
+			if bcrypt.CompareHashAndPassword([]byte(*existing), []byte(req.CurrentPasscode)) != nil {
+				writeJSON(w, http.StatusForbidden, errBody("INVALID_PASSCODE", "the current passcode is incorrect"))
+				return
+			}
+			if req.Passcode == req.CurrentPasscode {
+				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "the new passcode must differ from the current one"))
+				return
+			}
+		}
+
 		hash, herr := bcrypt.GenerateFromPassword([]byte(req.Passcode), 12)
 		if herr != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "hash failed"))

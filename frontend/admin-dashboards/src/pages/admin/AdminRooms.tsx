@@ -144,7 +144,7 @@ export default function AdminRooms() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Room code', 'Name', 'Building', 'Floor', 'Seats', 'Type', 'School / Dept', 'In use', ''].map(h => (
+            {['Room code', 'Name', 'Building', 'Floor', 'Seats', 'Type', 'In use', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -160,9 +160,6 @@ export default function AdminRooms() {
               <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.floor || '—'}</td>
               <td style={{ padding: '10px 12px', textAlign: 'center' }}>{r.capacity || '—'}</td>
               <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--muted)' }}>{(r.room_type || '').replace(/_/g, ' ')}</td>
-              <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--muted)' }}>
-                {r.school_name || '—'}{r.department_name ? ` · ${r.department_name}` : ''}
-              </td>
               <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: 12 }}>
                 {r.slot_count > 0 ? `${r.slot_count} slot${r.slot_count === 1 ? '' : 's'}` : '—'}
               </td>
@@ -174,7 +171,7 @@ export default function AdminRooms() {
             </tr>
           ))}
           {rooms.status === 'ok' && list.length === 0 && (
-            <tr><td colSpan={9} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+            <tr><td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
               {(rooms.data ?? []).length === 0
                 ? 'No rooms yet. Add one, or import your estates list from Excel.'
                 : 'No room matches those filters.'}

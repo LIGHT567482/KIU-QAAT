@@ -107,7 +107,7 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 	sRows, err := conn.Query(r.Context(), `
 		SELECT COALESCE(p.lecturer_id,''),
 		       COALESCE(MAX(l.full_name), MAX(p.lecturer_name), ''),
-		       COALESCE(MAX(l.department),''), COALESCE(MAX(c.school),''),
+		       COALESCE(MAX(c.department),''), COALESCE(MAX(c.school),''),
 		       COUNT(*)                              AS patrolled,
 		       COUNT(*) FILTER (WHERE p.taught)      AS taught,
 		       MAX(p.session_date)::text             AS last_patrol

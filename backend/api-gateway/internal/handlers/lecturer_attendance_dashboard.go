@@ -25,15 +25,18 @@ func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
+		// Department comes from the unit this log is FOR, not from the lecturer: they have none of
+		// their own, and each row is already about one unit, which names its department exactly.
 		rows, err := conn.Query(r.Context(), `
 			SELECT lal.log_id::text, lal.lecturer_id,
-			       COALESCE(l.full_name, lal.lecturer_id), COALESCE(l.department,''),
+			       COALESCE(l.full_name, lal.lecturer_id), COALESCE(c.department,''),
 			       lal.unit_id, COALESCE(cu.name, lal.unit_id), lal.session_date,
 			       lal.gate_open_time, lal.gate_close_time, COALESCE(lal.contact_hours,0),
 			       COALESCE(s.session_status::text,'UNKNOWN')
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id AND l.tenant_id = lal.tenant_id
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
 			LEFT JOIN sessions s ON s.session_id = lal.session_id
 			WHERE lal.tenant_id = $1
 			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
@@ -89,13 +92,16 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
 		rows, err := conn.Query(r.Context(), `
-			SELECT lal.lecturer_id, COALESCE(l.full_name, lal.lecturer_id), COALESCE(l.department,''),
+			SELECT lal.lecturer_id, COALESCE(l.full_name, lal.lecturer_id),
+			       COALESCE(STRING_AGG(DISTINCT c.department, ', ') FILTER (WHERE COALESCE(c.department,'') <> ''), ''),
 			       COALESCE(l.email,''), COUNT(*), COALESCE(SUM(lal.contact_hours),0),
 			       COALESCE(AVG(lal.contact_hours),0), MAX(lal.session_date)
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id AND l.tenant_id = lal.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id AND cu.tenant_id = lal.tenant_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
 			WHERE lal.tenant_id = $1
-			GROUP BY lal.lecturer_id, l.full_name, l.department, l.email
+			GROUP BY lal.lecturer_id, l.full_name, l.email
 			ORDER BY COUNT(*) DESC`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))

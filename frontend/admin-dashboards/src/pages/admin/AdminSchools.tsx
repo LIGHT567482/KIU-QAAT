@@ -30,6 +30,11 @@ export default function AdminSchools() {
   const [busy, setBusy] = useState(false)
   // Standalone support departments (no school).
   const [supportName, setSupportName] = useState('')
+  // Which schools are open. Collapsed by default: an institution with a dozen colleges was one
+  // flat wall of chips, and the school a person came here to work on was somewhere in the middle
+  // of it. The header still carries the department count, so nothing is hidden — only folded.
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const toggle = (id: string) => setOpen(o => ({ ...o, [id]: !o[id] }))
 
   // school_id === '' is the marker for a department that belongs to no school.
   const academicDepts = depts.filter(d => d.school_id !== '')
@@ -151,17 +156,28 @@ export default function AdminSchools() {
                     <button onClick={() => setEdit(p => { const n = { ...p }; delete n[s.school_id]; return n })} style={btnDanger}>Cancel</button>
                   </div>
                 ) : (
-                  <h3 style={{ margin: 0 }}>
+                  // The whole header is the toggle — clicking a school is how you get at what is
+                  // inside it, so the target is the school itself rather than a caret beside it.
+                  <h3
+                    onClick={() => toggle(s.school_id)}
+                    role="button" tabIndex={0} aria-expanded={!!open[s.school_id]}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.school_id) } }}
+                    style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, flex: 1, userSelect: 'none' }}
+                  >
+                    <span style={{
+                      display: 'inline-block', transition: 'transform .15s', color: 'var(--muted)', fontSize: 12,
+                      transform: open[s.school_id] ? 'rotate(90deg)' : 'none',
+                    }}>▶</span>
                     {s.abbreviation && (
                       <span style={{
                         background: 'var(--brand)', color: '#fff', borderRadius: 6,
-                        padding: '2px 8px', fontSize: 13, marginRight: 8, letterSpacing: '.03em',
+                        padding: '2px 8px', fontSize: 13, letterSpacing: '.03em',
                       }}>{s.abbreviation}</span>
                     )}
                     {s.name}
-                    <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}> · {myDepts.length} dept(s)</span>
+                    <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 13 }}>· {myDepts.length} dept(s)</span>
                     {!s.abbreviation && (
-                      <span style={{ color: '#b45309', fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+                      <span style={{ color: '#b45309', fontWeight: 400, fontSize: 12 }}>
                         no short form set
                       </span>
                     )}
@@ -176,22 +192,27 @@ export default function AdminSchools() {
                 )}
               </div>
 
-              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {myDepts.map(d => (
-                  <span key={d.department_id} style={chip}>
-                    {d.name}{d.kind === 'SUPPORT' ? ' (support)' : ''}
-                    <button onClick={() => delDept(d.department_id)} style={chipX} title="Remove">×</button>
-                  </span>
-                ))}
-                {myDepts.length === 0 && <span style={{ color: 'var(--muted)', fontSize: 13 }}>No departments yet.</span>}
-              </div>
+              {/* The contents of a school appear only once it is opened. */}
+              {open[s.school_id] && (
+                <>
+                  <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {myDepts.map(d => (
+                      <span key={d.department_id} style={chip}>
+                        {d.name}{d.kind === 'SUPPORT' ? ' (support)' : ''}
+                        <button onClick={() => delDept(d.department_id)} style={chipX} title="Remove">×</button>
+                      </span>
+                    ))}
+                    {myDepts.length === 0 && <span style={{ color: 'var(--muted)', fontSize: 13 }}>No departments yet.</span>}
+                  </div>
 
-              <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input value={deptName[s.school_id] ?? ''} onChange={e => setDeptName(m => ({ ...m, [s.school_id]: e.target.value }))}
-                  placeholder="New department name" style={{ ...inputStyle, maxWidth: 260 }}
-                  onKeyDown={e => { if (e.key === 'Enter') addDept(s.school_id) }} />
-                <button onClick={() => addDept(s.school_id)} disabled={busy} style={btnPrimary}>+ Add department</button>
-              </div>
+                  <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <input value={deptName[s.school_id] ?? ''} onChange={e => setDeptName(m => ({ ...m, [s.school_id]: e.target.value }))}
+                      placeholder="New department name" style={{ ...inputStyle, maxWidth: 260 }}
+                      onKeyDown={e => { if (e.key === 'Enter') addDept(s.school_id) }} />
+                    <button onClick={() => addDept(s.school_id)} disabled={busy} style={btnPrimary}>+ Add department</button>
+                  </div>
+                </>
+              )}
             </div>
           )
         })}

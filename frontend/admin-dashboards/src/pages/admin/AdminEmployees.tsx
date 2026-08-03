@@ -6,7 +6,10 @@ import { useQuery } from '../../lib/useApi'
 
 // General (non-teaching) staff whose attendance is tracked by the check-in tablet.
 // Separate registry from lecturers, with its own bulk import/export template.
-const EMP_COLS = ['staff_id', 'title', 'full_name', 'phone', 'email']
+//
+// `department` is required — and must be one of the SUPPORT departments, the ones that belong to
+// no faculty. An employee with no department is a person the no-show report cannot chase.
+const EMP_COLS = ['staff_id', 'title', 'full_name', 'department', 'phone', 'email']
 
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
@@ -46,6 +49,9 @@ export default function AdminEmployees() {
   const q = search.trim().toLowerCase()
   const list = (data ?? []).filter(e => !q ||
     [e.staff_id, e.full_name, e.department, e.job_title].some(v => (v || '').toLowerCase().includes(q)))
+
+  // Only support departments may hold staff, so that is the whole set the edit row offers.
+  const supportDepartments = org.departments.filter(d => d.kind === 'SUPPORT')
 
   async function handleCreate() {
     setSaving(true); setError(null)
@@ -118,18 +124,19 @@ export default function AdminEmployees() {
             <Input label="Phone (contact)" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <Input label="Email (contact)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} />
             <Input label="Job title" value={form.job_title} onChange={v => setForm(f => ({ ...f, job_title: v }))} placeholder="Bursar / Systems Officer" />
-            {/* Department was in the payload but had no field, so every employee was saved with a
-                blank one and the no-show report could not say whose office to chase. Non-teaching
-                staff sit in SUPPORT departments — Finance, ICT, Library — which belong to no
-                faculty, which is exactly the case the picker handles by clearing the school. */}
+            {/* Department is REQUIRED, and only a SUPPORT department will do. Non-teaching staff
+                sit in Finance, ICT, Library and the like — departments that belong to no faculty
+                — so the academic list is not offered at all. Saved blank, an employee has no
+                office to chase on the no-show report, which is what it was for. */}
             <OrgPicker
               schools={org.schools} departments={org.departments}
               department={form.department} school=""
               onChange={next => setForm(f => ({ ...f, department: next.department }))}
-              showSchool={false}
+              showSchool={false} requireDepartment kind="SUPPORT"
+              hint="Which support department this person works in."
             />
           </div>
-          <button onClick={handleCreate} disabled={saving || !form.staff_id.trim() || !form.full_name.trim()} style={{ ...btnPrimary, marginTop: 12 }}>
+          <button onClick={handleCreate} disabled={saving || !form.staff_id.trim() || !form.full_name.trim() || !form.department.trim()} style={{ ...btnPrimary, marginTop: 12 }}>
             {saving ? 'Saving…' : 'Save employee'}
           </button>
         </div>
@@ -140,16 +147,24 @@ export default function AdminEmployees() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead><tr style={{ background: 'var(--surface-2)' }}>
-              <th style={th}>Staff ID</th><th style={th}>Name</th><th style={th}>Contact</th><th style={th}></th>
+              <th style={th}>Staff ID</th><th style={th}>Name</th><th style={th}>Department</th><th style={th}>Contact</th><th style={th}></th>
             </tr></thead>
             <tbody>
               {list.map(e => editId === e.employee_pk ? (
                 <tr key={e.employee_pk}>
                   <td style={td}><input value={editForm.staff_id} onChange={ev => setEditForm(f => ({ ...f, staff_id: ev.target.value }))} style={inp} /></td>
                   <td style={td}><input value={editForm.full_name} onChange={ev => setEditForm(f => ({ ...f, full_name: ev.target.value }))} style={inp} /></td>
+                  {/* Editable here too — otherwise an employee filed against the wrong support
+                      department could only be fixed by deleting and re-adding them. */}
+                  <td style={td}>
+                    <select value={editForm.department} onChange={ev => setEditForm(f => ({ ...f, department: ev.target.value }))} style={inp}>
+                      <option value="">— none —</option>
+                      {supportDepartments.map(d => <option key={d.department_id} value={d.name}>{d.name}</option>)}
+                    </select>
+                  </td>
                   <td style={td}><input value={editForm.phone} onChange={ev => setEditForm(f => ({ ...f, phone: ev.target.value }))} style={inp} placeholder="phone / email" /></td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button onClick={saveEdit} style={btnSmall}>Save</button>{' '}
+                    <button onClick={saveEdit} disabled={!editForm.department.trim()} style={btnSmall}>Save</button>{' '}
                     <button onClick={() => setEditId(null)} style={btnSmall}>Cancel</button>
                   </td>
                 </tr>
@@ -157,6 +172,13 @@ export default function AdminEmployees() {
                 <tr key={e.employee_pk} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ ...td, fontFamily: 'monospace' }}>{e.staff_id}</td>
                   <td style={td}>{e.title ? `${e.title} ` : ''}{e.full_name}</td>
+                  {/* Records predating the requirement can still be blank; flag them rather than
+                      showing a dash, because a blank one is what breaks the no-show report. */}
+                  <td style={td}>
+                    {e.department
+                      ? e.department
+                      : <span style={{ color: '#b45309', fontSize: 12 }}>not set — edit to assign</span>}
+                  </td>
                   <td style={{ ...td, color: 'var(--muted)' }}>{e.phone || e.email || '—'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
                     <button onClick={() => startEdit(e)} style={btnSmall}>Edit</button>{' '}
@@ -164,7 +186,7 @@ export default function AdminEmployees() {
                   </td>
                 </tr>
               ))}
-              {list.length === 0 && <tr><td colSpan={4} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: 28 }}>No employees yet — add one or import a list.</td></tr>}
+              {list.length === 0 && <tr><td colSpan={5} style={{ ...td, textAlign: 'center', color: 'var(--muted)', padding: 28 }}>No employees yet — add one or import a list.</td></tr>}
             </tbody>
           </table>
         </div>

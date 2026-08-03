@@ -55,6 +55,7 @@ function UsersInner() {
   const GENDERS = ['', 'Male', 'Female', 'Other']
 
   const [creating, setCreating] = useState(false)
+  const [changingPasscode, setChangingPasscode] = useState(false)
   const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -113,10 +114,17 @@ function UsersInner() {
           <h2 style={{ margin: '4px 0 0' }}>Administration</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Staff accounts &amp; the institution's academic period.</p>
         </div>
-        <button onClick={() => setCreating(c => !c)} style={btn}>
-          {creating ? 'Cancel' : '+ Add User'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <button onClick={() => setChangingPasscode(c => !c)} style={btnGhost}>
+            {changingPasscode ? 'Cancel' : '🔑 Change access password'}
+          </button>
+          <button onClick={() => setCreating(c => !c)} style={btn}>
+            {creating ? 'Cancel' : '+ Add User'}
+          </button>
+        </div>
       </div>
+
+      {changingPasscode && <ChangePasscodeCard onDone={() => setChangingPasscode(false)} />}
 
       <AcademicPeriodCard tenantId={tenantId!} />
 
@@ -539,6 +547,58 @@ function PasscodeGate({ onUnlock }: { onUnlock: () => void }) {
   )
 }
 
+// Changing the passcode that guards this page. The current one is demanded because the gate is
+// only worth having if an unlocked browser cannot be used to replace it — the person locked out
+// afterwards would be the administrator.
+function ChangePasscodeCard({ onDone }: { onDone: () => void }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+
+  async function save() {
+    setErr(null)
+    if (next.length < 4) { setErr('The new passcode must be at least 4 characters.'); return }
+    if (next !== confirm) { setErr('The new passcodes do not match.'); return }
+    setBusy(true)
+    try {
+      await api.put('/api/v1/admin/settings/users-passcode', { passcode: next, current_passcode: current })
+      setOk(true); setCurrent(''); setNext(''); setConfirm('')
+      setTimeout(onDone, 1200)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not change the passcode') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 20, marginBottom: 24, maxWidth: 460 }}>
+      <h3 style={{ margin: '0 0 4px' }}>Change access password</h3>
+      <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 16px' }}>
+        This is the passcode asked for when anyone opens <strong>Administration</strong>. Everyone who
+        uses this page will need the new one.
+      </p>
+      {err && <div style={errorBox}>{err}</div>}
+      {ok  && <div style={{ background: '#f0fdf4', color: '#166534', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>Access password changed.</div>}
+      <div style={{ display: 'grid', gap: 10 }}>
+        <PasswordInput value={current} placeholder="Current passcode" autoFocus
+          onChange={e => setCurrent(e.target.value)}
+          style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15 }} />
+        <PasswordInput value={next} placeholder="New passcode"
+          onChange={e => setNext(e.target.value)}
+          style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15 }} />
+        <PasswordInput value={confirm} placeholder="Confirm new passcode"
+          onChange={e => setConfirm(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') save() }}
+          style={{ padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 15 }} />
+      </div>
+      <button onClick={save} disabled={busy || !current || !next || !confirm} style={{ ...btn, marginTop: 14 }}>
+        {busy ? 'Changing…' : 'Change passcode'}
+      </button>
+    </div>
+  )
+}
+
 function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
   const [show, setShow] = useState(false)
   const isPw = type === 'password'
@@ -556,6 +616,7 @@ function Field({ label, value, onChange, type = 'text' }: { label: string; value
 }
 
 const btn:         React.CSSProperties = { padding: '8px 16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
+const btnGhost:    React.CSSProperties = { padding: '8px 14px', background: '#fff', color: '#1e293b', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13 }
 const labelStyle:  React.CSSProperties = { fontSize: 13, fontWeight: 600, marginBottom: 4, color: '#475569' }
 const selectStyle: React.CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 14 }
 const errorBox:    React.CSSProperties = { background: '#fef2f2', color: '#b91c1c', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }

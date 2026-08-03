@@ -1,8 +1,13 @@
 package handlers
 
 // Lecturer bulk import/export — template-driven, mirrors the student SIS import
-// (sis.go). Columns: staff_id, full_name, email, phone, department, title, gender.
+// (sis.go). Columns: staff_id, full_name, email, phone, title, gender.
 // Keeps the manual "+ Add lecturer" path as the fallback.
+//
+// NO department column on import. A lecturer has none of their own: they can teach across several
+// colleges, and the units they are assigned to are what carry the department and school. A
+// `department` cell in an uploaded file is therefore ignored rather than written — the export emits
+// a DERIVED `departments` column for reading, which does not round-trip back in.
 
 import (
 	"bytes"
@@ -99,25 +104,24 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 			// Upsert by (tenant, staff_id) — matches the partial unique index
 			// ux_lecturers_tenant_staffid (predicate must be repeated).
 			qErr = pool.QueryRow(ctx, `
-				INSERT INTO lecturers (tenant_id, full_name, email, phone, department, staff_id, title, gender)
-				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''))
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, staff_id, title, gender)
+				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''))
 				ON CONFLICT (tenant_id, staff_id) WHERE staff_id IS NOT NULL AND staff_id <> ''
 				DO UPDATE SET
 				    full_name  = EXCLUDED.full_name,
 				    email      = COALESCE(EXCLUDED.email, lecturers.email),
 				    phone      = COALESCE(EXCLUDED.phone, lecturers.phone),
-				    department = COALESCE(EXCLUDED.department, lecturers.department),
 				    title      = COALESCE(EXCLUDED.title, lecturers.title),
 				    gender     = COALESCE(EXCLUDED.gender, lecturers.gender)
 				RETURNING lecturer_id::text, (xmax = 0)`,
-				tenantID, fullName, email, get("phone"), get("department"), staffID, get("title"), get("gender")).Scan(&lecturerID, &inserted)
+				tenantID, fullName, email, get("phone"), staffID, get("title"), get("gender")).Scan(&lecturerID, &inserted)
 		} else {
 			// No staff ID → plain insert (cannot dedupe reliably without it).
 			qErr = pool.QueryRow(ctx, `
-				INSERT INTO lecturers (tenant_id, full_name, email, phone, department, title, gender)
-				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''))
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, title, gender)
+				VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''))
 				RETURNING lecturer_id::text`,
-				tenantID, fullName, email, get("phone"), get("department"), get("title"), get("gender")).Scan(&lecturerID)
+				tenantID, fullName, email, get("phone"), get("title"), get("gender")).Scan(&lecturerID)
 			inserted = true
 		}
 		if qErr != nil {
@@ -135,31 +139,45 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 }
 
 // GET /api/v1/admin/tenants/{tenant_id}/lecturers/export.xlsx  (optional ?department=)
+//
+// The exported `departments` column is DERIVED from the units the lecturer is assigned to, and so
+// is the optional filter: a lecturer has no department of their own, and one who teaches in two
+// colleges appears under both. It is informational — re-importing this file will not write it back,
+// because assignment is what places a lecturer under a department.
 func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
-		where := "tenant_id = $1"
 		args := []interface{}{tenantID}
+		having := ""
 		if dept := strings.TrimSpace(r.URL.Query().Get("department")); dept != "" {
 			args = append(args, dept)
-			where += fmt.Sprintf(" AND department = $%d", len(args))
+			having = fmt.Sprintf(
+				" HAVING BOOL_OR(btrim(lower(c.department)) = btrim(lower($%d)))", len(args))
 		}
 		rows, err := adminPool.Query(r.Context(), `
-			SELECT COALESCE(staff_id,''), full_name, COALESCE(email,''), COALESCE(phone,''),
-			       COALESCE(department,''), COALESCE(title,''), COALESCE(gender,'')
-			FROM lecturers WHERE `+where+` ORDER BY full_name`, args...)
+			SELECT COALESCE(l.staff_id,''), l.full_name, COALESCE(l.email,''), COALESCE(l.phone,''),
+			       COALESCE(ARRAY_AGG(DISTINCT c.department) FILTER (WHERE COALESCE(c.department,'') <> ''), '{}'),
+			       COALESCE(l.title,''), COALESCE(l.gender,'')
+			FROM lecturers l
+			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			WHERE l.tenant_id = $1
+			GROUP BY l.lecturer_id, l.staff_id, l.full_name, l.email, l.phone, l.title, l.gender`+having+`
+			ORDER BY l.full_name`, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
 		defer rows.Close()
 
-		// email is optional and used only to dispatch the lecturer's career QR.
-		out := [][]string{{"staff_id", "full_name", "email", "phone", "department", "title", "gender"}}
+		// email is optional and used only for correspondence.
+		out := [][]string{{"staff_id", "full_name", "email", "phone", "departments", "title", "gender"}}
 		for rows.Next() {
-			var sid, name, email, phone, dept, title, gender string
-			rows.Scan(&sid, &name, &email, &phone, &dept, &title, &gender) //nolint:errcheck
-			out = append(out, []string{sid, name, email, phone, dept, title, gender})
+			var sid, name, email, phone, title, gender string
+			var depts []string
+			rows.Scan(&sid, &name, &email, &phone, &depts, &title, &gender) //nolint:errcheck
+			out = append(out, []string{sid, name, email, phone, strings.Join(depts, ", "), title, gender})
 		}
 
 		xlsx, err := buildXLSX(out)
