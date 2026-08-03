@@ -31,7 +31,6 @@ import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.sync.SyncManager
 import java.time.LocalDate
 
-private val DAYS = arrayOf("", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 /**
  * The coordinator home — mirrors the coordinator PWA Dashboard: cohort card, live-sessions
@@ -187,87 +186,31 @@ fun DashboardScreen() {
     }
 }
 
-// Time × Day grid (like the admin dashboard): a Time column on the left, day columns
-// across, and each unit rendered as a block that COVERS all the cells for its full
-// running time (08:00–11:00 = a 3-hour tall block). Weekend cohorts show Sat/Sun.
+// The week itself is drawn by the shared [TimetableGrid], so the coordinator's timetable and the
+// student's are the same picture of the same week. This only maps units onto it.
 @Composable
 private fun TimetableView(units: List<DashboardClient.Unit>, sessionType: String) {
     val scheduled = units.filter { it.dayOfWeek in 1..7 && it.start.isNotBlank() }
     val unscheduled = units.filter { !(it.dayOfWeek in 1..7 && it.start.isNotBlank()) }
     if (scheduled.isEmpty() && unscheduled.isEmpty()) { EmptyNote("No units in this session yet. Ask your admin to add units, then set each unit's day & time when you open it."); return }
-    val days = if (sessionType.lowercase().contains("weekend")) listOf(6, 7) else listOf(1, 2, 3, 4, 5)
-    val today = LocalDate.now().dayOfWeek.value
-    var lo = 8; var hi = 19
-    scheduled.forEach { val h = ttHourOf(it.start); if (h < lo) lo = h; if (h + ttSpan(it.durationMin) > hi) hi = h + ttSpan(it.durationMin) }
-    lo = lo.coerceIn(0, 23); hi = hi.coerceIn(lo + 1, 24)   // clamp to a real clock — no 24:00/25:00 rows
-    val hours = (lo until hi).toList()
-    val rowH = 40.dp
-    val dayW = 108.dp
-    val timeW = 46.dp
-    val brand = MaterialTheme.colorScheme.primary
-    val line = MaterialTheme.colorScheme.outlineVariant
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-
-    Column {
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            // Time column
-            Column {
-                Box(Modifier.width(timeW).height(26.dp), contentAlignment = Alignment.Center) {
-                    Text("Time", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = brand)
-                }
-                hours.forEach { h ->
-                    Box(Modifier.width(timeW).height(rowH), contentAlignment = Alignment.TopCenter) {
-                        Text(ampmHour(h), fontSize = 9.sp, color = muted, modifier = Modifier.padding(top = 2.dp))
-                    }
-                }
-            }
-            // Day columns
-            days.forEach { d ->
-                val isToday = d == today
-                Column {
-                    Box(Modifier.width(dayW).height(26.dp).background(if (isToday) brand else MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                        Text(DAYS[d] + if (isToday) " •" else "", fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = if (isToday) MaterialTheme.colorScheme.onPrimary else muted)
-                    }
-                    Box(Modifier.width(dayW).height(rowH * hours.size.toFloat())) {
-                        // hour gridlines
-                        Column {
-                            hours.forEach { _ ->
-                                Box(Modifier.fillMaxWidth().height(rowH).drawBehind {
-                                    drawLine(line, Offset(0f, size.height), Offset(size.width, size.height), 1f)
-                                })
-                            }
-                        }
-                        // unit blocks — height ∝ duration so they cover their full time
-                        scheduled.filter { it.dayOfWeek == d }.forEach { u ->
-                            val sh = ttHourOf(u.start); val span = ttSpan(u.durationMin)
-                            Box(Modifier.offset(y = rowH * (sh - lo).toFloat()).height(rowH * span.toFloat()).fillMaxWidth().padding(1.5.dp)) {
-                                Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(5.dp),
-                                    border = BorderStroke(1.dp, brand), modifier = Modifier.fillMaxSize()) {
-                                    Column(Modifier.padding(horizontal = 4.dp, vertical = 3.dp)) {
-                                        Text(u.name, fontWeight = FontWeight.SemiBold, fontSize = 10.sp, lineHeight = 11.sp, maxLines = 2, color = brand)
-                                        Text(timeRange(u.start, u.durationMin), fontSize = 8.sp, lineHeight = 10.sp, color = muted, maxLines = 1)
-                                        val extra = listOfNotNull(u.room.takeIf { it.isNotBlank() }, u.lecturers.takeIf { it.isNotBlank() },
-                                            u.lecturerPhone.takeIf { it.isNotBlank() }?.let { "☎ $it" }).joinToString(" · ")
-                                        if (extra.isNotBlank()) Text(extra, fontSize = 8.sp, lineHeight = 10.sp, color = muted, maxLines = if (span > 1) 3 else 1)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if (unscheduled.isNotEmpty()) {
-            Text("Not yet scheduled", fontWeight = FontWeight.Bold, fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-            unscheduled.forEach { Text("• ${it.name}", fontSize = 12.sp, color = muted) }
-        }
-    }
+    TimetableGrid(
+        entries = scheduled.map { u ->
+            TtEntry(
+                name = u.name,
+                dayOfWeek = u.dayOfWeek,
+                start = u.start,
+                durationMin = u.durationMin,
+                detail = listOfNotNull(
+                    u.room.takeIf { it.isNotBlank() },
+                    u.lecturers.takeIf { it.isNotBlank() },
+                    u.lecturerPhone.takeIf { it.isNotBlank() }?.let { "☎ $it" },
+                ).joinToString(" · "),
+            )
+        },
+        sessionType = sessionType,
+        unscheduledNames = unscheduled.map { it.name },
+    )
 }
-
-private fun ttHourOf(hhmm: String) = hhmm.split(":").getOrNull(0)?.toIntOrNull() ?: 0
-private fun ttSpan(mins: Int): Int { val m = if (mins <= 0) 60 else mins; return maxOf(1, (m + 59) / 60) }
 
 @Composable
 private fun UnitsView(units: List<DashboardClient.Unit>) {
@@ -410,30 +353,3 @@ private fun EmptyNote(msg: String) {
         modifier = Modifier.fillMaxWidth().padding(20.dp))
 }
 
-/** Whole-hour axis label: 8 → "8 AM", 12 → "12 PM", 13 → "1 PM", 24 → "12 AM". */
-private fun ampmHour(h: Int): String {
-    val hh = ((h % 24) + 24) % 24
-    val suffix = if (hh < 12) "AM" else "PM"
-    val h12 = if (hh % 12 == 0) 12 else hh % 12
-    return "$h12 $suffix"
-}
-
-/** "14:30" → "2:30 PM". */
-private fun ampm(hhmm: String): String {
-    if (hhmm.isBlank()) return ""
-    val p = hhmm.split(":"); if (p.size < 2) return hhmm
-    val h = p[0].toIntOrNull() ?: return hhmm
-    val suffix = if (h < 12) "AM" else "PM"
-    val h12 = when { h % 12 == 0 -> 12; else -> h % 12 }
-    return "$h12:${p[1]} $suffix"
-}
-
-/** "09:00" + 120 → "9:00 AM – 11:00 AM". */
-private fun timeRange(start: String, mins: Int): String {
-    if (start.isBlank()) return ""
-    if (mins <= 0) return ampm(start)
-    val p = start.split(":"); if (p.size < 2) return ampm(start)
-    val total = (p[0].toIntOrNull() ?: return ampm(start)) * 60 + (p[1].toIntOrNull() ?: return ampm(start)) + mins
-    val end = "%02d:%02d".format((total / 60) % 24, total % 60)
-    return "${ampm(start)} – ${ampm(end)}"
-}

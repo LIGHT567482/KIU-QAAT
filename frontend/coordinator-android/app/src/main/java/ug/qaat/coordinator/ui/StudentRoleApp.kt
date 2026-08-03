@@ -377,34 +377,25 @@ private fun StudentHome(reloadKey: Int) {
             Text("No timetable published for your cohort yet.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            // Grouped by weekday so the week reads top-to-bottom.
-            slots.groupBy { it.dayOfWeek }.toSortedMap().forEach { (day, daySlots) ->
-                Text(dayName(day), style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
-                daySlots.sortedBy { it.startTime }.forEach { sl ->
-                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(sl.unitName.ifBlank { sl.unitId }, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    listOfNotNull(
-                                        sl.unitId.takeIf { it.isNotBlank() },
-                                        sl.room.takeIf { it.isNotBlank() },
-                                        sl.lecturerName.takeIf { it.isNotBlank() },
-                                    ).joinToString(" · "),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Text(
-                                sl.startTime + (if (sl.durationMinutes > 0) " · ${sl.durationMinutes}m" else ""),
-                                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                }
-            }
+            // The SAME Time × Day grid the coordinator sees, so a student comparing their phone
+            // with the one at the front of the room is looking at one timetable, not two layouts
+            // of it. This used to be a list of weekday headings, which made the week read as a
+            // different thing depending on the role.
+            TimetableGrid(
+                entries = slots.map { sl ->
+                    TtEntry(
+                        name = sl.unitName.ifBlank { sl.unitId },
+                        dayOfWeek = sl.dayOfWeek,
+                        start = sl.startTime,
+                        durationMin = sl.durationMinutes,
+                        detail = listOfNotNull(
+                            sl.room.takeIf { it.isNotBlank() },
+                            sl.lecturerName.takeIf { it.isNotBlank() },
+                        ).joinToString(" · "),
+                    )
+                },
+                sessionType = home?.sessionType.orEmpty(),
+            )
         }
 
         Spacer(Modifier.height(20.dp))
@@ -597,11 +588,6 @@ private fun UnitRow(u: StudentHomeClient.Unit, dimmed: Boolean = false) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))
         }
     }
-}
-
-private fun dayName(d: Int) = when (d) {
-    1 -> "Monday"; 2 -> "Tuesday"; 3 -> "Wednesday"; 4 -> "Thursday"
-    5 -> "Friday"; 6 -> "Saturday"; 7 -> "Sunday"; else -> "Unscheduled"
 }
 
 /** Profile — a whole page, so it shows the student's whole record rather than three lines. */

@@ -26,18 +26,23 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
     val ctx = LocalContext.current
     // The manifest carries the FULL cohort unit list (so the Timetable stays populated). For the
     // ATTENDANCE picker, a coordinator may only start a unit that is actually TIMETABLED for today
-    // (has a day + start time) AND whose slot is due — the unit appears 10 minutes before its
-    // scheduled start. Un-timetabled units are never startable here. No fall-back to "all units".
+    // (has a day + start time). Un-timetabled units are never startable here. No fall-back to
+    // "all units". The unit is startable for the WHOLE day — it is no longer held back until
+    // 10 minutes before its slot.
     val allUnits = AppState.manifest?.units.orEmpty()
     val todayDow = java.time.LocalDate.now().dayOfWeek.value   // 1=Mon … 7=Sun
-    val nowMin = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+    // val nowMin = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
     fun startMinutes(hhmm: String): Int? {
         val p = hhmm.split(":"); val h = p.getOrNull(0)?.toIntOrNull(); val m = p.getOrNull(1)?.toIntOrNull()
         return if (h != null && m != null) h * 60 + m else null
     }
     val units = allUnits.filter { u ->
         val start = u.startTime.takeIf { it.isNotBlank() }?.let(::startMinutes)
-        u.dayOfWeek == todayDow && start != null && nowMin >= start - 10
+        // The "slot is due" gate is COMMENTED OUT: a unit used to appear only from 10 minutes
+        // before its timetabled start (`&& nowMin >= start - 10`). A coordinator may now open
+        // any unit timetabled for today at any point in the day. Restore the clause — and the
+        // `nowMin` line above — to bring the 10-minute rule back.
+        u.dayOfWeek == todayDow && start != null
     }
     var selectedUnit by remember(units.size) { mutableStateOf(units.firstOrNull()?.unitId) }
     var manualStaffId by remember { mutableStateOf("") }
@@ -62,8 +67,8 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
             return
         }
         if (units.isEmpty()) {
-            Text("No unit is due to start right now. A unit becomes available 10 minutes before its " +
-                "timetabled time — units that aren't timetabled for today can't start attendance here.",
+            Text("No unit is timetabled for today. Units that aren't timetabled for today can't " +
+                "start attendance here.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             return
         }
