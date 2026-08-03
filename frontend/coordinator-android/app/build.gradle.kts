@@ -33,12 +33,12 @@ android {
         // self-signed cert, and the URL is switchable at runtime (login "server" field /
         // Net.setBaseUrl). This is only the default; override it per build if you like:
         //   ./gradlew assembleRelease -Pqaat.apiBase=https://api.yourdomain.com
-        val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://qaat-gateway.onrender.com"
+        val apiBase = (project.findProperty("qaat.apiBase") as String?) ?: "https://kiu-qaat-gateway.onrender.com"
         buildConfigField("String", "API_BASE", "\"$apiBase\"")
         // The auth-service's own health URL — pinged on the login screen to wake the sleeping
         // free-tier service BEFORE the user submits (the gateway proxies login to it). Best-effort;
         // a wrong/unreachable value just means no pre-warm, login still works via the gateway.
-        val authWarm = (project.findProperty("qaat.authWarmUrl") as String?) ?: "https://qaat-auth.onrender.com/health"
+        val authWarm = (project.findProperty("qaat.authWarmUrl") as String?) ?: "https://kiu-qaat-auth.onrender.com/health"
         buildConfigField("String", "AUTH_WARM_URL", "\"$authWarm\"")
     }
     signingConfigs {

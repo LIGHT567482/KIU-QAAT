@@ -51,7 +51,7 @@ services:
 
   # ─── api-gateway (PUBLIC entry point) ──────────────────────────────────────
   - type: web
-    name: qaat-gateway
+    name: kiu-qaat-gateway
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
@@ -77,20 +77,20 @@ services:
           name: qaat-redis
           property: connectionString
       - key: CORS_ORIGINS
-        value: https://admin-dashboards-gamma.vercel.app,https://student-portal-xi-ruddy.vercel.app
+        value: https://kiu-qaat-admin.vercel.app,https://kiu-qaat-student.vercel.app
       # qaat-auth is currently deployed as a PUBLIC web service (has an onrender.com URL), so the
       # gateway reaches it over the public edge — the internal `http://qaat-auth:8081` address
       # black-holes when the service is asleep, which surfaces as an edge 502 on /auth/login.
       # (If you later redeploy qaat-auth as a private service on a non-sleeping plan, switch this
       # back to http://qaat-auth:8081 for private-network, no-egress routing.)
       - key: AUTH_SERVICE_URL
-        value: https://qaat-auth.onrender.com
+        value: https://kiu-qaat-auth.onrender.com
       # Same as auth: these are deployed as PUBLIC web services, so reach them over the public edge.
       # The internal http://qaat-*:port addresses black-hole (→ 502) unless they're private services.
       - key: SESSION_MANAGER_URL
-        value: https://qaat-session.onrender.com
+        value: https://kiu-qaat-session.onrender.com
       - key: SYNC_RECEIVER_URL
-        value: https://qaat-sync.onrender.com
+        value: https://kiu-qaat-sync.onrender.com
       - key: JWT_ISSUER
         fromGroup: qaat-shared
       - key: JWT_AUDIENCE
@@ -100,20 +100,20 @@ services:
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
       - key: WEBAUTHN_RP_ID
-        value: qaat-gateway.onrender.com
+        value: kiu-qaat-gateway.onrender.com
       - key: WEBAUTHN_RP_NAME
         value: QAAT
       - key: WEBAUTHN_RP_ORIGINS
-        value: https://qaat-gateway.onrender.com
+        value: https://kiu-qaat-gateway.onrender.com
       - key: STUDENT_CHECKIN_BASE_URL
-        value: https://qaat-gateway.onrender.com
+        value: https://kiu-qaat-gateway.onrender.com
       - key: LECTURER_CHECKIN_BASE_URL
-        value: https://qaat-gateway.onrender.com
+        value: https://kiu-qaat-gateway.onrender.com
 
   # ─── auth-service ──────────────────────────────────────────────────────────
   # `web`, not `pserv`: there is no free private-service instance type.
   - type: web
-    name: qaat-auth
+    name: kiu-qaat-auth
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
@@ -151,7 +151,7 @@ services:
 
   # ─── session-manager ───────────────────────────────────────────────────────
   - type: web
-    name: qaat-session
+    name: kiu-qaat-session
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
@@ -170,11 +170,11 @@ services:
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
       - key: WARDEN_BASE_URL
-        value: https://qaat-gateway.onrender.com
+        value: https://kiu-qaat-gateway.onrender.com
 
   # ─── sync-receiver ─────────────────────────────────────────────────────────
   - type: web
-    name: qaat-sync
+    name: kiu-qaat-sync
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
@@ -206,7 +206,7 @@ services:
 
   # ─── notification-service ──────────────────────────────────────────────────
   - type: web
-    name: qaat-notify
+    name: kiu-qaat-notify
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
@@ -219,7 +219,7 @@ services:
       - key: PORT
         value: "3004"
       - key: PLATFORM_DOMAIN
-        value: qaat-gateway.onrender.com
+        value: kiu-qaat-gateway.onrender.com
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
