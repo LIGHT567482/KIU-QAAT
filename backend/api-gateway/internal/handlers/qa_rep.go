@@ -35,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -388,7 +389,7 @@ func QARepTemplate(pool *pgxpool.Pool) http.HandlerFunc {
 		withQAConn(pool, w, r, func(conn *pgxpool.Conn, tenantID string, scope qaScope) {
 			out := [][]string{qaTemplateHeader, {
 				"CS201", "Data Communication", "BSC-CS", "KIU/044", "Dr. A. Mwangi",
-				"LR-101", time.Now().Format("2006-01-02"), "08:00", "YES", "example row — delete me",
+				"LR-101", clock.Today(), "08:00", "YES", "example row — delete me",
 			}}
 
 			clause, val, hasVal := scope.scopeSQL("c.department", "c.school", 2)
@@ -419,7 +420,7 @@ func QARepTemplate(pool *pgxpool.Pool) http.HandlerFunc {
 				ORDER BY ts.day_of_week, ts.start_time`, args...)
 			if err == nil {
 				defer rows.Close()
-				monday := startOfWeek(time.Now())
+				monday := startOfWeek(clock.Now())
 				for rows.Next() {
 					var unitID, unitName, courseCode, staffID, lecName, room, start string
 					var dow int
@@ -676,7 +677,7 @@ func ingestQAObservations(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 		date, ok := parseSheetDate(get("date"))
 		if !ok {
 			res.Skipped++
-			res.note("row %d: 'date' must be a date like %s (got %q)", ln+1, time.Now().Format("2006-01-02"), get("date"))
+			res.note("row %d: 'date' must be a date like %s (got %q)", ln+1, clock.Today(), get("date"))
 			continue
 		}
 		// The scheduled time completes the observation's identity (unit + date + time), so two

@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"time"
 
 	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -180,7 +180,7 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 	if sub != "" {
 		sub += " · "
 	}
-	pdf.CellFormat(0, 5, sub+"Generated "+time.Now().Format("2006-01-02 15:04"), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 5, sub+"Generated "+clock.Now().Format("2006-01-02 15:04"), "", 1, "L", false, 0, "")
 	pdf.Ln(3)
 
 	header()

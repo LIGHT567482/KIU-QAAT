@@ -24,10 +24,10 @@ package handlers
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -138,7 +138,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			return nil
 		}
 
-		since := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+		since := clock.Now().AddDate(0, 0, -90).Format("2006-01-02")
 
 		// ── Who runs each one ────────────────────────────────────────────────
 		hRows, _ := pool.Query(r.Context(), `

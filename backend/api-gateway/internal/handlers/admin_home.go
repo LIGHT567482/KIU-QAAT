@@ -26,6 +26,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -46,8 +47,8 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			return n
 		}
 
-		today := time.Now().Format("2006-01-02")
-		weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+		today := clock.Today()
+		weekAgo := clock.Now().AddDate(0, 0, -7).Format("2006-01-02")
 
 		// ── Roll call ────────────────────────────────────────────────────────
 		byRole := map[string]int{}
@@ -64,26 +65,26 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		setup := map[string]int{
-			"students":    one(`SELECT COUNT(*) FROM students_extended WHERE tenant_id=$1 AND enrollment_status='ACTIVE'`),
-			"lecturers":   one(`SELECT COUNT(*) FROM lecturers WHERE tenant_id=$1`),
-			"employees":   one(`SELECT COUNT(*) FROM employees WHERE tenant_id=$1`),
-			"courses":     one(`SELECT COUNT(*) FROM courses WHERE tenant_id=$1`),
-			"units":       one(`SELECT COUNT(*) FROM course_units WHERE tenant_id=$1`),
-			"cohorts":     one(`SELECT COUNT(*) FROM course_offerings WHERE tenant_id=$1`),
-			"schools":     one(`SELECT COUNT(*) FROM schools WHERE tenant_id=$1`),
-			"departments": one(`SELECT COUNT(*) FROM departments WHERE tenant_id=$1`),
-			"rooms":       one(`SELECT COUNT(*) FROM rooms WHERE tenant_id=$1`),
+			"students":        one(`SELECT COUNT(*) FROM students_extended WHERE tenant_id=$1 AND enrollment_status='ACTIVE'`),
+			"lecturers":       one(`SELECT COUNT(*) FROM lecturers WHERE tenant_id=$1`),
+			"employees":       one(`SELECT COUNT(*) FROM employees WHERE tenant_id=$1`),
+			"courses":         one(`SELECT COUNT(*) FROM courses WHERE tenant_id=$1`),
+			"units":           one(`SELECT COUNT(*) FROM course_units WHERE tenant_id=$1`),
+			"cohorts":         one(`SELECT COUNT(*) FROM course_offerings WHERE tenant_id=$1`),
+			"schools":         one(`SELECT COUNT(*) FROM schools WHERE tenant_id=$1`),
+			"departments":     one(`SELECT COUNT(*) FROM departments WHERE tenant_id=$1`),
+			"rooms":           one(`SELECT COUNT(*) FROM rooms WHERE tenant_id=$1`),
 			"timetable_slots": one(`SELECT COUNT(*) FROM timetable_slots WHERE tenant_id=$1`),
 		}
 
 		// ── Is it running? ───────────────────────────────────────────────────
 		activity := map[string]int{
-			"sessions_today":    one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date = $2::date`, today),
-			"sessions_week":     one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
-			"sessions_live":     one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_status = 'OPEN'`),
-			"checkins_today":    one(`SELECT COUNT(*) FROM attendance_logs al JOIN sessions s ON s.session_id = al.session_id WHERE s.tenant_id=$1 AND s.session_date = $2::date`, today),
+			"sessions_today":       one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date = $2::date`, today),
+			"sessions_week":        one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
+			"sessions_live":        one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_status = 'OPEN'`),
+			"checkins_today":       one(`SELECT COUNT(*) FROM attendance_logs al JOIN sessions s ON s.session_id = al.session_id WHERE s.tenant_id=$1 AND s.session_date = $2::date`, today),
 			"lecturer_gates_today": one(`SELECT COUNT(*) FROM lecturer_attendance_logs WHERE tenant_id=$1 AND session_date = $2::date`, today),
-			"patrols_week":      one(`SELECT COUNT(*) FROM lecturer_patrol_logs WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
+			"patrols_week":         one(`SELECT COUNT(*) FROM lecturer_patrol_logs WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
 		}
 
 		// ── What is quietly broken ───────────────────────────────────────────
@@ -161,7 +162,7 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			"setup":            setup,
 			"activity":         activity,
 			"gaps":             gaps,
-			"generated_at":     time.Now().Format(time.RFC3339),
+			"generated_at":     clock.Now().Format(time.RFC3339),
 		})
 	}
 }

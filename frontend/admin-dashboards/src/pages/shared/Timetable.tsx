@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
@@ -31,6 +31,8 @@ interface RoomOption {
   room_code: string; name: string; building: string; capacity: number; room_type: string; school: string
 }
 interface OverviewRow { offering_id: string; unit_id: string; unit_name: string }
+// A lecturer assigned to a unit, from the coordinator units/lecturers endpoint.
+interface UnitLecturer { lecturer_id: string; full_name: string; staff_id: string }
 
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
@@ -251,8 +253,22 @@ function AddSlot({ offering, units, onDone, onCancel }: {
   const [start, setStart] = useState(isEve ? '17:00' : '08:00')
   const [end, setEnd] = useState(isEve ? '18:00' : '09:00')
   const [room, setRoom] = useState('')
+  const [lecturer, setLecturer] = useState('')
   const [saving, setSaving] = useState(false)
   const uniqUnits = Array.from(new Map(units.map(u => [u.unit_id, u])).values())
+
+  // Who teaches this slot. The form never offered this, so every save wrote a blank
+  // lecturer and the coordinator's dashboard fell back to the unit's assignment —
+  // showing nothing at all for a unit nobody had assigned yet. Defaults to the unit's
+  // assigned lecturer, so the common case needs no extra click and the timetable
+  // stops disagreeing with the assignment list.
+  const lecturers = useQuery<UnitLecturer[]>(
+    () => unit ? api.get(`/api/v1/coordinator/units/${encodeURIComponent(unit)}/lecturers`) : Promise.resolve([]),
+    [unit])
+  const lecturerList = lecturers.data ?? []
+  useEffect(() => {
+    setLecturer(lecturerList.length === 1 ? lecturerList[0].lecturer_id : '')
+  }, [unit, lecturerList.length])
 
   // The managed room registry, so a room is picked rather than retyped. The field stays a free-text
   // input on purpose — a room that is not on the list yet must still be schedulable — but the hint
@@ -273,7 +289,7 @@ function AddSlot({ offering, units, onDone, onCancel }: {
     try {
       await api.put('/api/v1/dashboard/timetable/slots', {
         offering_id: offering.offering_id, unit_id: unit, day_of_week: day,
-        start_time: start, duration_minutes: dur, room,
+        start_time: start, duration_minutes: dur, room, lecturer_id: lecturer,
       })
       onDone()
     } catch (e) { alert(e instanceof Error ? e.message : 'Failed') }
@@ -300,6 +316,15 @@ function AddSlot({ offering, units, onDone, onCancel }: {
           {!room.trim() ? '' : matched
             ? `✓ ${matched.name}${matched.building ? ` · ${matched.building}` : ''}`
             : 'not in the room list — saved as text'}
+        </div>
+      </Field>
+      <Field label="Lecturer">
+        <select value={lecturer} onChange={e => setLecturer(e.target.value)} style={{ ...sel_, minWidth: 150 }} disabled={!unit}>
+          <option value="">{!unit ? '— pick a unit first —' : lecturerList.length ? '— use the unit’s assignment —' : '— none assigned —'}</option>
+          {lecturerList.map(l => <option key={l.lecturer_id} value={l.lecturer_id}>{l.full_name}</option>)}
+        </select>
+        <div style={{ fontSize: 10, marginTop: 2, height: 12, color: 'var(--muted)' }}>
+          {unit && !lecturerList.length ? 'assign one under Assignments' : ''}
         </div>
       </Field>
       <button onClick={save} disabled={!unit || saving || dur <= 0} style={{ ...btnGhost, background: KIU_GREEN, color: '#fff', borderColor: KIU_GREEN, opacity: dur <= 0 ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Add'}</button>

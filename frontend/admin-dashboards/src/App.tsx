@@ -74,6 +74,9 @@ export default function App() {
             <Route path="/dqa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/dqa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/dqa/qa-reports"          element={<QAReports />} />
+            {/* The gateway already authorises these roles to read the timetable; there
+                simply was no page, so oversight could not see the week it was judging. */}
+            <Route path="/dqa/timetable"           element={<Timetable readOnly />} />
             <Route path="/dqa/messages"            element={<Messages />} />
           </Route>
 
@@ -149,6 +152,7 @@ export default function App() {
             <Route path="/qa-dept/lecturers" element={<QAOrgLecturers />} />
             <Route path="/qa-dept/at-risk"  element={<AtRisk />} />
             <Route path="/qa-dept/report"   element={<QAOrgReports />} />
+            <Route path="/qa-dept/timetable" element={<Timetable readOnly />} />
             <Route path="/qa-dept/messages" element={<Messages />} />
           </Route>
           <Route element={<RoleLayout allowedRoles={['QA_SCHOOL_HANDLER']} />}>
@@ -158,6 +162,7 @@ export default function App() {
             <Route path="/qa-school/lecturers" element={<QAOrgLecturers />} />
             <Route path="/qa-school/at-risk"   element={<AtRisk />} />
             <Route path="/qa-school/reports"   element={<QAOrgReports />} />
+            <Route path="/qa-school/timetable" element={<Timetable readOnly />} />
             <Route path="/qa-school/messages"  element={<Messages />} />
           </Route>
 

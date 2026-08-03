@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/checkin"
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -58,9 +59,20 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		sessionDate := time.Now().UTC().Format("2006-01-02")
+		// The server clock decides which day a session belongs to. The device may
+		// only ask for a date it can justify — an offline hub syncing yesterday's
+		// round is legitimate, a phone with a wrong clock filing attendance under
+		// next month is not. Anything outside [today-7, today] is ignored rather
+		// than rejected, because refusing would strand a real session on a device
+		// whose clock is merely wrong.
+		sessionDate := clock.Today()
 		if req.SessionDate != "" {
-			sessionDate = req.SessionDate
+			if d, err := clock.ParseDate(req.SessionDate); err == nil {
+				days := int(clock.Now().Truncate(24*time.Hour).Sub(d.Truncate(24*time.Hour)).Hours() / 24)
+				if days >= 0 && days <= 7 {
+					sessionDate = req.SessionDate
+				}
+			}
 		}
 
 		secret := make([]byte, 32)

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -83,7 +84,7 @@ func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
-		today := time.Now().UTC().Format("2006-01-02")
+		today := clock.Today()
 		cacheKey := fmt.Sprintf("manifest:%s:%s:%s", tenantID, userID, today)
 
 		source := "fresh"
@@ -117,10 +118,7 @@ func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		// decide whether a session may be STARTED now: a unit timetabled for today is always
 		// startable; otherwise fall back to the tenant's global lecture-day/time window.
 		open, msg := withinSessionWindow(r.Context(), pool, tenantID)
-		iso := int(time.Now().Weekday())
-		if iso == 0 {
-			iso = 7 // Sunday → 7
-		}
+		iso := clock.ISOWeekday()
 		hasToday := false
 		for _, s := range manifest.Sessions {
 			if s.DayOfWeek == iso {
@@ -151,6 +149,24 @@ func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 // bustCoordinatorManifest clears any cached daily manifest for a coordinator so a
 // schedule change (timetable edit) shows up immediately rather than at the next
 // midnight cache rollover.
+// bustTenantManifests clears the cached manifest for EVERY coordinator in a tenant.
+//
+// The per-coordinator version below is right when one slot is edited by a known
+// coordinator. It is wrong for a bulk timetable import or a slot deletion: those
+// change the week for many cohorts at once, and until now neither invalidated
+// anything. The cache holds until midnight, so a corrected timetable simply did
+// not reach the phones that day — which looks, from the room, exactly like the
+// timetable never being updated at all.
+func bustTenantManifests(ctx context.Context, rdb *redis.Client, tenantID string) {
+	if rdb == nil || tenantID == "" {
+		return
+	}
+	keys, err := rdb.Keys(ctx, fmt.Sprintf("manifest:%s:*", tenantID)).Result()
+	if err == nil && len(keys) > 0 {
+		rdb.Del(ctx, keys...) //nolint:errcheck
+	}
+}
+
 func bustCoordinatorManifest(ctx context.Context, rdb *redis.Client, tenantID, coordinatorID string) {
 	if rdb == nil || coordinatorID == "" {
 		return
@@ -209,7 +225,14 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		WHERE coordinator_id = $1 AND tenant_id = $2
 		ORDER BY created_at DESC LIMIT 1`, coordinatorID, tenantID).Scan(&offeringID)
 
-	semFilter := "cu.year = o.study_year AND cu.semester = o.semester AND cu.level = o.level"
+	// Tolerant level match, as TimetableOverview already uses. The strict form
+	// (`cu.level = o.level`) is NULL whenever an offering has no level set, and a
+	// NULL predicate drops EVERY unit — so one blank column emptied the
+	// coordinator's whole app while the admin's web grid still showed a full week.
+	semFilter := `cu.year = o.study_year AND cu.semester = o.semester
+	              AND (cu.level = o.level
+	                   OR COALESCE(NULLIF(cu.level, ''), '') = ''
+	                   OR COALESCE(NULLIF(o.level, ''), '') = '')`
 	semArgs := []interface{}{offeringID, tenantID}
 	if activeAcademicYear != "" {
 		semFilter += fmt.Sprintf(" AND (cu.academic_year = $%d OR cu.academic_year IS NULL OR cu.academic_year = '')", len(semArgs)+1)
@@ -218,23 +241,49 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 
 	rows, err := conn.Query(ctx, fmt.Sprintf(`
 		SELECT cu.unit_id, cu.name,
-		       COALESCE(cu.default_venue_id, ''),
-		       COALESCE(ous.day_of_week, 0),
-		       COALESCE(to_char(ous.session_start, 'HH24:MI'), ''),
-		       COALESCE(ous.session_duration_minutes, 0),
+		       -- Room: the slot's own venue first. The unit-level default is a weaker
+		       -- answer (it cannot differ per day) and was previously the ONLY one the
+		       -- phone saw, so the app and the grid could name two different rooms for
+		       -- the same lecture.
+		       COALESCE(NULLIF(ts.room, ''), ts.venue_id, cu.default_venue_id, ''),
+		       -- Day/time now come from timetable_slots, the table the admin grid and the
+		       -- CSV import actually write. offering_unit_schedules survives only as a
+		       -- fallback for institutions still on the older set-once schedule; reading
+		       -- it FIRST is what made the coordinator's app report an empty day while
+		       -- every other surface showed the week.
+		       COALESCE(ts.day_of_week, ous.day_of_week, 0),
+		       COALESCE(to_char(ts.start_time, 'HH24:MI'), to_char(ous.session_start, 'HH24:MI'), ''),
+		       COALESCE(ts.duration_minutes, ous.session_duration_minutes, 0),
 		       COALESCE(lec.staff_id, ''), COALESCE(lec.full_name, ''), COALESCE(lec.phone, '')
 		FROM course_offerings o
 		JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+		-- One row per unit: a unit timetabled twice a week would otherwise duplicate the
+		-- whole manifest entry. The earliest slot in the week is the representative one.
+		LEFT JOIN LATERAL (
+		    SELECT t.day_of_week, t.start_time, t.duration_minutes, t.room, t.venue_id, t.lecturer_id
+		    FROM timetable_slots t
+		    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id AND t.tenant_id = o.tenant_id
+		    ORDER BY t.day_of_week, t.start_time
+		    LIMIT 1
+		) ts ON true
 		LEFT JOIN offering_unit_schedules ous
 		       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id AND ous.tenant_id = o.tenant_id
-		-- the assigned lecturer for this unit (one, without multiplying rows)
+		-- The lecturer for this unit: the slot's own, else the unit's assignment. Slot
+		-- first, so a one-off cover lecturer set on the timetable is respected.
 		LEFT JOIN LATERAL (
-		    SELECT l.staff_id, l.full_name, l.phone
-		    FROM lecturer_assignments la
-		    JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-		    WHERE la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-		    ORDER BY la.academic_year DESC
-		    LIMIT 1
+		    SELECT COALESCE(sl.staff_id, al.staff_id)   AS staff_id,
+		           COALESCE(sl.full_name, al.full_name) AS full_name,
+		           COALESCE(sl.phone, al.phone)         AS phone
+		    FROM (SELECT 1) _
+		    LEFT JOIN lecturers sl ON sl.lecturer_id = ts.lecturer_id AND sl.tenant_id = o.tenant_id
+		    LEFT JOIN LATERAL (
+		        SELECT l.staff_id, l.full_name, l.phone
+		        FROM lecturer_assignments la
+		        JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+		        WHERE la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
+		        ORDER BY la.academic_year DESC
+		        LIMIT 1
+		    ) al ON true
 		) lec ON true
 		WHERE o.offering_id = $1
 		  AND o.tenant_id = $2

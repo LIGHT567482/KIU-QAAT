@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -57,11 +58,8 @@ func withinSessionWindow(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 	if err != nil {
 		return true, "" // fail open — never block on a read error
 	}
-	now := time.Now()
-	iso := int(now.Weekday())
-	if iso == 0 {
-		iso = 7 // Sunday → 7
-	}
+	now := clock.Now()
+	iso := clock.ISOWeekday()
 	dayOK := false
 	for _, d := range w.ActiveDays {
 		if d == iso {

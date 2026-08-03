@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -127,7 +128,7 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 		pdf.CellFormat(0, 6, fmt.Sprintf("Ghost lectures suspected (last 30 days): %d", ghostCount), "", 1, "L", false, 0, "")
 
 		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-audit-%s.pdf"`, time.Now().Format("2006-01-02")))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-audit-%s.pdf"`, clock.Today()))
 		pdf.Output(w) //nolint:errcheck
 	}
 }
@@ -167,7 +168,7 @@ func DQAEligibilityCSV(pool *pgxpool.Pool) http.HandlerFunc {
 		defer rows.Close()
 
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-eligibility-%s.csv"`, time.Now().Format("2006-01-02")))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-eligibility-%s.csv"`, clock.Today()))
 
 		cw := csv.NewWriter(w)
 		cw.Write([]string{ //nolint:errcheck

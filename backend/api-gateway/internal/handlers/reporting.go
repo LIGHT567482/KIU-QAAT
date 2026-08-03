@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -24,7 +24,7 @@ func VCOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		unitID := q.Get("unit_id")
 		department := q.Get("department")
 
-		today := time.Now().Format("2006-01-02")
+		today := clock.Today()
 		if dateFrom == "" {
 			dateFrom = today
 		}
@@ -179,10 +179,10 @@ func VCLecturerWorkload(pool *pgxpool.Pool) http.HandlerFunc {
 		dateFrom := q.Get("date_from")
 		dateTo := q.Get("date_to")
 		if dateFrom == "" {
-			dateFrom = time.Now().AddDate(0, -1, 0).Format("2006-01-02")
+			dateFrom = clock.Now().AddDate(0, -1, 0).Format("2006-01-02")
 		}
 		if dateTo == "" {
-			dateTo = time.Now().Format("2006-01-02")
+			dateTo = clock.Today()
 		}
 
 		conn, err := pool.Acquire(r.Context())

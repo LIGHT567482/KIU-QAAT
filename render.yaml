@@ -61,6 +61,14 @@ services:
     plan: free            # sleeps when idle; first request after a sleep is slow
     healthCheckPath: /health
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: PORT
         value: "8443"
       - key: ENVIRONMENT
@@ -123,6 +131,14 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: PORT
         value: "8081"
       - key: ENVIRONMENT
@@ -161,6 +177,14 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: PORT
         value: "8082"
       - key: JWT_ISSUER
@@ -184,6 +208,14 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: PORT
         value: "8083"
       - key: DB_URL
@@ -216,6 +248,14 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: PORT
         value: "3004"
       - key: PLATFORM_DOMAIN
@@ -239,6 +279,14 @@ services:
 envVarGroups:
   - name: qaat-shared
     envVars:
+      # Civil time. Every "what day is it" in the gateway resolves through
+      # internal/clock, which reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore Postgres session time) to match. Without these the services
+      # run UTC and every date is three hours out.
+      - key: TZ
+        value: Africa/Kampala
+      - key: INSTITUTION_TZ
+        value: Africa/Kampala
       - key: JWT_ISSUER
         value: qaat-auth
       - key: JWT_AUDIENCE

@@ -21,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -72,7 +73,7 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		// Default to the current month when no range is given.
-		now := time.Now()
+		now := clock.Now()
 		from := parseDateOr(r.URL.Query().Get("from"), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
 		to := parseDateOr(r.URL.Query().Get("to"), from.AddDate(0, 1, -1))
 		if to.Before(from) {

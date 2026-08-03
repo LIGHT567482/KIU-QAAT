@@ -18,11 +18,12 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/qaat/api-gateway/internal/clock"
 )
 
 // rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, so the archive can be
@@ -229,7 +230,7 @@ func DownloadSemesterArchive(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		if filename == "" {
-			filename = fmt.Sprintf("semester-archive-%s.zip", time.Now().Format("2006-01-02"))
+			filename = fmt.Sprintf("semester-archive-%s.zip", clock.Today())
 		}
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))

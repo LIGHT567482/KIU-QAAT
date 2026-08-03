@@ -192,7 +192,13 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			ON CONFLICT (offering_id, unit_id, day_of_week, start_time) DO UPDATE
 			   SET duration_minutes = EXCLUDED.duration_minutes,
 			       room             = EXCLUDED.room,
-			       lecturer_id      = EXCLUDED.lecturer_id,
+			       -- COALESCE, not EXCLUDED: the grid's slot editor has historically sent no
+			       -- lecturer_id at all, so a plain assignment wrote NULL and every re-save
+			       -- silently erased the lecturer the CSV import had set. That is the root of
+			       -- "the coordinator dashboard says there are no lecturers for that day" —
+			       -- the name was there until someone nudged the slot. An explicit lecturer
+			       -- still overwrites; an omitted one now leaves what is there alone.
+			       lecturer_id      = COALESCE(EXCLUDED.lecturer_id, timetable_slots.lecturer_id),
 			       venue_id         = EXCLUDED.venue_id
 			RETURNING slot_id::text`,
 			tenantID, req.OfferingID, req.UnitID, req.DayOfWeek, req.StartTime, req.Duration, req.Room, req.LecturerID).Scan(&slotID)
@@ -206,7 +212,7 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 }
 
 // DELETE /api/v1/dashboard/timetable/slots/{slot_id}
-func DeleteTimetableSlot(pool *pgxpool.Pool) http.HandlerFunc {
+func DeleteTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 		slotID := chi.URLParam(r, "slot_id")
@@ -224,6 +230,8 @@ func DeleteTimetableSlot(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
+		// A removed lecture must disappear from the phones too, not linger until midnight.
+		bustTenantManifests(r.Context(), rdb, tenantID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}
 }
@@ -236,7 +244,7 @@ func DeleteTimetableSlot(pool *pgxpool.Pool) http.HandlerFunc {
 //	day, start_time, duration_minutes (or end_time), room, staff_id (lecturer).
 //
 // Resolves/creates the offering + unit, links the lecturer if found, upserts slots.
-func ImportTimetable(adminPool *pgxpool.Pool) http.HandlerFunc {
+func ImportTimetable(adminPool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -254,6 +262,10 @@ func ImportTimetable(adminPool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusUnprocessableEntity, errBody("CSV_PARSE_ERROR", perr.Error()))
 			return
 		}
+		// A bulk import rewrites the week for every cohort at once. Without this the
+		// cached manifest survives until midnight and none of the phones see the new
+		// timetable today — indistinguishable, in the room, from the import not working.
+		bustTenantManifests(r.Context(), rdb, tenantID)
 		writeJSON(w, http.StatusOK, res)
 	}
 }

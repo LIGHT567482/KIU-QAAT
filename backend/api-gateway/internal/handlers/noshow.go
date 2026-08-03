@@ -15,10 +15,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -56,7 +56,7 @@ func queryNoShows(r *http.Request, adminPool *pgxpool.Pool, tenantID, date strin
 	return out, nil
 }
 
-func today() string { return time.Now().Format("2006-01-02") }
+func today() string { return clock.Today() }
 
 // EmployeeNoShows — list today's (or ?date=) no-shows for the caller's tenant.
 func EmployeeNoShows(adminPool *pgxpool.Pool) http.HandlerFunc {
@@ -115,13 +115,18 @@ func postAbsentees(r *http.Request, list []noShow, tenantName string) error {
 func NotifyNoShows(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
+		// A caller may re-run an earlier day's notification, but not a future one:
+		// "who missed check-in tomorrow" has no answer, and sending it would
+		// accuse everybody.
 		date := today()
 		var body struct {
 			Date string `json:"date"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Date != "" {
-			date = body.Date
+			if d, err := clock.ParseDate(body.Date); err == nil && !d.After(clock.Now()) {
+				date = body.Date
+			}
 		}
 		list, err := queryNoShows(r, adminPool, tenantID, date)
 		if err != nil {

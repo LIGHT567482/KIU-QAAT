@@ -19,12 +19,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -127,7 +127,7 @@ func ClearSemesterData(adminPool *pgxpool.Pool) http.HandlerFunc {
 			label += " · " + ay
 		}
 		filename := fmt.Sprintf("semester-archive-%s-%s.zip",
-			strings.ReplaceAll(strings.Join(clean, "_"), " ", ""), time.Now().Format("2006-01-02"))
+			strings.ReplaceAll(strings.Join(clean, "_"), " ", ""), clock.Today())
 		var archiveID string
 		if err := tx.QueryRow(r.Context(), `
 			INSERT INTO semester_archives

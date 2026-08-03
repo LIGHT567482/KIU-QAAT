@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/config"
 	"github.com/qaat/api-gateway/internal/router"
 )
@@ -39,6 +40,15 @@ func main() {
 		_, err := c.Exec(ctx, "SELECT set_config('app.current_tenant', '', false)")
 		return err == nil
 	}
+	// Pin every connection to the institution's timezone so SQL's CURRENT_DATE,
+	// now() and EXTRACT(ISODOW …) answer the same "what day is it" that
+	// clock.Today() does in Go. Without this the two disagree by the container's
+	// UTC offset, which is how a session opened in the evening could be filed
+	// under tomorrow.
+	poolCfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET TIME ZONE '"+clock.Name()+"'")
+		return err
+	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		logger.Error("postgres connect failed", "error", err)
@@ -52,7 +62,7 @@ func main() {
 		logger.Error("postgres ping failed", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("postgres connected")
+	logger.Info("postgres connected", "timezone", clock.Name())
 
 	// Privileged pool for the ADMIN-gated, cross-tenant platform handlers only.
 	// Falls back to the data-plane pool if ADMIN_DB_URL is unset/identical.

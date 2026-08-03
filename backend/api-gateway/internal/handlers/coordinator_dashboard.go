@@ -57,20 +57,46 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		// Units are scoped to THIS cohort's year + semester.
+		//
+		// Day/time come from timetable_slots — the table the admin grid writes —
+		// with offering_unit_schedules only as a fallback. Reading the fallback
+		// first is why this list could come back with day_of_week = 0 for every
+		// unit and the dashboard render "no units scheduled for today".
+		//
+		// The level match is tolerant (see manifest.go): `cu.level = o.level` is
+		// NULL for an offering with no level, and a NULL predicate drops every row.
+		// Both the `ous` and `lecturers` joins were also missing a tenant_id
+		// predicate, so they could cross tenants.
 		rows, err := conn.Query(r.Context(), `
 			SELECT cu.unit_id, cu.name, COALESCE(cu.year,1), COALESCE(cu.semester,1),
-			       COALESCE(ous.day_of_week, 0),
-			       COALESCE(to_char(ous.session_start, 'HH24:MI'), ''),
-			       COALESCE(ous.session_duration_minutes, 0),
+			       COALESCE(ts.day_of_week, ous.day_of_week, 0),
+			       COALESCE(to_char(ts.start_time, 'HH24:MI'), to_char(ous.session_start, 'HH24:MI'), ''),
+			       COALESCE(ts.duration_minutes, ous.session_duration_minutes, 0),
 			       COALESCE(string_agg(DISTINCT l.full_name || CASE WHEN COALESCE(l.phone,'')<>'' THEN ' ('||l.phone||')' ELSE '' END, ', '), '')
 			FROM course_offerings o
 			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
-			       AND cu.year = o.study_year AND cu.semester = o.semester AND cu.level = o.level
-			LEFT JOIN offering_unit_schedules ous ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id
+			       AND cu.year = o.study_year AND cu.semester = o.semester
+			       AND (cu.level = o.level
+			            OR COALESCE(NULLIF(cu.level, ''), '') = ''
+			            OR COALESCE(NULLIF(o.level, ''), '') = '')
+			LEFT JOIN LATERAL (
+			    SELECT t.day_of_week, t.start_time, t.duration_minutes, t.lecturer_id
+			    FROM timetable_slots t
+			    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id AND t.tenant_id = o.tenant_id
+			    ORDER BY t.day_of_week, t.start_time
+			    LIMIT 1
+			) ts ON true
+			LEFT JOIN offering_unit_schedules ous
+			       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id AND ous.tenant_id = o.tenant_id
+			-- The slot's own lecturer counts as an assignment for display purposes, so a
+			-- unit whose lecturer is only recorded on the timetable is not shown as unstaffed.
 			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-			LEFT JOIN lecturers l ON l.lecturer_id = la.lecturer_id
+			LEFT JOIN lecturers l ON l.tenant_id = o.tenant_id
+			       AND (l.lecturer_id = la.lecturer_id OR l.lecturer_id = ts.lecturer_id)
 			WHERE o.offering_id = $1::uuid
-			GROUP BY cu.unit_id, cu.name, cu.year, cu.semester, ous.day_of_week, ous.session_start, ous.session_duration_minutes
+			GROUP BY cu.unit_id, cu.name, cu.year, cu.semester,
+			         ts.day_of_week, ts.start_time, ts.duration_minutes,
+			         ous.day_of_week, ous.session_start, ous.session_duration_minutes
 			ORDER BY cu.year, cu.semester, cu.name`, offeringID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -117,7 +143,9 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(NULLIF(l.phone,''),     la_l.phone,     '')
 			FROM timetable_slots s
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
-			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
+			-- tenant_id on the join: without it a slot could resolve a lecturer row
+			-- belonging to another institution.
+			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id AND l.tenant_id = s.tenant_id
 			-- fall back to the unit's assignment when the slot has no lecturer set
 			LEFT JOIN LATERAL (
 			    SELECT l2.full_name, l2.phone FROM lecturer_assignments la

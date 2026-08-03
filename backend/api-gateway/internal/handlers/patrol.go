@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -257,10 +258,7 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		iso := int(time.Now().Weekday())
-		if iso == 0 {
-			iso = 7 // Sunday → 7
-		}
+		iso := clock.ISOWeekday()
 		rows, err := conn.Query(r.Context(), `
 			SELECT ts.unit_id, COALESCE(cu.name, ts.unit_id), COALESCE(cu.course_id, ''),
 			       COALESCE(lec.staff_id, ''), COALESCE(lec.full_name, ''),
@@ -365,8 +363,14 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				   session_date, scheduled_time, taught, patroller_id, patroller_name, patroller_staff_id,
 				   taken_at, patroller_device_hash)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,
-				        $8::date, $9, $10, $11::uuid, $12, $13,
-				        COALESCE(NULLIF($14,'')::timestamptz, now()), $15)
+				        LEAST(COALESCE(NULLIF($8,'')::date, CURRENT_DATE), CURRENT_DATE),
+				        $9, $10, $11::uuid, $12, $13,
+				        -- The patroller works offline, so the phone's clock is the real
+				        -- record of when a tick happened and a PAST timestamp is kept as
+				        -- given. A FUTURE one is a wrong device clock, not evidence, so it
+				        -- is clamped to now rather than filed under a day that hasn't
+				        -- happened — where no report window would ever surface it.
+				        LEAST(COALESCE(NULLIF($14,'')::timestamptz, now()), now()), $15)
 				ON CONFLICT (tenant_id, unit_id, session_date, scheduled_time)
 				DO UPDATE SET taught = EXCLUDED.taught,
 				              patroller_id = EXCLUDED.patroller_id,

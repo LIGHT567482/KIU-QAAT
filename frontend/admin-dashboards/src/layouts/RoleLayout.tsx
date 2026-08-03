@@ -130,6 +130,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturers',      path: '/qa-dept/lecturers' },
     { label: 'At-risk Students', path: '/qa-dept/at-risk' },
     { label: 'File QA Report', path: '/qa-dept/report' },
+    { label: 'Timetable',      path: '/qa-dept/timetable' },
     { label: 'Messages',       path: '/qa-dept/messages' },
   ],
   QA_SCHOOL_HANDLER: [
@@ -139,6 +140,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturers',       path: '/qa-school/lecturers' },
     { label: 'At-risk Students', path: '/qa-school/at-risk' },
     { label: 'QA Reports',      path: '/qa-school/reports' },
+    { label: 'Timetable',       path: '/qa-school/timetable' },
     { label: 'Messages',        path: '/qa-school/messages' },
   ],
 }

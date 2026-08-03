@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -74,7 +75,7 @@ func CreateCoordinatorStandby(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		// Valid until end of today (server TZ).
-		now := time.Now()
+		now := clock.Now()
 		endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
 
 		var delegationID, code string

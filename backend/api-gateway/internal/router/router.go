@@ -620,7 +620,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/import/trigger", handlers.ImportTrigger(pool))
 		// Bulk timetable import (CSV/XLSX → weekly slots, auto-resolves offering/unit/lecturer).
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
-			Post("/api/v1/admin/tenants/{tenant_id}/timetable/import", handlers.ImportTimetable(adminPool))
+			Post("/api/v1/admin/tenants/{tenant_id}/timetable/import", handlers.ImportTimetable(adminPool, rdb))
 
 		// ── Dashboards ────────────────────────────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleVC, middleware.RoleDVC)).
@@ -669,7 +669,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable/slots", handlers.UpsertTimetableSlot(pool, rdb))
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
-			Delete("/api/v1/dashboard/timetable/slots/{slot_id}", handlers.DeleteTimetableSlot(pool))
+			Delete("/api/v1/dashboard/timetable/slots/{slot_id}", handlers.DeleteTimetableSlot(pool, rdb))
 
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
 			Post("/api/v1/dashboard/qa/device-reset", handlers.QADeviceReset(pool))

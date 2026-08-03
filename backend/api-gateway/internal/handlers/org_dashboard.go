@@ -20,10 +20,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
@@ -36,7 +36,7 @@ type scope struct {
 	Department string
 	School     string
 	// Column on `courses` this caller filters by, and the value. Empty col = institution-wide.
-	Col, Val string
+	Col, Val  string
 	Unbounded bool
 	// Every string that means this scope. For a school that is its full name AND its short form
 	// (SOMAC), because historic rows hold whichever the institution was using at the time — see
@@ -109,20 +109,20 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		// Window: this term's worth of sessions. 90 days is a semester either side of a break.
-		since := time.Now().AddDate(0, 0, -90).Format("2006-01-02")
+		since := clock.Now().AddDate(0, 0, -90).Format("2006-01-02")
 
 		type out struct {
-			Lecturers      int     `json:"lecturers"`
-			Students       int     `json:"students"`
-			Courses        int     `json:"courses"`
-			Units          int     `json:"units"`
-			UnitsUnstaffed int     `json:"units_unstaffed"`
-			SessionsHeld   int     `json:"sessions_held"`
-			SessionsPlanned int    `json:"sessions_planned"`
-			TaughtRate     float64 `json:"taught_rate"`
-			AvgAttendance  float64 `json:"avg_attendance"`
-			AtRisk         int     `json:"at_risk"`
-			Threshold      float64 `json:"threshold"`
+			Lecturers       int     `json:"lecturers"`
+			Students        int     `json:"students"`
+			Courses         int     `json:"courses"`
+			Units           int     `json:"units"`
+			UnitsUnstaffed  int     `json:"units_unstaffed"`
+			SessionsHeld    int     `json:"sessions_held"`
+			SessionsPlanned int     `json:"sessions_planned"`
+			TaughtRate      float64 `json:"taught_rate"`
+			AvgAttendance   float64 `json:"avg_attendance"`
+			AtRisk          int     `json:"at_risk"`
+			Threshold       float64 `json:"threshold"`
 		}
 		var o out
 
@@ -310,8 +310,8 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 			seen[x.StudentID] = true
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"scope":            orgScopeLabel(s, role),
-			"students":         out,
+			"scope":             orgScopeLabel(s, role),
+			"students":          out,
 			"distinct_students": len(seen),
 		})
 	}
