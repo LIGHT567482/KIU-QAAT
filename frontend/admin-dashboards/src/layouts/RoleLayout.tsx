@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import DashboardWelcome from '../components/DashboardWelcome'
 import { useAuth, type Role } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 import PasswordInput from '../components/PasswordInput'
@@ -60,6 +61,9 @@ export function RoleLayout({ allowedRoles }: RoleLayoutProps) {
         )}
         <main style={{ flex: 1, padding: 24, color: 'var(--text)', position: 'relative', zIndex: 1 }}>
           <GoBack navigate={navigate} location={location} />
+          {/* Every dashboard greets the person by title and name. Rendered here rather
+              than per page, so a new dashboard gets it by existing. */}
+          <DashboardWelcome />
           <Outlet />
         </main>
         <footer style={{ background: 'var(--footer)', color: 'var(--footer-text)', padding: '12px 24px', fontSize: 12, textAlign: 'center', position: 'relative', zIndex: 1 }}>
@@ -113,6 +117,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturers',           path: '/hod/lecturers' },
     { label: 'At-risk Students',    path: '/hod/at-risk' },
     { label: 'Student Attendance',  path: '/hod/attendance' },
+    { label: 'Assignments',         path: '/hod/assignments' },
     { label: 'Timetable',           path: '/hod/timetable' },
     { label: 'Alerts',              path: '/hod/messages' },
   ],
@@ -132,6 +137,12 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'File QA Report', path: '/qa-dept/report' },
     { label: 'Timetable',      path: '/qa-dept/timetable' },
     { label: 'Messages',       path: '/qa-dept/messages' },
+  ],
+  // The Teaching & Learning Centre owns the timetable and nothing else — a
+  // deliberately narrow console, because that is the whole of the role.
+  TLC: [
+    { label: 'Timetable',       path: '/tlc' },
+    { label: 'Rooms',           path: '/tlc/rooms' },
   ],
   QA_SCHOOL_HANDLER: [
     { label: 'Overview',        path: '/qa-school' },
@@ -314,7 +325,7 @@ const pwBtn: React.CSSProperties = { padding: '10px 16px', background: 'var(--br
 // A back-button shown on every sub-page so the user can always go back to the
 // previous page. Hidden on the base role route (e.g. /vc, /qa/reports, /admin).
 function GoBack({ navigate: nav, location: loc }: { navigate: ReturnType<typeof useNavigate>; location: ReturnType<typeof useLocation> }) {
-  const baseRoutes = ['/vc', '/dqa/thresholds', '/qa/reports', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school']
+  const baseRoutes = ['/vc', '/dqa', '/qa/reports', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school', '/tlc']
   const isBase = baseRoutes.some(b => loc.pathname === b || loc.pathname === b + '/')
   if (isBase) return null
   return (

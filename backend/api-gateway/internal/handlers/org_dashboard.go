@@ -59,6 +59,17 @@ func resolveOrgScope(r *http.Request, pool *pgxpool.Pool, tenantID, userID, role
 		// A dean whose account says "SOMAC" must still match courses filed under the full title,
 		// and vice versa.
 		s.Aliases = schoolAliases(r.Context(), pool, tenantID, s.School)
+		// A QA school handler is routinely given more than one school, and the single
+		// users.school column had nowhere to put the second — so everything outside
+		// their first school was simply invisible to them, with no error to explain it.
+		// user_schools (migration 075) carries the rest; every name is widened through
+		// the same alias lookup so abbreviations still match.
+		for _, extra := range userSchools(r.Context(), pool, tenantID, userID) {
+			s.Aliases = append(s.Aliases, schoolAliases(r.Context(), pool, tenantID, extra)...)
+			if strings.TrimSpace(s.Val) == "" {
+				s.Val = extra // a handler with no legacy users.school is still scoped
+			}
+		}
 	default:
 		// DQA / QA officer / VC / DVC / ADMIN see the institution.
 		s.Unbounded = true

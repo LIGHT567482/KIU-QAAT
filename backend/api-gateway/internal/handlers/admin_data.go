@@ -850,21 +850,30 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
-		// A lecturer has no department or school of their own. They can teach across several
-		// colleges at once, so a single field on the person could only ever be wrong for the rest —
-		// the units they are assigned to are what carry the org unit, and each department and
-		// school reaches them through those. Derived here, read-only, never stored on the row.
+		// Two different things, both true at once.
+		//
+		// HOME SCHOOL (stored, singular): the institution's rule is that every lecturer sits
+		// under a college, including one who has not been given a unit yet — and a derived
+		// value cannot express that, because an unassigned lecturer derives nothing and is
+		// invisible to every org role (the join is inner). Migration 075 stores it.
+		//
+		// DEPARTMENTS/SCHOOLS (derived, plural): where they actually teach. A lecturer can
+		// teach across several colleges at once, so a single field could only ever be wrong
+		// for the rest. Read-only, from the units they are assigned to.
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT l.lecturer_id::text, COALESCE(l.title,''), l.full_name, COALESCE(l.gender,''),
 			       COALESCE(l.email,''), COALESCE(l.phone,''), COALESCE(l.staff_id,''),
+			       COALESCE(l.school_id::text,''), COALESCE(hs.name,''),
 			       COALESCE(ARRAY_AGG(DISTINCT c.department) FILTER (WHERE COALESCE(c.department,'') <> ''), '{}') AS departments,
 			       COALESCE(ARRAY_AGG(DISTINCT c.school)     FILTER (WHERE COALESCE(c.school,'')     <> ''), '{}') AS schools
 			FROM lecturers l
+			LEFT JOIN schools hs ON hs.school_id = l.school_id AND hs.tenant_id = l.tenant_id
 			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
 			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
 			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
 			WHERE l.tenant_id = $1
-			GROUP BY l.lecturer_id, l.title, l.full_name, l.gender, l.email, l.phone, l.staff_id
+			GROUP BY l.lecturer_id, l.title, l.full_name, l.gender, l.email, l.phone, l.staff_id,
+			         l.school_id, hs.name
 			ORDER BY l.full_name`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -880,6 +889,10 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Email      string `json:"email"`
 			Phone      string `json:"phone"`
 			StaffID    string `json:"staff_id"`
+			// The lecturer's HOME college — stored on the row, one per lecturer, set even
+			// before they are given any unit.
+			SchoolID   string `json:"school_id"`
+			SchoolName string `json:"school_name"`
 			// Every department/school the lecturer reaches through a unit they teach. Plural
 			// because teaching across two colleges is ordinary, not an edge case.
 			Departments []string `json:"departments"`
@@ -889,7 +902,7 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var l lecturer
 			rows.Scan(&l.LecturerID, &l.Title, &l.FullName, &l.Gender, &l.Email, &l.Phone, &l.StaffID, //nolint:errcheck
-				&l.Departments, &l.Schools)
+				&l.SchoolID, &l.SchoolName, &l.Departments, &l.Schools)
 			list = append(list, l)
 		}
 		if list == nil {
@@ -904,8 +917,10 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := chi.URLParam(r, "tenant_id")
 
-		// No department field: a lecturer belongs to the units they teach, and those carry the
-		// department and school. Assign them a unit to place them under an HOD or a dean.
+		// school_id is the lecturer's HOME college — stored, because the institution
+		// requires every lecturer to sit under one even before they are given a unit.
+		// There is still no department field: which departments they teach in is derived
+		// from their unit assignments, and can legitimately be several.
 		var req struct {
 			FullName string `json:"full_name"`
 			Email    string `json:"email"`
@@ -913,6 +928,7 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 			StaffID  string `json:"staff_id"`
 			Title    string `json:"title"`
 			Gender   string `json:"gender"`
+			SchoolID string `json:"school_id"`
 		}
 		if err := decodeJSON(r, &req); err != nil || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "full_name is required"))
@@ -923,10 +939,10 @@ func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 		insert := func(sid string) (string, error) {
 			var id string
 			e := adminPool.QueryRow(r.Context(), `
-				INSERT INTO lecturers (tenant_id, full_name, email, phone, staff_id, title, gender)
-				VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''))
+				INSERT INTO lecturers (tenant_id, full_name, email, phone, staff_id, title, gender, school_id)
+				VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,'')::uuid)
 				RETURNING lecturer_id::text`,
-				tenantID, req.FullName, req.Email, req.Phone, sid, req.Title, req.Gender).Scan(&id)
+				tenantID, req.FullName, req.Email, req.Phone, sid, req.Title, req.Gender, req.SchoolID).Scan(&id)
 			return id, e
 		}
 
@@ -984,7 +1000,8 @@ func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lecturerID := chi.URLParam(r, "lecturer_id")
 		// Department is deliberately absent — see CreateLecturer. Editing a lecturer cannot file
-		// them under a department; assigning them a unit is what does that.
+		// them under a department; assigning them a unit is what does that. Their home
+		// SCHOOL is editable, because that one is stored rather than derived.
 		var req struct {
 			FullName *string `json:"full_name"`
 			Email    *string `json:"email"`
@@ -992,6 +1009,7 @@ func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 			StaffID  *string `json:"staff_id"`
 			Title    *string `json:"title"`
 			Gender   *string `json:"gender"`
+			SchoolID *string `json:"school_id"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
@@ -1014,6 +1032,13 @@ func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 		add("staff_id", req.StaffID)
 		add("title", req.Title)
 		add("gender", req.Gender)
+		// Cast, because school_id is a uuid rather than text — NULLIF alone would fail
+		// on the empty string an admin sends to clear it.
+		if req.SchoolID != nil {
+			setClauses = append(setClauses, fmt.Sprintf("school_id = NULLIF($%d,'')::uuid", n))
+			args = append(args, *req.SchoolID)
+			n++
+		}
 		if len(setClauses) == 0 {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "no fields to update"))
 			return

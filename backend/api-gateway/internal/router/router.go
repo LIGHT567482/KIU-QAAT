@@ -186,6 +186,18 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			middleware.RoleQAOfficer, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC,
 			middleware.RoleAdmin,
 		)
+		// Lecturer→unit assignment, by the head of department for THEIR department.
+		// ADMIN keeps the older institution-wide routes; these are the scoped ones, and
+		// the scope comes from the caller's own user row rather than the URL — an admin
+		// route trusts its tenant parameter, which is exactly what an HOD must not be
+		// given. Deans are included because a school without an HOD in post still needs
+		// someone able to staff its units.
+		hodAssign := middleware.RequireRole(middleware.RoleHOD, middleware.RoleDean, middleware.RoleAdmin)
+		r.With(hodAssign).Get("/api/v1/hod/assignments", handlers.HODListAssignments(pool))
+		r.With(hodAssign).Get("/api/v1/hod/assignable", handlers.HODAssignable(pool))
+		r.With(hodAssign).Post("/api/v1/hod/assignments", handlers.HODCreateAssignment(pool))
+		r.With(hodAssign).Delete("/api/v1/hod/assignments/{assignment_id}", handlers.HODDeleteAssignment(pool))
+
 		r.With(orgDashRoles).Get("/api/v1/org/overview", handlers.OrgOverview(adminPool))
 		r.With(orgDashRoles).Get("/api/v1/org/at-risk", handlers.OrgAtRisk(adminPool))
 		// The management layer a dean is accountable THROUGH: one row per department of their
@@ -619,7 +631,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleAdmin)).
 			Post("/api/v1/import/trigger", handlers.ImportTrigger(pool))
 		// Bulk timetable import (CSV/XLSX → weekly slots, auto-resolves offering/unit/lecturer).
-		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+		r.With(middleware.RequireRole(middleware.RoleTLC, middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/timetable/import", handlers.ImportTimetable(adminPool, rdb))
 
 		// ── Dashboards ────────────────────────────────────────────────────────
@@ -660,15 +672,20 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 
 		// Multi-slot weekly timetable grid (one slot per unit per day, with room).
 		// READ is open to the oversight roles — a head of department and a dean need to see the
-		// schedule they are accountable for — but WRITE stays with the admin and the QA office.
-		// The org roles get the read-only rendering of the same page (Timetable readOnly).
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer,
+		// schedule they are accountable for — and the org roles get the read-only rendering of
+		// the same page (Timetable readOnly).
+		//
+		// WRITE belongs to the TLC (Teaching & Learning Centre), whose job the timetable
+		// actually is. ADMIN is kept on the guard deliberately: an institution that has not
+		// created a TLC account yet would otherwise have nobody who can edit the schedule,
+		// and the first symptom would be a timetable that cannot be corrected.
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleTLC,
 			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep,
 			middleware.RoleDQADirector)).
 			Get("/api/v1/dashboard/timetable/slots", handlers.GetTimetableSlots(pool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleTLC, middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable/slots", handlers.UpsertTimetableSlot(pool, rdb))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleTLC, middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Delete("/api/v1/dashboard/timetable/slots/{slot_id}", handlers.DeleteTimetableSlot(pool, rdb))
 
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).

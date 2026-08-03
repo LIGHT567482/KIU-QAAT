@@ -27,6 +27,10 @@ interface Lecturer {
    */
   departments: string[]
   schools: string[]
+  // The lecturer's HOME college — stored, one per lecturer, unlike the derived
+  // `schools` above which lists everywhere they happen to teach.
+  school_id: string
+  school_name: string
 }
 
 const GENDERS = ['', 'Male', 'Female', 'Other']
@@ -37,7 +41,12 @@ export default function AdminLecturers() {
     () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturers`)
   )
   const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '' })
+  const [form, setForm] = useState({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '', school_id: '' })
+  // The colleges a lecturer can be filed under. Every lecturer must sit under one,
+  // including a new one who has not been given any unit yet — which is precisely
+  // what the derived value could not express.
+  const orgSchools = useQuery<{ school_id: string; name: string }[]>(
+    () => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -73,7 +82,7 @@ export default function AdminLecturers() {
     try {
       await api.post(`/api/v1/admin/tenants/${tenantId}/lecturers`, form)
       setCreating(false)
-      setForm({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '' })
+      setForm({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '', school_id: '' })
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setSaving(false) }
@@ -165,6 +174,13 @@ export default function AdminLecturers() {
             <Input label="Email (optional)" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="lecturer@university.edu — leave blank to skip" />
             <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+256 700 000000" />
             <Input label="Staff ID (optional — auto-generated if left blank)" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} placeholder="leave blank to auto-generate e.g. KIU/STAFF/00001" />
+            <label style={{ display: 'block' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>College / School</div>
+              <select value={form.school_id} onChange={e => setForm(f => ({ ...f, school_id: e.target.value }))} style={selectStyle}>
+                <option value="">— select a college —</option>
+                {(orgSchools.data ?? []).map(sc => <option key={sc.school_id} value={sc.school_id}>{sc.name}</option>)}
+              </select>
+            </label>
           </div>
           {/* No department or school here on purpose. A lecturer can teach in several colleges at
               once, so one field on the person could only ever be wrong for the rest. The units
@@ -199,7 +215,7 @@ export default function AdminLecturers() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'Teaches in', ''].map(h => (
+            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'College', 'Teaches in', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -234,6 +250,13 @@ export default function AdminLecturers() {
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.gender || '—'}</td>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{l.staff_id || '—'}</td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.phone || '—'}</td>
+              {/* The lecturer's HOME college: stored, one per lecturer, and set even when they
+                  have no unit yet. Distinct from the derived departments beside it. */}
+              <td style={{ padding: '10px 12px' }}>
+                {l.school_name
+                  ? l.school_name
+                  : <span style={{ color: '#b45309', fontSize: 12 }}>no college set</span>}
+              </td>
               {/* Read-only, and derived: every department the lecturer reaches through a unit they
                   are assigned to. Blank means no assignment yet — which is exactly why no HOD or
                   dean can see them, so it is worth saying rather than showing a dash. */}

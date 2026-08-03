@@ -78,3 +78,34 @@ func normaliseAliases(in []string) []string {
 	}
 	return out
 }
+
+// userSchools returns every school name a user has been given through user_schools
+// (migration 075), on top of the single legacy users.school column.
+//
+// A QA school handler covers several colleges. Before the join table existed the
+// account could hold exactly one, so the handler's other schools were not
+// "forbidden" — they were absent, which reads as an empty institution rather than
+// as a missing permission. That is the failure this closes.
+//
+// Returns names (not ids) because every scoped query in this codebase matches on
+// courses.school BY NAME; ids would need a different join in a dozen places.
+func userSchools(ctx context.Context, pool *pgxpool.Pool, tenantID, userID string) []string {
+	rows, err := pool.Query(ctx, `
+		SELECT s.name
+		  FROM user_schools us
+		  JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id
+		 WHERE us.user_id = $1::uuid AND us.tenant_id = $2
+		 ORDER BY s.name`, userID, tenantID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil && strings.TrimSpace(n) != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}

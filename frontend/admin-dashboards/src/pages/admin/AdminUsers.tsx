@@ -10,6 +10,8 @@ import { useQuery } from '../../lib/useApi'
 const ROLES = [
   'ADMIN', 'VC', 'DVC', 'QA_OFFICER', 'DQA_DIRECTOR',
   'DEAN', 'HOD', 'QA_SCHOOL_HANDLER', 'QA_DEPT_REP', 'QA_PATROLLER',
+  // Teaching & Learning Centre — maintains the timetable.
+  'TLC',
 ] as const
 const MANAGED_ROLES = new Set<string>(ROLES)
 
@@ -24,6 +26,7 @@ const SCOPE_HINT: Record<string, string> = {
   QA_DEPT_REP:       'A QA department rep files reports for one department — required.',
   DEAN:              'A dean oversees exactly one college/school — required.',
   QA_SCHOOL_HANDLER: 'A QA school handler files reports for one college/school — required.',
+  TLC:               'The Teaching & Learning Centre maintains the timetable institution-wide — no department or college needed.',
 }
 
 interface User {

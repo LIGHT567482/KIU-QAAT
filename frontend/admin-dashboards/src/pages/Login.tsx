@@ -11,7 +11,7 @@ const API = import.meta.env.VITE_API_URL ?? (typeof location !== 'undefined' ? `
 // all — see NO_WEB_DASHBOARD below.
 const ROLE_REDIRECT: Partial<Record<Role, string>> = {
   VC:           '/vc',
-  DQA_DIRECTOR: '/dqa/thresholds',
+  DQA_DIRECTOR: '/dqa',
   QA_OFFICER:   '/qa/reports',
   ADMIN:        '/admin',
   LECTURER:     '/lecturer',
@@ -19,6 +19,7 @@ const ROLE_REDIRECT: Partial<Record<Role, string>> = {
   DEAN:         '/dean',
   QA_SCHOOL_HANDLER: '/qa-school',
   QA_DEPT_REP:       '/qa-dept',
+  TLC:               '/tlc',
 }
 
 // Roles that work from a phone rather than this console. Their credentials are valid — sending
@@ -96,6 +97,10 @@ export default function Login() {
         tenantId:  tid,
         role:      data.role as Role,
         expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
+        // Carried so every dashboard can greet the person by title and name,
+        // rather than only the four-second toast that fires once at sign-in.
+        fullName:  data.full_name,
+        title:     data.title,
       })
       navigate(dest)
     } catch {

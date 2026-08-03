@@ -45,6 +45,11 @@ type qaScope struct {
 	ScopeKind  string `json:"scope_kind"` // DEPARTMENT | SCHOOL | ALL
 	Department string `json:"department"`
 	School     string `json:"school"`
+	// Schools is every college a QA school handler covers (migration 075). One
+	// handler is routinely given several, and the single School field above could
+	// hold only the first — so the rest of their institution was not forbidden,
+	// it was absent, which reads as an empty page rather than a missing permission.
+	Schools []string `json:"schools,omitempty"`
 	Name       string `json:"full_name"`
 	StaffID    string `json:"staff_id"`
 	// Unscoped is true for the oversight roles (DQA/QA officer/VC/admin) that read every
@@ -79,6 +84,22 @@ func resolveQAScope(ctx context.Context, conn qaRowQuerier, userID, role string)
 	switch role {
 	case middleware.RoleQASchool, middleware.RoleDean:
 		s.ScopeKind = "SCHOOL"
+		// Load the handler's other colleges. A DEAN is genuinely single-school and
+		// will simply have no rows here; a QA handler usually has several.
+		if rows, qerr := conn.Query(ctx, `
+			SELECT s.name
+			  FROM user_schools us
+			  JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id
+			 WHERE us.user_id = $1::uuid
+			 ORDER BY s.name`, userID); qerr == nil {
+			for rows.Next() {
+				var n string
+				if rows.Scan(&n) == nil && strings.TrimSpace(n) != "" {
+					s.Schools = append(s.Schools, n)
+				}
+			}
+			rows.Close()
+		}
 	case middleware.RoleQADeptRep, middleware.RoleHOD:
 		s.ScopeKind = "DEPARTMENT"
 	default:
@@ -91,6 +112,9 @@ func resolveQAScope(ctx context.Context, conn qaRowQuerier, userID, role string)
 // qaRowQuerier is the sliver of pgx that both a pool and a pooled connection satisfy.
 type qaRowQuerier interface {
 	QueryRow(context.Context, string, ...interface{}) pgx.Row
+	// Query, so a school handler's several colleges can be read through the same
+	// connection that already has the tenant GUC set.
+	Query(context.Context, string, ...interface{}) (pgx.Rows, error)
 }
 
 // withQAConn acquires a tenant-scoped connection and hands it, plus the caller's resolved scope,
@@ -118,17 +142,38 @@ func withQAConn(pool *pgxpool.Pool, w http.ResponseWriter, r *http.Request,
 
 // scopeSQL returns a WHERE fragment + arg confining a query to the caller's org unit. `col` names
 // the department column and `schoolCol` the school column of the table being filtered.
-func (s qaScope) scopeSQL(deptCol, schoolCol string, argN int) (string, string, bool) {
+// scopeSQL renders the WHERE fragment that confines a query to the caller's org unit,
+// plus the value to bind. The value is `any` because a school handler binds a LIST:
+// they cover several colleges and each must match.
+func (s qaScope) scopeSQL(deptCol, schoolCol string, argN int) (string, any, bool) {
 	switch {
 	case s.Unscoped:
-		return "", "", false
-	case s.ScopeKind == "SCHOOL" && s.School != "":
-		return fmt.Sprintf(" AND btrim(lower(%s)) = btrim(lower($%d))", schoolCol, argN), s.School, true
+		return "", nil, false
+	case s.ScopeKind == "SCHOOL" && len(s.allSchools()) > 0:
+		// = ANY over the normalised set, so a handler with three schools sees all
+		// three and an abbreviation still matches the full title.
+		return fmt.Sprintf(" AND btrim(lower(%s)) = ANY($%d)", schoolCol, argN),
+			normaliseAliases(s.allSchools()), true
 	case s.ScopeKind == "DEPARTMENT" && s.Department != "":
 		return fmt.Sprintf(" AND btrim(lower(%s)) = btrim(lower($%d))", deptCol, argN), s.Department, true
 	}
 	// Scoped role with no org unit set → match nothing rather than everything.
-	return " AND false", "", false
+	return " AND false", nil, false
+}
+
+// allSchools is the handler's schools, with the legacy single column folded in so an
+// account that predates user_schools keeps working unchanged.
+func (s qaScope) allSchools() []string {
+	out := make([]string, 0, len(s.Schools)+1)
+	if strings.TrimSpace(s.School) != "" {
+		out = append(out, s.School)
+	}
+	for _, x := range s.Schools {
+		if strings.TrimSpace(x) != "" && !strings.EqualFold(strings.TrimSpace(x), strings.TrimSpace(s.School)) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // noScopeMessage explains an empty dashboard caused by an unset department/school.
@@ -202,6 +247,11 @@ func QARepDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			type deptRow struct {
 				Department string `json:"department"`
 				School     string `json:"school"`
+	// Schools is every college a QA school handler covers (migration 075). One
+	// handler is routinely given several, and the single School field above could
+	// hold only the first — so the rest of their institution was not forbidden,
+	// it was absent, which reads as an empty page rather than a missing permission.
+	Schools []string `json:"schools,omitempty"`
 				Lecturers  int    `json:"lecturers"`
 				Patrolled  int    `json:"patrolled"`
 				Taught     int    `json:"taught"`

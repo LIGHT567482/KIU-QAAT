@@ -5,6 +5,8 @@ package handlers
 // the part most likely to differ between "works on my CSV" and "works on the file the rep uploads".
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -191,10 +193,33 @@ func TestQAScopeSQL(t *testing.T) {
 		t.Errorf("department scope = (%q, %q, %v)", clause, val, has)
 	}
 
+	// A school scope binds a LIST, not a string: one QA handler covers several
+	// colleges (migration 075), so the filter is `= ANY(...)` over the normalised set.
 	school := qaScope{ScopeKind: "SCHOOL", Department: "Computer Science", School: "SCI"}
 	clause, val, has = school.scopeSQL("c.department", "c.school", 2)
-	if !has || val != "SCI" {
-		t.Errorf("school scope = (%q, %q, %v)", clause, val, has)
+	if !has || !strings.Contains(clause, "= ANY($2)") {
+		t.Errorf("school scope = (%q, %v, %v), want an ANY filter", clause, val, has)
+	}
+	if got, ok := val.([]string); !ok || len(got) != 1 || got[0] != "sci" {
+		t.Errorf("school scope value = %v, want the normalised [sci]", val)
+	}
+
+	// The case the join table exists for: a handler given three colleges must see
+	// all three. Before user_schools the account could hold one, so the other two
+	// were not forbidden — they were absent, which looks like an empty institution.
+	multi := qaScope{ScopeKind: "SCHOOL", School: "SCI", Schools: []string{"SOMAC", "SoBAM", "SCI"}}
+	_, val, has = multi.scopeSQL("c.department", "c.school", 2)
+	got, ok := val.([]string)
+	if !has || !ok {
+		t.Fatalf("multi-school scope = (%v, %v), want a bound list", val, has)
+	}
+	if len(got) != 3 {
+		t.Errorf("multi-school scope bound %v, want three distinct schools (SCI must not repeat)", got)
+	}
+	for _, want := range []string{"sci", "somac", "sobam"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("multi-school scope %v is missing %q — that college would be invisible", got, want)
+		}
 	}
 
 	// An oversight role is unscoped and adds no filter at all.

@@ -7,6 +7,7 @@ import WelcomeToast from './components/WelcomeToast'
 
 import VCOverview from './pages/vc/VCOverview'
 import VCLecturerWorkload from './pages/vc/VCLecturerWorkload'
+import DQAHome from './pages/dqa/DQAHome'
 import DQAThresholds from './pages/dqa/DQAThresholds'
 import DQAEligibility from './pages/dqa/DQAEligibility'
 import DQACourseHealth from './pages/dqa/DQACourseHealth'
@@ -37,6 +38,7 @@ import QAStudentAttendance from './pages/qa/QAStudentAttendance'
 import QAReports from './pages/qa/QAReports'
 import { QAOrgLecturers, QAOrgDepartments, QAOrgReports } from './pages/qa/QAOrgDashboard'
 import Timetable from './pages/shared/Timetable'
+import LecturerAssignments from './pages/shared/LecturerAssignments'
 import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
 import OrgOverview from './pages/shared/OrgOverview'
@@ -66,6 +68,7 @@ export default function App() {
 
           {/* ── DQA Director ───────────────────────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['DQA_DIRECTOR']} />}>
+            <Route path="/dqa"              element={<DQAHome />} />
             <Route path="/dqa/thresholds"   element={<DQAThresholds />} />
             <Route path="/dqa/eligibility"  element={<DQAEligibility />} />
             <Route path="/dqa/course-health" element={<DQACourseHealth />} />
@@ -132,6 +135,10 @@ export default function App() {
             <Route path="/hod/lecturers" element={<OrgLecturers level="hod" />} />
             <Route path="/hod/at-risk"   element={<AtRisk />} />
             <Route path="/hod/attendance" element={<QAStudentAttendance />} />
+            {/* Assignment moved here from the admin console: staffing a department's
+                units is the head of department's job, and the server scopes it to
+                their own department rather than trusting anything this page sends. */}
+            <Route path="/hod/assignments" element={<LecturerAssignments />} />
             <Route path="/hod/timetable" element={<Timetable readOnly />} />
             <Route path="/hod/messages"  element={<Alerts />} />
           </Route>
@@ -144,6 +151,16 @@ export default function App() {
             <Route path="/dean/attendance" element={<QAStudentAttendance />} />
             <Route path="/dean/timetable" element={<Timetable readOnly />} />
             <Route path="/dean/messages"  element={<Alerts />} />
+          </Route>
+
+          {/* ── TLC: Teaching & Learning Centre ─────────────────────────
+              The timetable's owner. A deliberately narrow console — the timetable
+              and the rooms it refers to — because that is the whole of the role.
+              It used to be the IT administrator's job by default, which was an
+              accident of who had the button rather than whose work it is. */}
+          <Route element={<RoleLayout allowedRoles={['TLC']} />}>
+            <Route path="/tlc"       element={<Timetable />} />
+            <Route path="/tlc/rooms" element={<AdminRooms />} />
           </Route>
 
           {/* ── QA reps: department rep / school handler ────────────────── */}

@@ -351,6 +351,9 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			// set on the account below, so the org unit is not optional for them.
 			"HOD": true, "DEAN": true, "QA_SCHOOL_HANDLER": true, "QA_DEPT_REP": true,
 			"QA_PATROLLER": true,
+			// Teaching & Learning Centre — owns the timetable, institution-wide, so it
+			// needs no department or school.
+			"TLC": true,
 		}
 		if !validRoles[req.Role] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_ROLE", "invalid role"))

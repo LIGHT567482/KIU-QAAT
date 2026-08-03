@@ -5,6 +5,9 @@ export type Role =
   // Org-scoped oversight. Each is bounded by the department or college/school on
   // the account: HOD/QA_DEPT_REP by department, DEAN/QA_SCHOOL_HANDLER by school.
   | 'HOD' | 'DEAN' | 'QA_SCHOOL_HANDLER' | 'QA_DEPT_REP'
+  // Teaching & Learning Centre — owns the timetable. It used to be the IT
+  // administrator's by default, which was an accident of who had the button.
+  | 'TLC'
 
 interface AuthUser {
   userId: string
@@ -12,6 +15,11 @@ interface AuthUser {
   role: Role
   token: string
   expiresAt: number
+  // Shown in the dashboard greeting. Optional because a token minted before this
+  // existed carries neither, and a missing name must degrade to a plain welcome
+  // rather than to "Welcome, undefined".
+  fullName?: string
+  title?: string
 }
 
 interface AuthContextValue {

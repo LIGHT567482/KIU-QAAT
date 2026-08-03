@@ -44,4 +44,8 @@ const (
 	RoleDean        = "DEAN"         // Dean — oversees departments/lecturers in ONE school/college
 	RoleQASchool    = "QA_SCHOOL_HANDLER"
 	RoleQADeptRep   = "QA_DEPT_REP"
+	// RoleTLC — Teaching & Learning Centre. The timetable's owner. It used to be
+	// the IT administrator's job by default, which is an accident of who had the
+	// button rather than whose work it is; the TLC maintains the schedule.
+	RoleTLC = "TLC"
 )
