@@ -40,7 +40,7 @@ services:
   - type: web
     name: qaat-gateway
     runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
+    repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
     rootDir: backend/api-gateway
     dockerfilePath: Dockerfile
@@ -101,7 +101,7 @@ services:
   - type: pserv
     name: qaat-auth
     runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
+    repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
     rootDir: backend/auth-service
     dockerfilePath: Dockerfile
@@ -138,7 +138,7 @@ services:
   - type: pserv
     name: qaat-session
     runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
+    repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
     rootDir: backend/session-manager
     dockerfilePath: Dockerfile
@@ -160,7 +160,7 @@ services:
   - type: pserv
     name: qaat-sync
     runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
+    repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
     rootDir: backend/sync-receiver
     dockerfilePath: Dockerfile
@@ -191,7 +191,7 @@ services:
   - type: pserv
     name: qaat-notify
     runtime: docker
-    repo: https://github.com/LIGHT567482/QAAT
+    repo: https://github.com/LIGHT567482/KIU-QAAT
     branch: main
     rootDir: backend/notification-service
     dockerfilePath: Dockerfile
