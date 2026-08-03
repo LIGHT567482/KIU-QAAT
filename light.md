@@ -59,7 +59,7 @@ build, and the fixes that were applied to make it all work.
 | Redis (Key Value) | keyvalue | `red-d9ivn3jtqb8s739h3gog` | `redis://red-d9ivn3jtqb8s739h3gog:6379` |
 
 - **Render workspace:** `My Workspace` (`tea-d9ivd0beo5us73ajddfg`).
-- **GitHub repo:** `LIGHT567482/QAAT` (public — Render builds Docker services from it).
+- **GitHub repo:** `LIGHT567482/KIU-QAAT` (public — Render builds Docker services from it).
 - **Default super-admin login:** `superadmin@qaat.platform` / `Super1234!`
 
 > **Free tier caveats:** services **sleep after ~15 min idle** (first request cold-starts
