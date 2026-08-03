@@ -1,2 +1,4 @@
 .vercel
-.env*
+# Vercel CLI writes .env.local on link; the .production/.example files are
+# deliberately committed, so do not blanket-ignore .env*
+.env.local
