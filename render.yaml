@@ -1,8 +1,21 @@
 # QAAT — Render Blueprint (Infrastructure as Code)
 # ---------------------------------------------------------------------------
-# Provisions the whole backend: managed Postgres + Redis (Key Value) + 6 services
-# (api-gateway public, the rest private). Launch via Render dashboard →
-# "New → Blueprint" pointed at this repo, or `render blueprint launch`.
+# Provisions the whole backend: managed Postgres + Redis (Key Value) + 5 services.
+# Launch via Render dashboard → "New → Blueprint" pointed at this repo, or
+# `render blueprint launch`.
+#
+# EVERYTHING IS ON THE FREE PLAN, to validate the deploy before it costs anything.
+# Two consequences worth knowing before debugging a "broken" deploy:
+#   • Render offers no free instance type for a private service (`pserv`), so the
+#     four internal services are declared as `web` here. They each get a public
+#     onrender.com URL, which is why the gateway addresses them by https:// URL
+#     rather than by the internal http://qaat-*:port name.
+#   • Free services sleep after ~15 minutes idle and cold-start slowly. The first
+#     request after a sleep can surface as a 502 at the gateway. That is the free
+#     tier working as designed, not a misconfiguration — move the gateway and
+#     auth to `starter` when the flakiness stops being acceptable.
+#   • The free Postgres plan is REMOVED BY RENDER AFTER 30 DAYS. Upgrade it before
+#     then or the database, and everything in it, goes away.
 #
 # THREE things this file cannot do for you (Render requires them out-of-band):
 #   1. RSA JWT keys  — upload keys/auth_private.pem + keys/auth_public.pem as
@@ -45,7 +58,7 @@ services:
     rootDir: backend/api-gateway
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter         # keep the public gateway warm (free tier sleeps)
+    plan: free            # sleeps when idle; first request after a sleep is slow
     healthCheckPath: /health
     envVars:
       - key: PORT
@@ -97,8 +110,9 @@ services:
       - key: LECTURER_CHECKIN_BASE_URL
         value: https://qaat-gateway.onrender.com
 
-  # ─── auth-service (private) ────────────────────────────────────────────────
-  - type: pserv
+  # ─── auth-service ──────────────────────────────────────────────────────────
+  # `web`, not `pserv`: there is no free private-service instance type.
+  - type: web
     name: qaat-auth
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
@@ -106,7 +120,8 @@ services:
     rootDir: backend/auth-service
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "8081"
@@ -134,8 +149,8 @@ services:
       - key: DISABLE_MFA          # standalone single-institution: VC/DQA sign in with password only
         value: "true"
 
-  # ─── session-manager (private) ─────────────────────────────────────────────
-  - type: pserv
+  # ─── session-manager ───────────────────────────────────────────────────────
+  - type: web
     name: qaat-session
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
@@ -143,7 +158,8 @@ services:
     rootDir: backend/session-manager
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "8082"
@@ -156,8 +172,8 @@ services:
       - key: WARDEN_BASE_URL
         value: https://qaat-gateway.onrender.com
 
-  # ─── sync-receiver (private) ───────────────────────────────────────────────
-  - type: pserv
+  # ─── sync-receiver ─────────────────────────────────────────────────────────
+  - type: web
     name: qaat-sync
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
@@ -165,7 +181,8 @@ services:
     rootDir: backend/sync-receiver
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "8083"
@@ -187,8 +204,8 @@ services:
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
 
-  # ─── notification-service (private) ────────────────────────────────────────
-  - type: pserv
+  # ─── notification-service ──────────────────────────────────────────────────
+  - type: web
     name: qaat-notify
     runtime: docker
     repo: https://github.com/LIGHT567482/KIU-QAAT
@@ -196,7 +213,8 @@ services:
     rootDir: backend/notification-service
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "3004"
