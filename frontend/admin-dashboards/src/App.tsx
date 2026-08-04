@@ -39,6 +39,7 @@ import QAReports from './pages/qa/QAReports'
 import { QAOrgLecturers, QAOrgDepartments, QAOrgReports } from './pages/qa/QAOrgDashboard'
 import Timetable from './pages/shared/Timetable'
 import LecturerAssignments from './pages/shared/LecturerAssignments'
+import EmployeeAttendance from './pages/shared/EmployeeAttendance'
 import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
 import OrgOverview from './pages/shared/OrgOverview'
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="/vc/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/vc/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/vc/alerts"              element={<Alerts />} />
+            <Route path="/vc/employee-attendance" element={<EmployeeAttendance />} />
           </Route>
 
           {/* ── DQA Director ───────────────────────────────────────────── */}
@@ -82,6 +84,7 @@ export default function App() {
                 simply was no page, so oversight could not see the week it was judging. */}
             <Route path="/dqa/timetable"           element={<Timetable readOnly />} />
             <Route path="/dqa/alerts"              element={<Alerts />} />
+            <Route path="/dqa/employee-attendance" element={<EmployeeAttendance />} />
             <Route path="/dqa/messages"            element={<Messages />} />
           </Route>
 
@@ -94,6 +97,7 @@ export default function App() {
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />
+            <Route path="/qa/employee-attendance" element={<EmployeeAttendance />} />
             <Route path="/qa/messages"            element={<Messages />} />
           </Route>
 

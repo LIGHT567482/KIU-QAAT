@@ -44,6 +44,41 @@ app.post('/notify/absentees', async (req, res) => {
   res.json({ status: 'SENT', total: recipients.length, emailed, whatsapped })
 })
 
+// POST /notify/direct — one message to named people, over email and WhatsApp.
+//
+// WHY THIS EXISTS SEPARATELY FROM /notify/absentees. That endpoint is shaped around one
+// specific report: it takes a list of people who failed to do something and says so. The
+// employee attendance alerts are the same two transports carrying different content — a
+// late check-in, a reminder to clock out — and squeezing them through an "absentees" route
+// meant every future alert would inherit a name and a shape that no longer described it.
+//
+// Both transports are best-effort and independent: an employee with a phone but no email
+// still gets the WhatsApp, and one unreachable address never fails the batch. The gateway
+// has already recorded the alert as sent before calling here, so a delivery failure is
+// logged rather than retried — a duplicate alert is worse than a missed one.
+app.post('/notify/direct', async (req, res) => {
+  const { recipients = [], subject, message, tenant, branding } = req.body ?? {}
+  let emailed = 0, whatsapped = 0, failed = 0
+  for (const rcpt of recipients as { name?: string; email?: string; phone?: string }[]) {
+    const greeting = rcpt.name ? `Dear ${rcpt.name},\n\n` : ''
+    const signature = tenant ? `\n\n— ${tenant} Quality Assurance` : ''
+    const body = `${greeting}${message ?? ''}${signature}`
+    if (rcpt.email) {
+      try {
+        await transporter.sendMail({
+          from: `noreply@${branding?.domain ?? 'qaat.local'}`,
+          to: rcpt.email,
+          subject: subject ?? 'QAAT notification',
+          text: body,
+        })
+        emailed++
+      } catch (e) { failed++; console.warn('direct email failed', e) }
+    }
+    if (rcpt.phone && await sendWhatsApp(rcpt.phone, body)) whatsapped++
+  }
+  res.json({ status: 'SENT', total: recipients.length, emailed, whatsapped, failed })
+})
+
 // POST /notify/sync-overdue
 app.post('/notify/sync-overdue', async (req, res) => {
   const { to, coordinator_name, session_date, branding, push_subscription } = req.body

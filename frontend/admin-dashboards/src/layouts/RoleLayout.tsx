@@ -83,6 +83,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturer Attendance', path: '/vc/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/vc/student-attendance' },
     { label: 'Alerts',              path: '/vc/alerts' },
+    { label: 'Employee Attendance', path: '/vc/employee-attendance' },
   ],
   DQA_DIRECTOR: [
     { label: 'Thresholds',          path: '/dqa/thresholds' },
@@ -98,6 +99,7 @@ const NAV: Record<Role, NavLink[]> = {
   QA_OFFICER: [
     { label: 'QA Reports',          path: '/qa/reports' },
     { label: 'Timetable',           path: '/qa/timetable' },
+    { label: 'Employee Attendance', path: '/qa/employee-attendance' },
     { label: 'Student Attendance',  path: '/qa/student-attendance' },
     { label: 'Lecturer Attendance', path: '/qa/lecturer-attendance' },
     { label: 'Manual Correction',   path: '/qa/correction' },

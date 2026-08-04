@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -391,6 +392,93 @@ func LecturerTeachingExport(pool *pgxpool.Pool, format string) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		if t, ok := teachingReportTable(w, r, pool); ok {
 			writeReport(w, r, pool, format, "lecturer-teaching", t)
+		}
+	}
+}
+
+// ─── Employee daily sheet (the biometric terminal's 29-column export) ─────────
+
+type employeeDaysExport struct {
+	Days []employeeDay `json:"days"`
+}
+
+// employeeDaysTable renders whatever the CURRENT filters selected, not the whole
+// institution. That is the point of it: the request was for reports on a specific
+// filter, and captureJSON re-invokes the on-screen handler with the same query
+// string, so the export can never disagree with the table it was clicked from.
+func employeeDaysTable(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool) (reportTable, bool) {
+	body, ok := captureJSON(EmployeeDays(pool), w, r)
+	if !ok {
+		return reportTable{}, false
+	}
+	var rep employeeDaysExport
+	if err := json.Unmarshal(body, &rep); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+		return reportTable{}, false
+	}
+
+	// The filters, spelled back into the subtitle. A printed report that does not say
+	// what it was narrowed to is indistinguishable from one covering everybody, which
+	// is exactly the misreading that matters when it reaches a VC's desk.
+	q := r.URL.Query()
+	var narrowed []string
+	if v := q.Get("department"); v != "" {
+		narrowed = append(narrowed, v)
+	}
+	if v := q.Get("q"); v != "" {
+		narrowed = append(narrowed, "matching "+v)
+	}
+	for _, f := range []struct{ key, label string }{
+		{"late", "late arrivals"}, {"early", "early departures"},
+		{"absent", "absences"}, {"exception", "exceptions"},
+	} {
+		if q.Get(f.key) == "true" {
+			narrowed = append(narrowed, f.label)
+		}
+	}
+	scope := "all staff"
+	if len(narrowed) > 0 {
+		scope = strings.Join(narrowed, " · ")
+	}
+	period := "all dates"
+	if from, to := q.Get("from"), q.Get("to"); from != "" || to != "" {
+		period = strings.TrimSpace(from + " to " + to)
+	}
+
+	t := reportTable{
+		Title:    "Employee Attendance",
+		Subtitle: fmt.Sprintf("%s · %s · %d row(s)", period, scope, len(rep.Days)),
+		Headers: []string{"AC-No.", "Name", "Department", "Date", "On duty", "Off duty",
+			"Clock In", "Clock Out", "Late", "Early", "Absent", "OT", "Work time"},
+		Weights: []float64{1.2, 3, 2.6, 1.4, 1, 1, 1.1, 1.1, 0.9, 0.9, 0.9, 1, 1.2},
+	}
+	for _, d := range rep.Days {
+		t.Rows = append(t.Rows, []string{
+			d.ACNo, d.FullName, d.Department, d.WorkDate, d.OnDuty, d.OffDuty,
+			d.ClockIn, d.ClockOut,
+			flagCell(d.LateFlag), flagCell(d.EarlyFlag), flagCell(d.Absent),
+			d.OTTime, d.WorkTime,
+		})
+	}
+	return t, true
+}
+
+// flagCell renders an exception flag the way the source sheet does: "Yes" when it
+// applies and BLANK when it does not, rather than "no". A column of the word "no"
+// buries the handful of rows anyone is actually looking for. (Distinct from the
+// yesNo in rooms.go, which is a genuine yes/no.)
+func flagCell(b bool) string {
+	if b {
+		return "Yes"
+	}
+	return ""
+}
+
+// GET /api/v1/dashboard/employee-days/export.{xlsx,csv,pdf}
+func EmployeeDaysExport(pool *pgxpool.Pool, format string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if t, ok := employeeDaysTable(w, r, pool); ok {
+			writeReport(w, r, pool, format, "employee-attendance", t)
 		}
 	}
 }

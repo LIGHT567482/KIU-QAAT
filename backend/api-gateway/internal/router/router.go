@@ -520,6 +520,26 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// Tablet punch import + the admin attendance report (with auto-comments).
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/employee-attendance/import", handlers.ImportEmployeePunches(adminPool))
+		// The biometric terminal's 29-column daily export. Separate from the punch
+		// importer above because they are different files with different shapes, and
+		// sniffing one as the other silently stores the wrong thing.
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/employee-attendance/sheet", handlers.ImportEmployeeSheet(adminPool))
+
+		// Reading employee attendance is NOT admin-only. The request was explicit that
+		// the DVC, VC, DQA and QA officers must be able to trace this; before now the
+		// data existed on a screen only the IT administrator could open.
+		employeeReaders := middleware.RequireRole(
+			middleware.RoleAdmin, middleware.RoleVC, middleware.RoleDVC,
+			middleware.RoleDQADirector, middleware.RoleQAOfficer,
+		)
+		r.With(employeeReaders).Get("/api/v1/dashboard/employee-days", handlers.EmployeeDays(pool))
+		// Exports carry the SAME filters as the screen they were clicked from: the
+		// request was for reports on a specific filter, not on everybody.
+		for _, f := range []string{"xlsx", "csv", "pdf"} {
+			r.With(employeeReaders).
+				Get("/api/v1/dashboard/employee-days/export."+f, handlers.EmployeeDaysExport(pool, f))
+		}
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/employee-attendance", handlers.EmployeeAttendanceReport(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).

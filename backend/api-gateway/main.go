@@ -125,6 +125,7 @@ func main() {
 	// cannot use the RLS-confined data-plane connection.
 	sched := scheduler.New(adminPool, logger)
 	jobs.Register(sched, adminPool)
+	jobs.RegisterEmployeeJobs(sched, adminPool)
 	sched.Start(context.Background())
 	defer sched.Stop()
 

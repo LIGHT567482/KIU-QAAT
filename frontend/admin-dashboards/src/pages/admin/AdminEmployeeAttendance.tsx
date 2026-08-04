@@ -26,6 +26,29 @@ export default function AdminEmployeeAttendance() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const sheetRef = useRef<HTMLInputElement>(null)
+
+  // The 29-column daily export goes to its own endpoint: it is a different file with a
+  // different shape, and sniffing one as the other would silently store the wrong thing.
+  async function handleSheetImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true); setImportMsg(null)
+    try {
+      const fd = new FormData(); fd.append('sheet', file)
+      const res = await api.upload<{ inserted: number; skipped: number; errors: string[] }>(
+        `/api/v1/admin/tenants/${tenantId}/employee-attendance/sheet`, fd)
+      setImportMsg(`Imported ${res.inserted} day-record(s)` +
+        (res.skipped ? `, ${res.skipped} skipped` : '') +
+        (res.errors?.length ? ` · ${res.errors.slice(0, 3).join('; ')}` : ''))
+      load()
+    } catch (err) {
+      setImportMsg(err instanceof Error ? `Import failed: ${err.message}` : 'Import failed')
+    } finally {
+      setImporting(false)
+      if (sheetRef.current) sheetRef.current.value = ''
+    }
+  }
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
 
@@ -69,11 +92,20 @@ export default function AdminEmployeeAttendance() {
     <div>
       <h2 style={{ margin: 0 }}>Employee Attendance</h2>
       <p style={{ color: 'var(--muted)', margin: '4px 0 14px', fontSize: 13 }}>
-        Upload the check-in tablet's export. Each row's <strong>Comment</strong> is generated automatically — the latest check-in/out date &amp; time and the total days the employee worked (a day with both a check-in and check-out).
+        Upload the biometric terminal's <strong>daily sheet</strong> — the export with Emp No., AC-No., On duty,
+        Clock In/Out and the overtime columns. Re-uploading the same period is safe: rows update in place
+        rather than doubling. The filtered view, with per-column search and export, is under
+        <strong> Employee Attendance</strong> on the QA, DQA and VC dashboards.
       </p>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
-        <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnPrimary}>{importing ? 'Importing…' : 'Import tablet punches'}</button>
+        {/* The 29-column daily export is the one HR actually produces, so it leads.
+            The older punch upload stays for terminals that only emit raw clock events. */}
+        <button onClick={() => sheetRef.current?.click()} disabled={importing} style={btnPrimary}>
+          {importing ? 'Importing…' : 'Import daily sheet'}
+        </button>
+        <input ref={sheetRef} type="file" accept=".csv,.xlsx" onChange={handleSheetImport} style={{ display: 'none' }} />
+        <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnSmall}>{importing ? 'Importing…' : 'Import raw punches'}</button>
         <input ref={fileRef} type="file" accept=".csv,.xlsx" onChange={handleImport} style={{ display: 'none' }} />
         <button onClick={() => downloadText('tablet_punches_template.csv', PUNCH_COLS.join(',') + '\n')} style={btnSmall}>Template</button>
         <span style={{ flex: 1 }} />
