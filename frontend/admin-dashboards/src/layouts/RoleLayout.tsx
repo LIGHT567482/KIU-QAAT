@@ -82,6 +82,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturer Workload',   path: '/vc/lecturer-workload' },
     { label: 'Lecturer Attendance', path: '/vc/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/vc/student-attendance' },
+    { label: 'Alerts',              path: '/vc/alerts' },
   ],
   DQA_DIRECTOR: [
     { label: 'Thresholds',          path: '/dqa/thresholds' },

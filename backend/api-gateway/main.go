@@ -15,7 +15,9 @@ import (
 
 	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/config"
+	"github.com/qaat/api-gateway/internal/jobs"
 	"github.com/qaat/api-gateway/internal/router"
+	"github.com/qaat/api-gateway/internal/scheduler"
 )
 
 func main() {
@@ -112,6 +114,19 @@ func main() {
 			SyncReceiver:   cfg.SyncReceiverURL,
 		},
 	)
+
+	// ─── Scheduled jobs ───────────────────────────────────────────────────────
+	// Reminders, the attendance chase and the QA escalation. Runs in-process
+	// rather than as a Render cron job because the free plan has no cron service —
+	// and because the scheduler is written to catch up on every window it slept
+	// through, which an external trigger would have to reimplement anyway.
+	//
+	// The admin pool: these jobs read across every tenant in one sweep, so they
+	// cannot use the RLS-confined data-plane connection.
+	sched := scheduler.New(adminPool, logger)
+	jobs.Register(sched, adminPool)
+	sched.Start(context.Background())
+	defer sched.Stop()
 
 	// ─── Server ───────────────────────────────────────────────────────────────
 	srv := &http.Server{

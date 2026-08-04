@@ -69,6 +69,11 @@ services:
         value: Africa/Kampala
       - key: INSTITUTION_TZ
         value: Africa/Kampala
+      # Guards /internal/cron/*. The gateway runs its own in-process scheduler, so
+      # this is only needed if you also drive the jobs from an external pinger —
+      # but without it set, that endpoint 401s everything, which reads as broken.
+      - key: CRON_SECRET
+        sync: false
       - key: PORT
         value: "8443"
       - key: ENVIRONMENT

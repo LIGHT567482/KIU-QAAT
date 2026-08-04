@@ -64,6 +64,7 @@ export default function App() {
             <Route path="/vc/lecturer-workload"   element={<VCLecturerWorkload />} />
             <Route path="/vc/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/vc/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/vc/alerts"              element={<Alerts />} />
           </Route>
 
           {/* ── DQA Director ───────────────────────────────────────────── */}
@@ -80,6 +81,7 @@ export default function App() {
             {/* The gateway already authorises these roles to read the timetable; there
                 simply was no page, so oversight could not see the week it was judging. */}
             <Route path="/dqa/timetable"           element={<Timetable readOnly />} />
+            <Route path="/dqa/alerts"              element={<Alerts />} />
             <Route path="/dqa/messages"            element={<Messages />} />
           </Route>
 
