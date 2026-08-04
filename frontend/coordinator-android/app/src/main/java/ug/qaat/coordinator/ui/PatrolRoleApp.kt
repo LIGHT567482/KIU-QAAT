@@ -1,8 +1,11 @@
 package ug.qaat.coordinator.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -10,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -232,50 +236,64 @@ private fun PatrolRoundTab(reloadKey: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val dao = remember { Graph.db.dao() }
-    var slots by remember { mutableStateOf<List<PatrolSlotEntity>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+
+    // SEARCH FIRST. The round used to open on every timetabled session in the institution,
+    // each with a pair of tick buttons — a screen that invites ticking without visiting,
+    // since the lecturer, room and time are all on it and nothing distinguishes a slot the
+    // patroller stood in front of from one they scrolled past. A patrol record is weighed
+    // against the coordinator's own precisely because it comes from someone who was there,
+    // so the patroller now looks a lecturer or unit up before anything appears.
+    var mode by remember { mutableStateOf("lecturer") }   // "lecturer" | "unit"
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<PatrolSlotEntity>?>(null) }   // null = nothing searched yet
+    var searching by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<PatrolSlotEntity?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf(0) }
     val logs by dao.patrolLogsForDay(today()).collectAsStateWithLifecycle(emptyList())
 
-    suspend fun refresh() {
-        loading = true
-        // Cached day first so the screen is usable instantly and offline, then the network.
-        slots = withContext(Dispatchers.IO) { dao.patrolSlots() }
+    // The cached day still refreshes in the background: it is what makes the search work
+    // with no signal, which is most of a round in a concrete building.
+    suspend fun refreshCache() {
         val token = AppState.token
         if (token != null) {
             runCatching { PatrolClient().manifest(token, Fingerprint.get(ctx)) }
-                .onSuccess { fresh ->
-                    withContext(Dispatchers.IO) { dao.replacePatrolSlots(fresh) }
-                    slots = fresh; note = null
-                }
-                .onFailure {
-                    note = when {
-                        it is PatrolClient.DeviceRejected -> it.message
-                        slots.isEmpty() -> "Offline — no timetable cached yet. Connect once to download today's rounds."
-                        else -> null
-                    }
-                }
+                .onSuccess { fresh -> withContext(Dispatchers.IO) { dao.replacePatrolSlots(fresh) } }
+                .onFailure { if (it is PatrolClient.DeviceRejected) note = it.message }
         }
         syncPending(ctx)?.let { note = it }
         pending = withContext(Dispatchers.IO) { dao.pendingPatrolCount() }
-        loading = false
     }
-    LaunchedEffect(reloadKey) { refresh() }
+    LaunchedEffect(reloadKey) { refreshCache() }
 
-    // Slots overlapping "now" (from 10 minutes before the start to the end) float up, marked NOW.
-    val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
-    fun startMin(s: String): Int {
-        val p = s.split(":")
-        return (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
-    }
-    fun isNow(s: PatrolSlotEntity): Boolean {
-        val st = startMin(s.startTime); return nowMin in (st - 10)..(st + s.durationMinutes)
-    }
-    val ordered = slots.sortedWith(compareByDescending<PatrolSlotEntity> { isNow(it) }.thenBy { it.startTime })
-    val done = logs.associateBy { it.unitId + "@" + it.scheduledTime }
+    fun runSearch() = scope.launch {
+        val q = query.trim()
+        if (q.isEmpty()) { results = null; return@launch }
+        searching = true; note = null
+        val token = AppState.token
+        val online = if (token != null) {
+            runCatching { PatrolClient().search(token, Fingerprint.get(ctx), mode, q) }
+                .onFailure { if (it is PatrolClient.DeviceRejected) note = it.message }
+                .getOrNull()
+        } else null
 
-    fun tick(s: PatrolSlotEntity, taught: Boolean) = scope.launch {
+        results = if (online != null) online else {
+            // Offline: search the cached day. Same matching rule as the server — prefix,
+            // case-insensitive, staff id or name — so the patroller does not get a
+            // different answer depending on whether the signal happened to be up.
+            note = "Offline — searching today's cached timetable."
+            val needle = q.lowercase()
+            withContext(Dispatchers.IO) { dao.patrolSlots() }.filter { s ->
+                if (mode == "lecturer")
+                    s.lecturerStaffId.lowercase().startsWith(needle) || s.lecturerName.lowercase().startsWith(needle)
+                else
+                    s.unitId.lowercase().startsWith(needle) || s.unitName.lowercase().startsWith(needle)
+            }.sortedBy { it.startTime }
+        }
+        searching = false
+    }
+
+    fun tick(s: PatrolSlotEntity, taught: Boolean, found: FoundElsewhere?) = scope.launch {
         withContext(Dispatchers.IO) {
             dao.putPatrolLog(PatrolLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -283,86 +301,232 @@ private fun PatrolRoundTab(reloadKey: Int) {
                 lecturerId = s.lecturerStaffId, lecturerName = s.lecturerName, room = s.room,
                 sessionDate = today(), scheduledTime = s.startTime, taught = taught,
                 takenAt = Instant.now().toString(),
+                offeringId = s.offeringId,
+                foundVenue = found?.venue.orEmpty(),
+                foundStartTime = found?.time.orEmpty(),
+                foundDate = found?.date.orEmpty(),
+                venueChanged = found != null,
+                remarks = found?.remarks.orEmpty(),
             ))
         }
+        chosen = null
         syncPending(ctx)?.let { note = it }
         pending = withContext(Dispatchers.IO) { dao.pendingPatrolCount() }
     }
 
+    val done = logs.associateBy { it.unitId + "@" + it.scheduledTime }
+
+    // The confirm sheet: one lecture, one green tick, one red cross.
+    chosen?.let { slot ->
+        PatrolConfirmSheet(
+            slot = slot,
+            onDismiss = { chosen = null },
+            onDecide = { taught, found -> tick(slot, taught, found) },
+        )
+    }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Column(Modifier.fillMaxWidth()) {
-            Text("Patrol — ${AppState.coordinatorName.orEmpty().ifBlank { "QA" }}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(
-                "Staff ID: ${AppState.staffId.orEmpty().ifBlank { "—" }}" +
-                    if (pending > 0) "  ·  $pending pending sync" else "  ·  all synced",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Text("Tick whether the timetabled lecturer is actually teaching. Works offline — ticks sync automatically.",
+        Text("Patrol — ${AppState.coordinatorName.orEmpty().ifBlank { "QA" }}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(
+            "Staff ID: ${AppState.staffId.orEmpty().ifBlank { "—" }}" +
+                if (pending > 0) "  ·  $pending pending sync" else "  ·  all synced",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("Search the lecturer or the unit you are standing in front of, then record whether they are teaching. Works offline.",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 6.dp))
+
+        // Which way to search. Both find the same lectures; the patroller uses whichever
+        // identifier the door or the badge in front of them happens to carry.
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = mode == "lecturer", onClick = { mode = "lecturer"; results = null },
+                label = { Text("By lecturer ID") })
+            FilterChip(selected = mode == "unit", onClick = { mode = "unit"; results = null },
+                label = { Text("By unit code") })
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(if (mode == "lecturer") "Lecturer staff ID or name" else "Unit code or name") },
+            placeholder = { Text(if (mode == "lecturer") "e.g. KIU/044" else "e.g. CS201") },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { runSearch() }),
+            trailingIcon = {
+                TextButton(onClick = { runSearch() }, enabled = query.isNotBlank() && !searching) {
+                    Text(if (searching) "…" else "Search")
+                }
+            },
+        )
+
         note?.let {
+            Spacer(Modifier.height(8.dp))
             Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small,
                 modifier = Modifier.fillMaxWidth()) {
                 Text(it, Modifier.padding(10.dp), style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onErrorContainer)
             }
         }
+        Spacer(Modifier.height(12.dp))
 
         when {
-            loading && slots.isEmpty() -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
-            ordered.isEmpty() -> Text("No timetabled sessions for today.",
+            searching -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
+            // Nothing searched yet is NOT the same as nothing found, and must not read as it.
+            results == null -> Text(
+                "No lecturer is shown until you search. Enter the staff ID or the unit code for the room you are at.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
+            results!!.isEmpty() -> Text(
+                "Nothing timetabled today matches “${query.trim()}”. Check the ID, or try searching the other way.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
             else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(ordered) { s ->
-                    PatrolSlotCard(s, isNow(s), done[s.unitId + "@" + s.startTime]) { taught -> tick(s, taught) }
+                items(results!!) { s ->
+                    PatrolResultCard(s, done[s.unitId + "@" + s.startTime]) { chosen = s }
                 }
             }
         }
     }
 }
 
+/** What the patroller found, when it was not where the timetable said. */
+private data class FoundElsewhere(
+    val venue: String,
+    val time: String,
+    val date: String,
+    val remarks: String,
+)
+
+/** One search hit. Tapping it opens the confirm sheet — the card itself cannot tick, so a
+ *  verdict is always two deliberate actions rather than one thumb on a scrolling list. */
 @Composable
-private fun PatrolSlotCard(
+private fun PatrolResultCard(
     s: PatrolSlotEntity,
-    live: Boolean,
     recorded: PatrolLogEntity?,
-    onTick: (Boolean) -> Unit,
+    onOpen: () -> Unit,
 ) {
     Surface(
-        color = if (live) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium,
+        onClick = onOpen,
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(s.startTime, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                if (live) {
-                    Spacer(Modifier.width(8.dp))
-                    Text("● NOW", color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                }
+                Spacer(Modifier.width(8.dp))
+                Text(s.unitName.ifBlank { s.unitId } + if (s.courseCode.isNotBlank()) "  (${s.courseCode})" else "",
+                    fontWeight = FontWeight.SemiBold)
             }
-            Text(s.unitName.ifBlank { s.unitId } + if (s.courseCode.isNotBlank()) "  (${s.courseCode})" else "",
-                fontWeight = FontWeight.SemiBold)
             Text("Lecturer: ${s.lecturerName.ifBlank { s.lecturerStaffId.ifBlank { "—" } }}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Room: ${s.room.ifBlank { "—" }}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
+            if (s.cohort.isNotBlank()) {
+                Text(s.cohort, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (recorded != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (recorded.taught) "✓ Marked TAUGHT" else "✗ Marked NOT TAUGHT",
-                        color = if (recorded.taught) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    if (!recorded.synced) Text("queued", style = MaterialTheme.typography.labelSmall,
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    (if (recorded.taught) "✓ Already marked TAUGHT" else "✗ Already marked NOT TAUGHT") +
+                        if (!recorded.synced) " · queued" else "",
+                    color = if (recorded.taught) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The verdict screen: is this lecturer teaching, yes or no.
+ *
+ * The "found somewhere else" section is collapsed by default because the lecture being where
+ * the timetable said is the ordinary case. When it is not, the patroller is the only person
+ * who knows — so recording the real room, time or date here is what turns a moved lecture
+ * from a false "not taught" into a fact somebody can act on.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PatrolConfirmSheet(
+    slot: PatrolSlotEntity,
+    onDismiss: () -> Unit,
+    onDecide: (taught: Boolean, found: FoundElsewhere?) -> Unit,
+) {
+    var moved by remember { mutableStateOf(false) }
+    var venue by remember { mutableStateOf(slot.room) }
+    var time by remember { mutableStateOf(slot.startTime) }
+    var date by remember { mutableStateOf(today()) }
+    var remarks by remember { mutableStateOf("") }
+
+    // Only counts as a change if something actually differs — ticking the box and editing
+    // nothing must not raise an alert telling a lecturer their lecture moved to where it was.
+    fun found(): FoundElsewhere? {
+        if (!moved) return null
+        val changed = venue.trim() != slot.room.trim() ||
+            time.trim() != slot.startTime.trim() ||
+            date.trim() != today()
+        return if (changed || remarks.isNotBlank())
+            FoundElsewhere(venue.trim(), time.trim(), date.trim(), remarks.trim()) else null
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Text(slot.unitName.ifBlank { slot.unitId }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            if (slot.courseCode.isNotBlank()) {
+                Text(slot.courseCode, style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("Lecturer: ${slot.lecturerName.ifBlank { slot.lecturerStaffId.ifBlank { "—" } }}")
+            Text("Timetabled: ${slot.room.ifBlank { "no room" }} at ${slot.startTime}",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (slot.cohort.isNotBlank()) {
+                Text(slot.cohort, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Text("Is the lecturer teaching?", fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    onClick = { onDecide(true, found()) },
+                ) { Text("✓  Yes", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                Button(
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    onClick = { onDecide(false, found()) },
+                ) { Text("✗  No", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable { moved = !moved }) {
+                Checkbox(checked = moved, onCheckedChange = { moved = it })
+                Column {
+                    Text("Found somewhere else?", fontWeight = FontWeight.SemiBold)
+                    Text("Different room, time or day — the lecturer, their HOD and QA are told.",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(modifier = Modifier.weight(1f), onClick = { onTick(true) }) { Text("Taught ✓") }
-                    OutlinedButton(modifier = Modifier.weight(1f), onClick = { onTick(false) }) { Text("Not taught ✗") }
-                }
             }
+            if (moved) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(venue, { venue = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Room where you found it") })
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(time, { time = it }, singleLine = true,
+                        modifier = Modifier.weight(1f), label = { Text("Start (HH:MM)") })
+                    OutlinedTextField(date, { date = it }, singleLine = true,
+                        modifier = Modifier.weight(1f), label = { Text("Date") })
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(remarks, { remarks = it },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Note (optional)") })
+            }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

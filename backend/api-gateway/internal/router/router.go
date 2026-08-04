@@ -148,6 +148,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/patrol/bind-device", handlers.BindPatrolDevice(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Get("/api/v1/patrol/manifest", handlers.PatrolManifest(pool))
+		// Search-first: the round shows nothing until the patroller looks a lecturer or
+		// a unit up, so a tick is the result of visiting a room rather than of scrolling
+		// a list of every session in the institution.
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Get("/api/v1/patrol/search", handlers.PatrolSearch(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
 		// The patroller's SECOND FACTOR (migration 071). The handset binding above proves WHICH

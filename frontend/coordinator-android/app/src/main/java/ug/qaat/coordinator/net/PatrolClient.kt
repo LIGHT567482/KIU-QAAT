@@ -131,9 +131,52 @@ class PatrolClient {
                 dayOfWeek = o.optInt("day_of_week", 0),
                 startTime = o.optString("start_time", ""),
                 durationMinutes = o.optInt("duration_minutes", 60),
+                offeringId = o.optString("offering_id", ""),
+                cohort = o.optString("cohort", ""),
             )
         }.filter { it.unitId.isNotBlank() && it.startTime.isNotBlank() }
     }
+
+    /**
+     * GET /api/v1/patrol/search?by=lecturer|unit&q=…
+     *
+     * The round shows nothing until this returns something. Searching is what makes a
+     * tick evidence of having visited a room rather than of having scrolled a list —
+     * see the handler comment for why the browse-everything screen was removed.
+     *
+     * Returns null when the phone is offline, which the caller distinguishes from an
+     * empty result: "no network" and "no such lecturer" need different words on screen.
+     */
+    suspend fun search(token: String, fingerprint: String, mode: String, query: String): List<PatrolSlotEntity>? =
+        withContext(Dispatchers.IO) {
+            val q = query.trim()
+            if (q.isEmpty()) return@withContext emptyList()
+            val r = runCatching {
+                http.get("$base/api/v1/patrol/search") {
+                    auth(token, fingerprint)
+                    url { parameters.append("by", mode); parameters.append("q", q) }
+                }
+            }.getOrNull() ?: return@withContext null
+            if (r.status.value == 403) throw DeviceRejected(deviceMessage(r.bodyAsText()))
+            if (!r.status.isSuccess()) return@withContext null
+            val arr = JSONObject(r.bodyAsText()).optJSONArray("results") ?: JSONArray()
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                PatrolSlotEntity(
+                    unitId = o.optString("unit_id"),
+                    unitName = o.optString("unit_name", o.optString("unit_id")),
+                    courseCode = o.optString("course_code", ""),
+                    lecturerStaffId = o.optString("lecturer_staff_id", ""),
+                    lecturerName = o.optString("lecturer_name", ""),
+                    room = o.optString("room", ""),
+                    dayOfWeek = o.optInt("day_of_week", 0),
+                    startTime = o.optString("start_time", ""),
+                    durationMinutes = o.optInt("duration_minutes", 60),
+                    offeringId = o.optString("offering_id", ""),
+                    cohort = o.optString("cohort", ""),
+                )
+            }.filter { it.unitId.isNotBlank() }
+        }
 
     /** POST /api/v1/patrol/sync {logs:[…]} — true once the batch is durably stored. */
     suspend fun sync(token: String, fingerprint: String, logs: List<PatrolLogEntity>): Boolean = withContext(Dispatchers.IO) {
@@ -144,7 +187,11 @@ class PatrolClient {
                 .put("unit_id", l.unitId).put("unit_name", l.unitName).put("course_code", l.courseCode)
                 .put("lecturer_id", l.lecturerId).put("lecturer_name", l.lecturerName).put("room", l.room)
                 .put("session_date", l.sessionDate).put("scheduled_time", l.scheduledTime)
-                .put("taught", l.taught).put("taken_at", l.takenAt))
+                .put("taught", l.taught).put("taken_at", l.takenAt)
+                .put("offering_id", l.offeringId)
+                .put("found_venue", l.foundVenue).put("found_start_time", l.foundStartTime)
+                .put("found_date", l.foundDate).put("venue_changed", l.venueChanged)
+                .put("remarks", l.remarks))
         }
         val r = http.post("$base/api/v1/patrol/sync") {
             auth(token, fingerprint)

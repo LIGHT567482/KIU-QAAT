@@ -84,6 +84,10 @@ data class PatrolSlotEntity(
     val dayOfWeek: Int,
     val startTime: String,        // "HH:MM"
     val durationMinutes: Int,
+    /** Which cohort's session. Two intakes can run the same unit at the same hour in
+     *  different rooms; without this they look like one duplicated row to the patroller. */
+    val offeringId: String = "",
+    val cohort: String = "",
 )
 
 /** A patrol observation captured in the field; uploaded when the phone is back online. */
@@ -101,6 +105,14 @@ data class PatrolLogEntity(
     val taught: Boolean,
     val takenAt: String,          // RFC3339
     val synced: Boolean = false,
+    val offeringId: String = "",
+    /** Where/when the lecture was ACTUALLY found, when it had moved. Blank means it
+     *  matched the timetable, which is the common case. */
+    val foundVenue: String = "",
+    val foundStartTime: String = "",
+    val foundDate: String = "",
+    val venueChanged: Boolean = false,
+    val remarks: String = "",
 )
 
 @Dao
@@ -239,7 +251,7 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
         SessionEntity::class, PresentDisplayEntity::class,
         PatrolSlotEntity::class, PatrolLogEntity::class],
-    version = 4,
+    version = 5,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -281,5 +293,25 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
                  PRIMARY KEY(id))"""
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS index_patrol_logs_sessionDate ON patrol_logs (sessionDate)")
+    }
+}
+
+/** v4→v5: the patroller records WHERE they found the lecture, not just whether it happened.
+ *
+ *  Lecturers move rooms informally. A tick that could only say taught/not-taught against the
+ *  timetabled slot either lost the move entirely or turned it into a false accusation — the
+ *  patroller found nothing in A02 and had to mark "not taught" for a lecture that was running
+ *  perfectly well in B04. Additive, with defaults, so a patroller mid-round upgrading the app
+ *  keeps every queued tick. */
+val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE patrol_slots ADD COLUMN offeringId TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_slots ADD COLUMN cohort TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN offeringId TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN foundVenue TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN foundStartTime TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN foundDate TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN venueChanged INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN remarks TEXT NOT NULL DEFAULT ''")
     }
 }

@@ -236,6 +236,11 @@ type patrolSlot struct {
 	DayOfWeek       int    `json:"day_of_week"`
 	StartTime       string `json:"start_time"` // "HH:MM"
 	DurationMinutes int    `json:"duration_minutes"`
+	// Which cohort's session this is. Two intakes can run the same unit at the same
+	// hour in different rooms; without this they are indistinguishable to the
+	// patroller and collide on the log's uniqueness key.
+	OfferingID string `json:"offering_id"`
+	Cohort     string `json:"cohort"`
 }
 
 // PatrolManifest returns today's timetabled sessions for the patroller's tenant.
@@ -312,6 +317,18 @@ type patrolLogIn struct {
 	ScheduledTime string `json:"scheduled_time"` // HH:MM
 	Taught        bool   `json:"taught"`
 	TakenAt       string `json:"taken_at"` // RFC3339
+	OfferingID    string `json:"offering_id"`
+
+	// What the patroller ACTUALLY found, when it differed from the timetable.
+	// Lecturers move rooms, and until now a tick could only say taught/not-taught
+	// against the timetabled slot — so a lecture found in another room was either
+	// recorded as if nothing had changed, or recorded as NOT TAUGHT, which is a
+	// false accusation about the one thing QA exists to observe.
+	FoundVenue     string `json:"found_venue"`
+	FoundStartTime string `json:"found_start_time"` // HH:MM
+	FoundDate      string `json:"found_date"`       // YYYY-MM-DD
+	VenueChanged   bool   `json:"venue_changed"`
+	Remarks        string `json:"remarks"`
 }
 
 // PatrolSync ingests a batch of patrol logs, stamping the patroller's identity from the token.
@@ -361,7 +378,8 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				INSERT INTO lecturer_patrol_logs
 				  (tenant_id, unit_id, unit_name, course_code, lecturer_id, lecturer_name, room,
 				   session_date, scheduled_time, taught, patroller_id, patroller_name, patroller_staff_id,
-				   taken_at, patroller_device_hash)
+				   taken_at, patroller_device_hash,
+				   offering_id, found_venue, found_start_time, found_date, venue_changed, remarks)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,
 				        LEAST(COALESCE(NULLIF($8,'')::date, CURRENT_DATE), CURRENT_DATE),
 				        $9, $10, $11::uuid, $12, $13,
@@ -370,17 +388,26 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				        -- given. A FUTURE one is a wrong device clock, not evidence, so it
 				        -- is clamped to now rather than filed under a day that hasn't
 				        -- happened — where no report window would ever surface it.
-				        LEAST(COALESCE(NULLIF($14,'')::timestamptz, now()), now()), $15)
-				ON CONFLICT (tenant_id, unit_id, session_date, scheduled_time)
+				        LEAST(COALESCE(NULLIF($14,'')::timestamptz, now()), now()), $15,
+				        NULLIF($16,'')::uuid, NULLIF($17,''), NULLIF($18,''),
+				        NULLIF($19,'')::date, $20, NULLIF($21,''))
+				ON CONFLICT (tenant_id, unit_id, session_date, scheduled_time,
+				             COALESCE(offering_id, '00000000-0000-0000-0000-000000000000'::uuid))
 				DO UPDATE SET taught = EXCLUDED.taught,
 				              patroller_id = EXCLUDED.patroller_id,
 				              patroller_name = EXCLUDED.patroller_name,
 				              patroller_staff_id = EXCLUDED.patroller_staff_id,
 				              taken_at = EXCLUDED.taken_at,
-				              patroller_device_hash = EXCLUDED.patroller_device_hash`,
+				              patroller_device_hash = EXCLUDED.patroller_device_hash,
+				              found_venue = EXCLUDED.found_venue,
+				              found_start_time = EXCLUDED.found_start_time,
+				              found_date = EXCLUDED.found_date,
+				              venue_changed = EXCLUDED.venue_changed,
+				              remarks = EXCLUDED.remarks`,
 				tenantID, l.UnitID, l.UnitName, l.CourseCode, l.LecturerID, l.LecturerName, l.Room,
 				l.SessionDate, l.ScheduledTime, l.Taught, userID, patrollerName, patrollerStaffID,
-				l.TakenAt, deviceHash)
+				l.TakenAt, deviceHash,
+				l.OfferingID, l.FoundVenue, l.FoundStartTime, l.FoundDate, l.VenueChanged, l.Remarks)
 			if execErr == nil {
 				written++
 				// Persistent lecturer alert (stays in their inbox until they delete it): the patroller
@@ -409,6 +436,28 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 						_, _ = conn.Exec(r.Context(),
 							`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)
 							 VALUES ($1, $2, $3::uuid) ON CONFLICT DO NOTHING`, nid, tenantID, lecUser)
+					}
+				}
+
+				// A lecture found away from its published slot is news to more people than
+				// the lecturer: nobody updated the timetable, so students are still being
+				// sent to the old room and the next patroller will repeat this search.
+				// Best-effort, and never allowed to fail the sync — the tick is the record
+				// that matters, the alert is a courtesy on top of it.
+				if l.VenueChanged {
+					if recips := venueChangeRecipients(r.Context(), conn, tenantID, l.UnitID, l.LecturerID); len(recips) > 0 {
+						subj, bodyTxt := venueChangeMessage(l, patrollerName)
+						var vid string
+						if conn.QueryRow(r.Context(), `
+							INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, unit_id, subject, body)
+							VALUES ($1, $2, $3, 'QA_PATROLLER', 'DIRECT', $4, $5, $6) RETURNING notification_id::text`,
+							tenantID, userID, patrollerName, l.UnitID, subj, bodyTxt).Scan(&vid) == nil {
+							for _, uid := range recips {
+								_, _ = conn.Exec(r.Context(),
+									`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)
+									 VALUES ($1, $2, $3::uuid) ON CONFLICT DO NOTHING`, vid, tenantID, uid)
+							}
+						}
 					}
 				}
 			}
