@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/auth-service
+        working-directory: backend/auth-service
 
     services:
       postgres:
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-          cache-dependency-path: services/auth-service/go.sum
+          cache-dependency-path: backend/auth-service/go.sum
 
       - name: Generate test RSA keys
         run: |
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/api-gateway
+        working-directory: backend/api-gateway
 
     steps:
       - uses: actions/checkout@v4
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-          cache-dependency-path: services/api-gateway/go.sum
+          cache-dependency-path: backend/api-gateway/go.sum
 
       - name: Generate test RSA keys
         run: |
@@ -136,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/admin-dashboards
+        working-directory: frontend/admin-dashboards
 
     steps:
       - uses: actions/checkout@v4
@@ -149,7 +149,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          cache-dependency-path: apps/admin-dashboards/pnpm-lock.yaml
+          cache-dependency-path: frontend/admin-dashboards/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck

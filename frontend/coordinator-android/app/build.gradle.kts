@@ -26,8 +26,11 @@ android {
         targetSdk = 34
         // 4 / 1.1.0 — the QA patroller moved in from the retired standalone `ug.qaat.patroller`
         // APK, so this one package now serves coordinators, lecturers, students AND patrollers.
-        versionCode = 4
-        versionName = "1.1.0"
+        // 1.2.0: search-first patrol round, the 15-minute auto-close, and the
+        // kiu-qaat-* backend. versionCode must rise for the APK to install as an
+        // upgrade over 1.1.0 rather than being refused as a downgrade.
+        versionCode = 5
+        versionName = "1.2.0"
         // DEFAULT backend URL the app starts with. The app works for BOTH your local server
         // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
         // self-signed cert, and the URL is switchable at runtime (login "server" field /
