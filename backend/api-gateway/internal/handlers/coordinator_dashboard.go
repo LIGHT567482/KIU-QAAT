@@ -258,7 +258,7 @@ func CoordinatorAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := conn.Query(r.Context(), `
 			SELECT se.student_id, se.full_name, s.unit_id, s.unit_name,
 			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
-			       COALESCE(t.attendance_threshold, 75)
+			       COALESCE(75 /* fixed: internal/policy.AttendanceThresholdPercent */, 75)
 			FROM students_extended se
 			JOIN student_attendance_summary s ON s.student_id = se.student_id AND s.tenant_id = se.tenant_id
 			JOIN tenants t ON t.tenant_id = se.tenant_id
@@ -458,7 +458,7 @@ func CoordinatorTrends(pool *pgxpool.Pool) http.HandlerFunc {
 
 		threshold := 75
 		_ = conn.QueryRow(r.Context(),
-			`SELECT COALESCE(attendance_threshold,75) FROM tenants WHERE tenant_id=$1`, tenantID).Scan(&threshold)
+			`SELECT 75 /* fixed: internal/policy.AttendanceThresholdPercent */ FROM tenants WHERE tenant_id=$1`, tenantID).Scan(&threshold)
 
 		rows, err := conn.Query(r.Context(), `
 			WITH sess AS (

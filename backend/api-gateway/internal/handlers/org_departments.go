@@ -197,7 +197,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			SELECT COALESCE(c.department,''),
 			       COUNT(DISTINCT se.student_id),
 			       ROUND(COALESCE(AVG(sas.attendance_percentage),0),1),
-			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < t.attendance_threshold)
+			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */)
 			FROM students_extended se
 			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
 			JOIN tenants t ON t.tenant_id = se.tenant_id

@@ -193,7 +193,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	var activeAcademicYear string
 	var activeSemester int
 	err = conn.QueryRow(ctx, `
-		SELECT t.attendance_threshold, t.checkin_window_minutes,
+		SELECT 75 /* fixed: internal/policy.AttendanceThresholdPercent */, t.checkin_window_minutes,
 		       t.auto_kill_minutes, t.student_hash_key,
 		       COALESCE(t.active_academic_year, ''),
 		       COALESCE(t.active_semester, 0)

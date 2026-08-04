@@ -10,12 +10,16 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/policy"
 )
 
 type thresholdConfig struct {
 	AttendanceThreshold  int `json:"attendance_threshold"`
 	CheckinWindowMinutes int `json:"checkin_window_minutes"`
 	AutoKillMinutes      int `json:"auto_kill_minutes"`
+	// Fixed tells the UI these are no longer editable, so it can render them as
+	// facts rather than as a form that silently discards what is typed into it.
+	Fixed bool `json:"fixed"`
 }
 
 // GET /api/v1/dashboard/dqa/thresholds
@@ -23,14 +27,18 @@ func GetThresholds(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 
-		var cfg thresholdConfig
-		err := pool.QueryRow(r.Context(), `
-			SELECT attendance_threshold, checkin_window_minutes,
-			       auto_kill_minutes
-			FROM tenants WHERE tenant_id = $1`, tenantID).
-			Scan(&cfg.AttendanceThreshold, &cfg.CheckinWindowMinutes,
-				&cfg.AutoKillMinutes)
-		if err != nil {
+		// The threshold and the auto-kill are FIXED institution-wide (internal/policy);
+		// only the check-in window is still per-tenant. The endpoint stays so the UI has
+		// something to render and so a client that still reads it does not break — it now
+		// reports the fixed values rather than whatever the columns happen to hold.
+		cfg := thresholdConfig{
+			AttendanceThreshold: policy.AttendanceThresholdPercent,
+			AutoKillMinutes:     policy.AutoKillGraceMinutes,
+			Fixed:               true,
+		}
+		if err := pool.QueryRow(r.Context(),
+			`SELECT checkin_window_minutes FROM tenants WHERE tenant_id = $1`, tenantID).
+			Scan(&cfg.CheckinWindowMinutes); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{
 				"error": "TENANT_NOT_FOUND", "message": "tenant not found",
 			})
@@ -53,23 +61,23 @@ func PutThresholds(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		// Policy: the attendance threshold is FIXED at a 75% minimum — it can never go
-		// below it. A lower value is clamped up to 75; cap at 100.
-		if cfg.AttendanceThreshold < 75 {
-			cfg.AttendanceThreshold = 75
-		}
-		if cfg.AttendanceThreshold > 100 {
-			cfg.AttendanceThreshold = 100
-		}
-
+		// The threshold and the auto-kill are no longer per-tenant — they are fixed in
+		// internal/policy. Writing them is ignored rather than refused, so an older
+		// client that still PUTs all three keeps working; only the check-in window,
+		// which is still institution-configurable, is saved.
+		//
+		// COMMENTED OUT, not deleted, so restoring per-tenant policy is an edit:
+		//
+		//	if cfg.AttendanceThreshold < 75 { cfg.AttendanceThreshold = 75 }
+		//	if cfg.AttendanceThreshold > 100 { cfg.AttendanceThreshold = 100 }
+		//	... SET attendance_threshold = $1, auto_kill_minutes = $3 ...
+		//
+		// The tenants columns are left in place and untouched.
 		_, err := pool.Exec(r.Context(), `
 			UPDATE tenants
-			SET attendance_threshold   = $1,
-			    checkin_window_minutes = $2,
-			    auto_kill_minutes      = $3
-			WHERE tenant_id = $4`,
-			cfg.AttendanceThreshold, cfg.CheckinWindowMinutes,
-			cfg.AutoKillMinutes, tenantID)
+			SET checkin_window_minutes = $1
+			WHERE tenant_id = $2`,
+			cfg.CheckinWindowMinutes, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": "INTERNAL_ERROR", "message": "update failed",
@@ -111,15 +119,15 @@ func DQACourseHealth(pool *pgxpool.Pool) http.HandlerFunc {
 			  COALESCE(c.department, '') AS department,
 			  COUNT(DISTINCT sas.student_id) AS enrolled_count,
 			  ROUND(COALESCE(AVG(sas.attendance_percentage), 0), 1) AS avg_attendance_pct,
-			  COUNT(*) FILTER (WHERE sas.attendance_percentage < t.attendance_threshold) AS below_threshold_count,
-			  t.attendance_threshold
+			  COUNT(*) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */) AS below_threshold_count,
+			  75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			FROM course_units cu
 			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = $1
 			LEFT JOIN student_attendance_summary sas
 			  ON sas.unit_id = cu.unit_id AND sas.tenant_id = $1
 			JOIN tenants t ON t.tenant_id = $1
 			WHERE cu.tenant_id = $1
-			GROUP BY cu.unit_id, cu.name, c.course_id, c.name, c.department, t.attendance_threshold
+			GROUP BY cu.unit_id, cu.name, c.course_id, c.name, c.department, 75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			ORDER BY avg_attendance_pct ASC`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -323,15 +331,15 @@ func DQABulkIneligible(pool *pgxpool.Pool) http.HandlerFunc {
 			  sas.sessions_held,
 			  sas.sessions_attended,
 			  sas.attendance_percentage,
-			  t.attendance_threshold,
-			  GREATEST(0, CEIL(t.attendance_threshold::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int AS deficit_sessions
+			  75 /* fixed: internal/policy.AttendanceThresholdPercent */,
+			  GREATEST(0, CEIL(75 /* fixed: internal/policy.AttendanceThresholdPercent */::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int AS deficit_sessions
 			FROM student_attendance_summary sas
 			JOIN students_extended se ON se.student_id = sas.student_id AND se.tenant_id = $1
 			JOIN course_units cu ON cu.unit_id = sas.unit_id
 			JOIN courses c ON c.course_id = se.course_id
 			JOIN tenants t ON t.tenant_id = $1
 			WHERE sas.tenant_id = $1
-			  AND sas.attendance_percentage < t.attendance_threshold
+			  AND sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			ORDER BY sas.student_id, sas.unit_id`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -403,9 +411,9 @@ func DQAAllEligibility(pool *pgxpool.Pool) http.HandlerFunc {
 			  sas.sessions_held,
 			  sas.sessions_attended,
 			  sas.attendance_percentage,
-			  t.attendance_threshold,
-			  GREATEST(0, CEIL(t.attendance_threshold::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int AS deficit_sessions,
-			  CASE WHEN sas.attendance_percentage >= t.attendance_threshold THEN 'ELIGIBLE' ELSE 'INELIGIBLE' END AS status,
+			  75 /* fixed: internal/policy.AttendanceThresholdPercent */,
+			  GREATEST(0, CEIL(75 /* fixed: internal/policy.AttendanceThresholdPercent */::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int AS deficit_sessions,
+			  CASE WHEN sas.attendance_percentage >= 75 /* fixed: internal/policy.AttendanceThresholdPercent */ THEN 'ELIGIBLE' ELSE 'INELIGIBLE' END AS status,
 			  COALESCE(se.current_year, 0),
 			  COALESCE(se.semester, 0),
 			  COALESCE(se.intake_session, ''),

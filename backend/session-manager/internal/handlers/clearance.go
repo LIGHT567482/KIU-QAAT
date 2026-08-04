@@ -73,10 +73,13 @@ func ClearanceToken(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		// Fetch eligible students from the materialized view.
-		threshold := 0
-		conn.QueryRow(r.Context(),
-			`SELECT attendance_threshold FROM tenants WHERE tenant_id = $1`, tenantID).
-			Scan(&threshold) //nolint:errcheck
+		//
+		// The threshold is fixed institution-wide (see api-gateway internal/policy).
+		// It used to be read from tenants with the query error IGNORED into
+		// `threshold := 0` — so any database hiccup meant a threshold of zero, and a
+		// zero threshold clears EVERY student for exams, including one who attended
+		// nothing. A constant cannot fail to load.
+		const attendanceThresholdPercent = 75
 
 		rows, err := conn.Query(r.Context(), `
 			SELECT s.student_id
@@ -84,7 +87,7 @@ func ClearanceToken(pool *pgxpool.Pool) http.HandlerFunc {
 			WHERE s.unit_id   = $1
 			  AND s.tenant_id = $2
 			  AND s.attendance_percentage >= $3`,
-			req.UnitID, tenantID, threshold)
+			req.UnitID, tenantID, attendanceThresholdPercent)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 			return

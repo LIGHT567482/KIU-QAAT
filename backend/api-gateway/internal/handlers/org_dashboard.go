@@ -200,8 +200,8 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		args = []interface{}{tenantID}
 		_ = pool.QueryRow(r.Context(), `
 			SELECT ROUND(COALESCE(AVG(sas.attendance_percentage),0), 1),
-			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < t.attendance_threshold),
-			       MAX(t.attendance_threshold)
+			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */),
+			       MAX(75 /* fixed: internal/policy.AttendanceThresholdPercent */)
 			FROM student_attendance_summary sas
 			JOIN students_extended se ON se.student_id = sas.student_id AND se.tenant_id = sas.tenant_id
 			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
@@ -266,8 +266,8 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(c.name, se.course_id), COALESCE(c.department,''), COALESCE(c.school,''),
 			       sas.unit_id, COALESCE(cu.name, sas.unit_id),
 			       sas.sessions_held, sas.sessions_attended, sas.attendance_percentage,
-			       t.attendance_threshold,
-			       GREATEST(0, CEIL(t.attendance_threshold::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int
+			       75 /* fixed: internal/policy.AttendanceThresholdPercent */,
+			       GREATEST(0, CEIL(75 /* fixed: internal/policy.AttendanceThresholdPercent */::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int
 			FROM student_attendance_summary sas
 			JOIN students_extended se ON se.student_id = sas.student_id AND se.tenant_id = sas.tenant_id
 			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
@@ -275,7 +275,7 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 			JOIN tenants t ON t.tenant_id = sas.tenant_id
 			WHERE sas.tenant_id = $1
 			  AND se.enrollment_status = 'ACTIVE'
-			  AND sas.attendance_percentage < t.attendance_threshold` + s.whereScope(&args)
+			  AND sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */` + s.whereScope(&args)
 
 		if course := strings.TrimSpace(r.URL.Query().Get("course")); course != "" {
 			args = append(args, course)

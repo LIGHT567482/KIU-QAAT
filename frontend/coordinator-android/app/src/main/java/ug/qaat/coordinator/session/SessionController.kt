@@ -25,6 +25,16 @@ import java.util.UUID
  * synced package (FK attendance_logs→sessions) — see BUILD_AND_TEST.md "central session".
  */
 object SessionController {
+    /**
+     * Minutes after a lecture's timetabled END that its session closes itself.
+     *
+     * Institution policy, fixed. The server carries the same number in
+     * internal/policy.AutoKillGraceMinutes; the tenant's old configurable
+     * `auto_kill_minutes` was shipped in the manifest and never read here, so the
+     * value on this line has always been the one that actually applied.
+     */
+    private const val AUTO_CLOSE_GRACE_MIN = 15
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var ticker: Job? = null
 
@@ -92,9 +102,18 @@ object SessionController {
         val unit = m.units.firstOrNull { it.unitId == unitId }
         val unitName = unit?.unitName?.takeIf { it.isNotBlank() } ?: unitId
         val cohort = AppState.cohortLabel?.takeIf { it.isNotBlank() } ?: ""
-        // Auto-close deadline: scheduled duration (fallback 120m) + 5m grace after the hour it runs.
+        // Auto-close deadline: 15 minutes after the lecture was timetabled to END.
+        //
+        // Anchored to the end, not the start. Fifteen minutes after the START would
+        // close a two-hour lecture at 08:15 and take the rest of its attendance with
+        // it. Fifteen after the end lets the lecture run and then shuts the session
+        // promptly, so nothing can be added to it afterwards — which is the whole
+        // point of an auto-kill.
+        //
+        // A unit with no timetabled length falls back to two hours rather than closing
+        // immediately. Matches AutoKillGraceMinutes in the gateway's internal/policy.
         val durationMin = (unit?.durationMinutes?.takeIf { it > 0 } ?: 120)
-        autoCloseAtMillis = System.currentTimeMillis() + (durationMin + 5) * 60_000L
+        autoCloseAtMillis = System.currentTimeMillis() + (durationMin + AUTO_CLOSE_GRACE_MIN) * 60_000L
         server.setLive(
             InRoomServer.Live(
                 session = session,

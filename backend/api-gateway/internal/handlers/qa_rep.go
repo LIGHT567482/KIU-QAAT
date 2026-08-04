@@ -50,8 +50,8 @@ type qaScope struct {
 	// hold only the first — so the rest of their institution was not forbidden,
 	// it was absent, which reads as an empty page rather than a missing permission.
 	Schools []string `json:"schools,omitempty"`
-	Name       string `json:"full_name"`
-	StaffID    string `json:"staff_id"`
+	Name    string   `json:"full_name"`
+	StaffID string   `json:"staff_id"`
 	// Unscoped is true for the oversight roles (DQA/QA officer/VC/admin) that read every
 	// submission rather than one department's.
 	Unscoped bool `json:"unscoped"`
@@ -247,15 +247,15 @@ func QARepDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			type deptRow struct {
 				Department string `json:"department"`
 				School     string `json:"school"`
-	// Schools is every college a QA school handler covers (migration 075). One
-	// handler is routinely given several, and the single School field above could
-	// hold only the first — so the rest of their institution was not forbidden,
-	// it was absent, which reads as an empty page rather than a missing permission.
-	Schools []string `json:"schools,omitempty"`
-				Lecturers  int    `json:"lecturers"`
-				Patrolled  int    `json:"patrolled"`
-				Taught     int    `json:"taught"`
-				LastReport string `json:"last_report,omitempty"`
+				// Schools is every college a QA school handler covers (migration 075). One
+				// handler is routinely given several, and the single School field above could
+				// hold only the first — so the rest of their institution was not forbidden,
+				// it was absent, which reads as an empty page rather than a missing permission.
+				Schools    []string `json:"schools,omitempty"`
+				Lecturers  int      `json:"lecturers"`
+				Patrolled  int      `json:"patrolled"`
+				Taught     int      `json:"taught"`
+				LastReport string   `json:"last_report,omitempty"`
 			}
 			out := []deptRow{}
 			for rows.Next() {

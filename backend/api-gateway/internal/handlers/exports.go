@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/policy"
 )
 
 // ─── PDF Audit Report ─────────────────────────────────────────────────────────
@@ -147,9 +148,9 @@ func DQAEligibilityCSV(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
-		var threshold int
-		conn.QueryRow(r.Context(), `SELECT attendance_threshold FROM tenants WHERE tenant_id = $1`, tenantID).
-			Scan(&threshold) //nolint:errcheck
+		// Fixed institution-wide — see internal/policy. Previously read per tenant,
+		// which meant a failed query left it at zero and marked everybody eligible.
+		threshold := policy.AttendanceThresholdPercent
 
 		rows, err := conn.Query(r.Context(), `
 			SELECT s.student_id, se.full_name, se.email,

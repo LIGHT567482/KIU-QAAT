@@ -43,16 +43,27 @@ export default function AdminSettings() {
         Daily Manifest cache is invalidated automatically.
       </p>
 
-      <div style={{ display: 'grid', gap: 20 }}>
+      {/* The attendance threshold and the auto-kill timer are FIXED institution-wide
+          (backend internal/policy). They are shown as facts rather than as a form,
+          because a field that silently discards what is typed into it is worse than
+          no field. The editors are commented out below, not deleted, so restoring
+          per-tenant policy is an edit — the tenants columns are still there.
+
         <Field label="Attendance threshold (%)" hint="Fixed at a 75% floor — can be raised, never set below 75."
           value={form.attendance_threshold} min={75} max={100}
           onChange={v => setForm(f => f && ({ ...f, attendance_threshold: Math.max(75, v) }))} />
-        <Field label="Check-in window (minutes)" hint="How long students can scan after gate-open"
-          value={form.checkin_window_minutes} min={10} max={360}
-          onChange={v => setForm(f => f && ({ ...f, checkin_window_minutes: v }))} />
         <Field label="Auto-kill timer (minutes)" hint="Session auto-closes this many minutes after initialisation"
           value={form.auto_kill_minutes} min={30} max={480}
           onChange={v => setForm(f => f && ({ ...f, auto_kill_minutes: v }))} />
+      */}
+      <div style={{ display: 'grid', gap: 20 }}>
+        <FixedFact label="Attendance threshold" value="75%"
+          hint="Institution policy. A student below this is ineligible to sit exams." />
+        <FixedFact label="Auto-close" value="15 minutes after the timetabled end"
+          hint="A session closes itself 15 minutes after the lecture was due to finish." />
+        <Field label="Check-in window (minutes)" hint="How long students can scan after gate-open"
+          value={form.checkin_window_minutes} min={10} max={360}
+          onChange={v => setForm(f => f && ({ ...f, checkin_window_minutes: v }))} />
       </div>
 
       {saved     && <div style={successBox}>Saved — manifest cache cleared.</div>}
@@ -63,6 +74,22 @@ export default function AdminSettings() {
       </button>
 
       <SessionWindowEditor />
+    </div>
+  )
+}
+
+// A policy value that is no longer editable. Rendered like a Field so the page
+// still reads as one list of settings rather than a form with holes in it.
+function FixedFact({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{label}</div>
+      <div style={{
+        padding: '8px 12px', borderRadius: 8, fontSize: 14, fontWeight: 700,
+        background: 'var(--surface-2,#f1f5f9)', border: '1px solid var(--border,#e2e8f0)',
+        color: 'var(--text,#0f172a)', display: 'inline-block',
+      }}>{value}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{hint}</div>
     </div>
   )
 }

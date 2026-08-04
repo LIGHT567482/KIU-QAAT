@@ -109,8 +109,8 @@ func VCOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		var eligible, ineligible int
 		conn.QueryRow(r.Context(), `
 			SELECT
-			  COUNT(*) FILTER (WHERE attendance_percentage >= (SELECT attendance_threshold FROM tenants WHERE tenant_id = $1)),
-			  COUNT(*) FILTER (WHERE attendance_percentage <  (SELECT attendance_threshold FROM tenants WHERE tenant_id = $1))
+			  COUNT(*) FILTER (WHERE attendance_percentage >= 75 /* fixed: internal/policy.AttendanceThresholdPercent */),
+			  COUNT(*) FILTER (WHERE attendance_percentage <  75 /* fixed: internal/policy.AttendanceThresholdPercent */)
 			FROM student_attendance_summary WHERE tenant_id = $1`, tenantID).
 			Scan(&eligible, &ineligible) //nolint:errcheck
 
@@ -527,7 +527,7 @@ func GetEligibility(pool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := conn.Query(r.Context(), `
 			SELECT s.unit_id, s.unit_name,
 			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
-			       t.attendance_threshold
+			       75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			FROM student_attendance_summary s
 			JOIN tenants t ON t.tenant_id = s.tenant_id
 			WHERE s.student_id = $1 AND s.tenant_id = $2`, studentID, tenantID)
@@ -617,7 +617,7 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT s.unit_id, s.unit_name, s.sessions_held, s.sessions_attended,
-			       s.attendance_percentage, t.attendance_threshold
+			       s.attendance_percentage, 75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			FROM student_attendance_summary s
 			JOIN tenants t ON t.tenant_id = s.tenant_id
 			WHERE s.student_id = $1 AND s.tenant_id = $2`, reg, tenantID)
