@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
-const API      = process.env.BASE_URL ?? 'http://localhost:8443'
-const TENANT_A = 'a0000000-0000-0000-0000-000000000001'
+const API      = process.env.BASE_URL ?? 'https://localhost:8443'
+const TENANT_A = 'a1000000-0000-0000-0000-000000000001'  // Alpha University (db/seeds/001)
 
 // Helper: obtain a JWT for API tests.
 async function getToken(request: Parameters<typeof test.beforeEach>[0]['request'], role: 'QA_OFFICER' | 'COORDINATOR') {

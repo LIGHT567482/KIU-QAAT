@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -406,9 +407,36 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // resolveBindingKey returns the coordinator's device binding key in plaintext,
 // generating and persisting one (encrypted) on first login. The user_id is used
 // as AAD so a stored key cannot be transplanted onto a different user.
+//
+// AN UNDECRYPTABLE STORED KEY RE-ISSUES RATHER THAN FAILING. If the stored
+// ciphertext cannot be opened — KEY_ENCRYPTION_KEY was rotated, the row was
+// written under a different key, the value was corrupted — the previous code
+// returned the error and the caller answered 500 "could not establish device
+// binding". That is unrecoverable by the person: the coordinator cannot sign in
+// AT ALL, on any device, and no screen in the system can clear it. Observed on a
+// real database, where it locked the account permanently.
+//
+// The tradeoff is deliberate and worth stating. A new binding key means any
+// sealed session package still queued on that phone can never be decrypted by
+// sync-receiver, so unsynced attendance is lost. But a coordinator who cannot log
+// in cannot sync those packages either — they are stranded under both behaviours.
+// Re-issuing at least lets them keep working; failing closed strands the data AND
+// bricks the account.
+//
+// It is logged at ERROR because the plausible cause is a misconfigured
+// KEY_ENCRYPTION_KEY on the service, and if that is what happened this will fire
+// for every coordinator in turn. That pattern in the logs is the signal to fix
+// the key rather than to let the whole institution silently re-key itself.
 func (h *AuthHandler) resolveBindingKey(ctx context.Context, user *models.User) (string, error) {
 	if user.DeviceBindingKeyEnc != nil && *user.DeviceBindingKeyEnc != "" {
-		return crypto.DecryptWithMasterKey(*user.DeviceBindingKeyEnc, user.UserID)
+		key, err := crypto.DecryptWithMasterKey(*user.DeviceBindingKeyEnc, user.UserID)
+		if err == nil {
+			return key, nil
+		}
+		slog.Error("device binding key could not be decrypted — re-issuing; "+
+			"if this repeats across users, KEY_ENCRYPTION_KEY is wrong for this database",
+			"user_id", user.UserID, "error", err)
+		// fall through and mint a replacement
 	}
 	key, err := crypto.GenerateBindingKey()
 	if err != nil {
