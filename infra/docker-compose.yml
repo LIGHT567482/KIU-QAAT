@@ -100,8 +100,17 @@ services:
       INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:-changeme_internal_svc_key}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      # Daily session window (08:00–17:00) is evaluated in local time.
+      # Civil time. internal/clock reads INSTITUTION_TZ; TZ pins the container (and
+      # therefore the Postgres session timezone) to match, so SQL's CURRENT_DATE and
+      # Go's clock.Today() cannot disagree about what day it is.
       TZ: ${TZ:-Africa/Kampala}
+      INSTITUTION_TZ: ${INSTITUTION_TZ:-Africa/Kampala}
+      # Where the scheduled jobs send employee alerts (email + WhatsApp). The default
+      # in code is the same value; declared here so it is visible and overridable.
+      NOTIFICATION_URL: ${NOTIFICATION_URL:-http://notification-service:3004}
+      # Guards /internal/cron/*. Blank means that endpoint 401s everything, which is
+      # fine — the gateway runs its own in-process scheduler and does not need it.
+      CRON_SECRET: ${CRON_SECRET:-}
       # WebAuthn relying-party identity for lecturer biometric passkeys. RP_ID
       # MUST be a hostname (browsers reject bare IPs); RP_ORIGINS is the https origin.
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
@@ -178,6 +187,15 @@ services:
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-qaat.platform}
       VAPID_PUBLIC_KEY:  ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # WhatsApp for the employee attendance alerts. All blank by default, which
+      # makes sendWhatsApp log instead of send — the flow still works end to end,
+      # and email is unaffected. See .env for what each provider needs.
+      WHATSAPP_PROVIDER:    ${WHATSAPP_PROVIDER:-}
+      TWILIO_ACCOUNT_SID:   ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN:    ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
+      META_PHONE_NUMBER_ID: ${META_PHONE_NUMBER_ID:-}
+      META_ACCESS_TOKEN:    ${META_ACCESS_TOKEN:-}
     ports:
       - "3004:3004"
     depends_on:

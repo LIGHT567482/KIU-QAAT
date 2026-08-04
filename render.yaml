@@ -74,6 +74,11 @@ services:
       # but without it set, that endpoint 401s everything, which reads as broken.
       - key: CRON_SECRET
         sync: false
+      # The scheduled employee alerts POST here. The in-code default is the compose
+      # service name, which does not resolve on Render — so this is required, not
+      # optional, and a missing value means the alerts silently go nowhere.
+      - key: NOTIFICATION_URL
+        value: https://kiu-qaat-notify.onrender.com
       - key: PORT
         value: "8443"
       - key: ENVIRONMENT
@@ -278,6 +283,26 @@ services:
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY
+        sync: false
+      # WhatsApp for the employee attendance alerts (late/early check-in, check-out
+      # reminder). Employees are non-teaching staff with no dashboard account, so
+      # email and WhatsApp are the only channels that reach them.
+      #
+      # Leave WHATSAPP_PROVIDER blank and sendWhatsApp LOGS each message instead of
+      # sending it — a deliberate no-op, so the flow works end to end without
+      # credentials and email is unaffected. Set it to `twilio` or `meta` and fill in
+      # that provider's pair to light it up, with no redeploy of anything else.
+      - key: WHATSAPP_PROVIDER
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: META_ACCESS_TOKEN
         sync: false
 
 # ─── Shared env var group ────────────────────────────────────────────────────

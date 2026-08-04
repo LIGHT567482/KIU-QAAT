@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -78,9 +79,14 @@ func EmployeeNoShows(adminPool *pgxpool.Pool) http.HandlerFunc {
 // notifyURL is the notification-service base (email + WhatsApp fan-out).
 func notifyURL() string {
 	if u := os.Getenv("NOTIFICATION_URL"); u != "" {
-		return u
+		return strings.TrimRight(u, "/")
 	}
-	return "http://notification-service:8080"
+	// :3004, not :8080. The notification-service has always listened on 3004 (its
+	// own PORT default, the compose port mapping and the Render blueprint all agree),
+	// so this fallback pointed at a port nothing was on — and since delivery is
+	// best-effort and failures are swallowed, a no-show notification simply never
+	// arrived and nothing said so.
+	return "http://notification-service:3004"
 }
 
 // postAbsentees sends the no-shows to the notification-service. Best-effort; returns (emailed?, err).
