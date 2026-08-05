@@ -87,8 +87,7 @@ fun PatrolRoleApp() {
                     ) else TopAppBarDefaults.topAppBarColors(),
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            BrandLogo(AppState.branding, size = 30); Spacer(Modifier.width(8.dp))
-                            Text("KIU QAAT", fontWeight = FontWeight.Bold)
+                            BrandHeader(AppState.branding)
                         }
                     },
                     actions = {

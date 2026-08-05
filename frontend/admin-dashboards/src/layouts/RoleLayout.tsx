@@ -224,7 +224,14 @@ function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
                 height: 64, width: 64, borderRadius: 6, background: 'var(--brand)',
                 color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700,
               }}>{name.slice(0, 1)}</div>}
-          <strong style={{ fontSize: 16 }}>{name}</strong>
+          {/* The product beside the mark, then the institution beneath it. The header used to
+              name only the institution, so every dashboard said whose system it was and none of
+              them said what it was — while the browser tab said "KIU QAAT". Same order as the
+              phone app's BrandHeader, so the two read as one system. */}
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ fontSize: 17, display: 'block', lineHeight: 1.15 }}>KIU QAAT</strong>
+            <span style={{ fontSize: 11, opacity: .8, display: 'block', marginTop: 2 }}>{name}</span>
+          </div>
         </div>
         {brand?.motto && <div style={{ fontSize: 11, opacity: .75, marginTop: 6, fontStyle: 'italic' }}>{brand.motto}</div>}
         <div style={{ fontSize: 12, opacity: .75, marginTop: 4 }}>{role.replace('_', ' ')}</div>

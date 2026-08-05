@@ -47,7 +47,9 @@ fun StudentPortalScreen(regNo: String?, onClose: () -> Unit) {
                     navigationIconContentColor = onNav, actionIconContentColor = onNav,
                 ) else TopAppBarDefaults.topAppBarColors(),
                 navigationIcon = { IconButton(onClick = onClose) { BarIcon(Icons.Filled.ArrowBack, "Back", onNav ?: MaterialTheme.colorScheme.primary) } },
-                title = { Text("Student portal", fontWeight = FontWeight.Bold) },
+                // Was the bare words "Student portal" — the one screen a student reaches from
+                // outside the app, and the only one that never said whose system it was.
+                title = { BrandHeader(AppState.branding, compact = true) },
                 actions = {
                     TextButton(onClick = {
                         // Fallback: open in the phone's browser. Copy the reg number first so the

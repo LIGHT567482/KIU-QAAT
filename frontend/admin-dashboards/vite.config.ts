@@ -12,8 +12,18 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       manifest: {
-        name: 'QAAT Admin', short_name: 'QAAT Admin',
-        theme_color: '#1e293b', background_color: '#f1f5f9', display: 'standalone', start_url: '/',
+        // Named and iconed like every other surface. The manifest carried NO icons at all, so
+        // installing this to a home screen produced a blank tile — and the theme colour was a
+        // slate grey that belonged to nothing, rather than the institution's green.
+        name: 'KIU QAAT', short_name: 'KIU QAAT',
+        description: 'Kampala International University — Quality Assurance Attendance Tracker',
+        theme_color: '#1a7a3f', background_color: '#f0fdf4', display: 'standalone', start_url: '/',
+        icons: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          // "maskable" lets Android crop the mark to its own shape without clipping the logo.
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],

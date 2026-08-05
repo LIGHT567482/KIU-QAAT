@@ -114,21 +114,35 @@ private fun rememberDataUrlBitmap(url: String): androidx.compose.ui.graphics.Ima
     }.getOrNull()
 }
 
-/** Logo + full institution name, for the app bar. The name uses a small size and wraps
- *  to two lines so the WHOLE tenant name stays visible (no truncation). */
+/**
+ * The app bar's identity: the institution logo, then "KIU QAAT", then the institution name.
+ *
+ * ONE header for every role, because there were four. The coordinator and student bars showed the
+ * logo with the tenant name; the lecturer and patroller bars showed the logo with "KIU QAAT"; and
+ * the student portal showed the words "Student portal" with no logo at all. Four bars meant the
+ * product was recognisable on some screens and anonymous on others, and the one screen a student
+ * is sent to from outside the app was the anonymous one.
+ *
+ * The product name is stated even when branding has loaded, rather than only as a fallback — an
+ * institution's own name on its own screen tells you whose it is, not what it is.
+ *
+ * [compact] drops the secondary line for bars that are already carrying a lot.
+ */
 @Composable
-fun BrandHeader(branding: BrandingClient.Branding?) {
+fun BrandHeader(branding: BrandingClient.Branding?, compact: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         BrandLogo(branding, size = 30)
         Spacer(Modifier.width(8.dp))
         Column {
             Text(
-                branding?.name ?: "KIU QAAT",
-                fontSize = 13.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                "KIU QAAT",
+                fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 17.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            branding?.motto?.takeIf { it.isNotBlank() }?.let {
-                Text(it, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // The institution beneath the product, wrapping to two lines so a long tenant
+            // name stays whole rather than being cut off mid-word.
+            if (!compact) branding?.name?.takeIf { it.isNotBlank() }?.let {
+                Text(it, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }

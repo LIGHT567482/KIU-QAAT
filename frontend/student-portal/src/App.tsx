@@ -114,7 +114,10 @@ export default function App() {
             ? <img src={brand.logo_url} alt="" style={{ height: 44, width: 44, objectFit: 'contain', background: '#fff', borderRadius: 6, padding: 2, flexShrink: 0 }} />
             : <div style={{ height: 44, width: 44, borderRadius: 6, background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, flexShrink: 0 }}>{title.slice(0, 1)}</div>}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
+            {/* Product first, institution under it — the same order as the dashboards and the
+                phone app, so a student who meets all three meets one system. */}
+            <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>KIU QAAT</div>
+            <div style={{ fontSize: 11, opacity: .9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
             {brand?.motto && <div style={{ fontSize: 11, opacity: .85 }}>{brand.motto}</div>}
           </div>
         </div>
