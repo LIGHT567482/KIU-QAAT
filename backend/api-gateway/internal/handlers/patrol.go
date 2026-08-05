@@ -9,10 +9,15 @@ package handlers
 //
 // Role: QA_PATROLLER. Everything is tenant-scoped via RLS.
 //
-// On top of the role check, every route here is bound to ONE handset. A patrol record states that
-// a named lecturer was or was not teaching and feeds the QA reports as the independent second
-// record, so possession of a valid token is deliberately not enough: the call must also come from
-// the phone the patroller claimed. See migration 069 for why the binding is shaped as it is.
+// THE ONE-HANDSET LOCK IS OFF. Every route here used to require that the call come from the phone
+// the patroller had claimed (migration 069). That is commented out in checkPatrolDevice and
+// BindPatrolDevice, and migration 078 drops the matching unique index — a patroller can now work
+// from any phone, and a phone can be used by more than one patroller.
+//
+// The handset is still RECORDED on every call, so which phone filed a tick is answerable and the
+// admin binding screens keep working. But it is no longer a factor: a patrol record accuses a
+// named lecturer of not teaching, and the patrol PIN (migration 071) is now the only thing
+// standing behind that accusation.
 
 import (
 	"encoding/json"
@@ -23,7 +28,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgconn"
+	// pgconn: only used by the one-device lock's DEVICE_IN_USE branch, which is
+	// commented out in BindPatrolDevice. Re-add this import when restoring it.
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/clock"
@@ -37,27 +43,55 @@ func deviceFingerprint(r *http.Request) string {
 
 var errDeviceMismatch = errors.New("device mismatch")
 
-// checkPatrolDevice verifies that this request came from the handset bound to this patroller.
+// checkPatrolDevice records which handset a patrol call came from.
 //
-// It never binds — binding is an explicit act, done once by BindPatrolDevice. A patroller with no
-// binding at all is refused rather than silently trusted, because the sync endpoint is exactly
-// where a lifted token would be replayed, and "no binding yet" is indistinguishable from "binding
-// was released because the phone was stolen".
+// THE ONE-DEVICE LOCK IS COMMENTED OUT. It used to refuse any request whose
+// X-Device-Fingerprint did not match the handset bound to this patroller, and refuse
+// a patroller with no binding at all. That is off: a patroller who changes phone,
+// borrows one, reinstalls the app, or whose fingerprint simply changes is otherwise
+// dead in the water mid-round, and only an administrator can free them.
+//
+// What survives is the RECORD. The binding row is still written and its last_seen_at
+// still updated, so "which phone filed this tick" remains answerable and the admin
+// screens (ListPatrolBindings / ReleasePatrolBinding) keep working. Only the refusal
+// is gone.
+//
+// WHAT THIS COSTS, stated plainly: the handset was one of the two factors behind a
+// patrol tick, and a tick is an accusation that a named lecturer was or was not
+// teaching. Without it, a lifted token can be replayed from any phone. The patrol PIN
+// (migration 071) is now the only thing standing between a shared password and a
+// false accusation — it is verified server-side, so it still holds, but it is holding
+// alone.
+//
+// To restore: un-comment the block below and drop the `return nil`.
 func checkPatrolDevice(r *http.Request, conn *pgxpool.Conn, tenantID, userID string) error {
 	fp := deviceFingerprint(r)
-	if fp == "" {
-		return errDeviceMismatch
+
+	/*
+		// ── one patroller, one handset (disabled) ─────────────────────────────────
+		if fp == "" {
+			return errDeviceMismatch
+		}
+		var bound string
+		err := conn.QueryRow(r.Context(),
+			`SELECT device_fingerprint_hash FROM patroller_device_bindings
+			  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound)
+		if err != nil || bound == "" || bound != fp {
+			return errDeviceMismatch
+		}
+	*/
+
+	// Keep the trail: upsert this handset against the patroller so the record of which
+	// phone is in use stays current even though nothing is refused. Best-effort — a
+	// failure here must not block a round.
+	if fp != "" {
+		_, _ = conn.Exec(r.Context(), `
+			INSERT INTO patroller_device_bindings (user_id, tenant_id, device_fingerprint_hash, last_seen_at)
+			VALUES ($2::uuid, $1, $3, now())
+			ON CONFLICT (user_id) DO UPDATE
+			   SET device_fingerprint_hash = EXCLUDED.device_fingerprint_hash,
+			       last_seen_at = now()`, tenantID, userID, fp)
 	}
-	var bound string
-	err := conn.QueryRow(r.Context(),
-		`SELECT device_fingerprint_hash FROM patroller_device_bindings
-		  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound)
-	if err != nil || bound == "" || bound != fp {
-		return errDeviceMismatch
-	}
-	_, _ = conn.Exec(r.Context(),
-		`UPDATE patroller_device_bindings SET last_seen_at = now()
-		  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
 	return nil
 }
 
@@ -100,35 +134,54 @@ func BindPatrolDevice(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Already bound? Only the same handset may continue.
-		var bound string
-		switch err := conn.QueryRow(r.Context(),
-			`SELECT device_fingerprint_hash FROM patroller_device_bindings
-			  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound); {
-		case err == nil && bound == fp:
-			_, _ = conn.Exec(r.Context(),
-				`UPDATE patroller_device_bindings SET last_seen_at = now()
-				  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
-			writeJSON(w, http.StatusOK, map[string]interface{}{"status": "BOUND", "changed": false})
-			return
-		case err == nil:
-			writeDeviceRefusal(w)
-			return
-		}
-
-		// Unbound account: claim the handset, unless another patroller already holds it.
-		//
-		// Only a unique-constraint violation means "taken" — anything else is our problem, not the
-		// patroller's, and must not be reported to them as a device conflict they cannot resolve.
-		if _, err := conn.Exec(r.Context(), `
-			INSERT INTO patroller_device_bindings (user_id, tenant_id, device_fingerprint_hash)
-			VALUES ($2::uuid, $1, $3)`, tenantID, userID, fp); err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				writeJSON(w, http.StatusForbidden, errBody("DEVICE_IN_USE",
-					"This phone is already registered to another patrol account. Each patroller needs their own handset."))
+		/*
+			// ── the one-device lock (disabled — see checkPatrolDevice) ────────────────
+			//
+			// Already bound? Only the same handset may continue.
+			var bound string
+			switch err := conn.QueryRow(r.Context(),
+				`SELECT device_fingerprint_hash FROM patroller_device_bindings
+				  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID).Scan(&bound); {
+			case err == nil && bound == fp:
+				_, _ = conn.Exec(r.Context(),
+					`UPDATE patroller_device_bindings SET last_seen_at = now()
+					  WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
+				writeJSON(w, http.StatusOK, map[string]interface{}{"status": "BOUND", "changed": false})
+				return
+			case err == nil:
+				writeDeviceRefusal(w)
 				return
 			}
+
+			// Unbound account: claim the handset, unless another patroller already holds it.
+			//
+			// Only a unique-constraint violation means "taken" — anything else is our problem, not
+			// the patroller's, and must not be reported to them as a device conflict they cannot
+			// resolve.
+			if _, err := conn.Exec(r.Context(), `
+				INSERT INTO patroller_device_bindings (user_id, tenant_id, device_fingerprint_hash)
+				VALUES ($2::uuid, $1, $3)`, tenantID, userID, fp); err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+					writeJSON(w, http.StatusForbidden, errBody("DEVICE_IN_USE",
+						"This phone is already registered to another patrol account. Each patroller needs their own handset."))
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+				return
+			}
+		*/
+
+		// Binding is now a RECORD, not a claim: whichever handset the patroller is on
+		// becomes the one on file. Nothing is refused — not a second phone, not a phone
+		// another patroller has used. The app still calls this on entry, so the endpoint
+		// keeps its contract and older builds continue to work unchanged.
+		if _, err := conn.Exec(r.Context(), `
+			INSERT INTO patroller_device_bindings (user_id, tenant_id, device_fingerprint_hash, last_seen_at)
+			VALUES ($2::uuid, $1, $3, now())
+			ON CONFLICT (user_id) DO UPDATE
+			   SET device_fingerprint_hash = EXCLUDED.device_fingerprint_hash,
+			       last_seen_at = now()`, tenantID, userID, fp); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
