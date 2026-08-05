@@ -294,12 +294,15 @@ private fun StudentProgress(reloadKey: Int) {
             if (org.isNotBlank()) Text(org, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(12.dp))
+        // Same reason as the patrol round: the LazyColumn body is invoked after this
+        // composition returns, so it must close over a value, not over the state holder.
+        val units = data?.units
         when {
             loading -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
-            error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
-            data?.units.isNullOrEmpty() -> Text("No attendance recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            error != null -> Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            units.isNullOrEmpty() -> Text("No attendance recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(data!!.units) { u ->
+                items(units) { u ->
                     val eligible = u.status == "ELIGIBLE"
                     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
                         Column(Modifier.fillMaxWidth().padding(12.dp)) {

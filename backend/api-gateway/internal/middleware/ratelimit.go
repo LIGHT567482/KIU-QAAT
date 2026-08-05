@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -69,19 +70,43 @@ func CoordinatorRateLimit() func(http.Handler) http.Handler {
 // to blunt scripted abuse / room-code brute force (the signed-QR gate already
 // restricts attempts to holders of a real, enrolled QR).
 func PublicIPRateLimit(perSec rate.Limit, burst int) func(http.Handler) http.Handler {
+	type entry struct {
+		lim  *rate.Limiter
+		seen time.Time
+	}
 	var (
-		mu  sync.Mutex
-		ips = make(map[string]*rate.Limiter)
+		mu   sync.Mutex
+		ips  = make(map[string]*entry)
+		next time.Time // when to sweep again
 	)
+	// Evict idle buckets. The map had no eviction, so every IP that ever touched a public
+	// endpoint kept a limiter for the life of the process — an unbounded map fed by the open
+	// internet, which is a slow leak on a long-running gateway. An IP idle for the full window
+	// has refilled its bucket to burst anyway, so forgetting it grants nothing.
+	const idleFor = 10 * time.Minute
+	sweep := func(now time.Time) {
+		if now.Before(next) {
+			return
+		}
+		next = now.Add(time.Minute)
+		for ip, e := range ips {
+			if now.Sub(e.seen) > idleFor {
+				delete(ips, ip)
+			}
+		}
+	}
 	get := func(ip string) *rate.Limiter {
 		mu.Lock()
 		defer mu.Unlock()
-		l, ok := ips[ip]
+		now := time.Now()
+		sweep(now)
+		e, ok := ips[ip]
 		if !ok {
-			l = rate.NewLimiter(perSec, burst)
-			ips[ip] = l
+			e = &entry{lim: rate.NewLimiter(perSec, burst)}
+			ips[ip] = e
 		}
-		return l
+		e.seen = now
+		return e.lim
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

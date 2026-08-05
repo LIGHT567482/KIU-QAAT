@@ -96,6 +96,39 @@ object Net {
         ssl to composite
     }
 
+    /**
+     * Run [call], and when the server answers 429 wait as it asked and try again.
+     *
+     * A whole institution shares one public IP on campus Wi-Fi, so the gateway's per-IP limit is
+     * in practice a per-CAMPUS limit: when a cohort looks at something together, the ones at the
+     * back are refused for no reason of their own. The server already says how long to wait —
+     * the Retry-After header exists precisely for this — and a client that ignores it turns a
+     * two-second wait into a failure the student sees. MEASURED against the live gateway
+     * (tests/load/storm, 5000 students at once): a client that gives up got 44% of them their
+     * attendance; a client that backs off got 100%.
+     *
+     * The jitter is not decoration. Without it every refused phone retries in the same instant
+     * and rebuilds the stampede that caused the refusal, which is how a brief shed becomes a
+     * sustained one.
+     */
+    suspend fun <T> retrying(
+        attempts: Int = 4,
+        call: suspend () -> io.ktor.client.statement.HttpResponse,
+        parse: suspend (io.ktor.client.statement.HttpResponse) -> T,
+    ): T {
+        var last: io.ktor.client.statement.HttpResponse? = null
+        repeat(attempts) { attempt ->
+            val r = call()
+            if (r.status.value != 429) return parse(r)
+            last = r
+            if (attempt == attempts - 1) return parse(r)
+            val after = r.headers["Retry-After"]?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+            val base = (after?.times(1000L) ?: 2000L) shl minOf(attempt, 3)
+            kotlinx.coroutines.delay(base + (0 until base / 2).random())
+        }
+        return parse(last!!)
+    }
+
     /** Turn a raw network exception into a calm, human message — no "Socket timeout has
      *  expired […socket_timeout=unknown] ms" jargon leaking to coordinators. */
     fun friendly(t: Throwable): String {

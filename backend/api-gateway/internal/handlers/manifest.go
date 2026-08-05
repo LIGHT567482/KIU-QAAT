@@ -48,6 +48,25 @@ type manifestSession struct {
 	SessionCode string `json:"session_code,omitempty"`
 }
 
+// manifestSlot is ONE row of the weekly timetable grid — one per day a unit runs.
+//
+// manifestSession carries only the EARLIEST slot of the week per unit (the LATERAL … LIMIT 1
+// below), which is all the attendance picker needs but is not a timetable: a unit taught Monday
+// and Thursday appeared once. The coordinator's grid was therefore complete online (it reads
+// /coordinator/overview, which returns the full grid) and quietly missing days offline — the one
+// state where the grid is the only copy they have. These rows are the same shape that endpoint
+// returns, so the offline grid is the online grid.
+type manifestSlot struct {
+	UnitID          string `json:"unit_id"`
+	UnitName        string `json:"unit_name"`
+	DayOfWeek       int    `json:"day_of_week"`
+	StartTime       string `json:"start_time"`
+	DurationMinutes int    `json:"duration_minutes"`
+	Room            string `json:"room"`
+	LecturerName    string `json:"lecturer_name"`
+	LecturerPhone   string `json:"lecturer_phone"`
+}
+
 type rosterEntry struct {
 	StudentIDHash string `json:"student_id_hash"`
 	// Reg-no + name so the coordinator can see WHO is absent (incl. never-present students) even
@@ -68,7 +87,10 @@ type dailyManifest struct {
 	GeneratedAt     string            `json:"generated_at"`
 	ExpiresAt       string            `json:"expires_at"`
 	Sessions        []manifestSession `json:"sessions"`
-	Policy          manifestPolicy    `json:"policy"`
+	// Slots is the FULL weekly grid — every day each unit runs, not one row per unit.
+	// The phone caches it so its Timetable tab is complete with no signal.
+	Slots  []manifestSlot `json:"slots"`
+	Policy manifestPolicy `json:"policy"`
 	// StudentHashKey is the per-tenant secret the Coordinator uses to recompute
 	// keyed student-id hashes (HMAC-SHA256). Delivered over TLS and stored only
 	// inside the AES-encrypted manifest vault on the device (F-07).
@@ -309,26 +331,72 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	if sessions == nil {
 		sessions = []manifestSession{}
 	}
-	// Multi-coordinator daily codes: for each unit whose lecturer is shared across 2+ coordinators'
-	// offerings, attach that lecturer's unique daily 4-digit code (get-or-create). Cached per staff id.
-	// ONE code covering both lecturer + session: generated per lecturer per day, attached to each of
-	// that lecturer's sessions, only in the multi-coordinator case.
-	codeByStaff := map[string]string{}
+	// The shared-lecturer code, one per LECTURE.
+	//
+	// It used to be one code per lecturer per DAY. A lecturer covering an 08:00 and a 14:00
+	// lecture read out the same four digits for both, so a coordinator could start their 14:00
+	// room with digits overheard at 08:00 and the lecturer never had to arrive. The code is now
+	// keyed on the lecturer AND the hour they are teaching, so it starts that lecture and nothing
+	// else.
+	//
+	// Keyed on start time rather than on the unit, deliberately: the whole point of this code is
+	// that the same lecture is timetabled under DIFFERENT unit codes and sometimes different unit
+	// names in each cohort. What the sharing coordinators genuinely have in common is the lecturer
+	// and the hour, so that is the key. It follows that cohorts sharing a lecturer must be
+	// timetabled at the same start time — which is what "the lecturer is teaching them at once"
+	// means in the first place.
+	codeByLecture := map[string]string{}
 	for i := range sessions {
-		sid := sessions[i].LecturerStaffID
-		if sid == "" {
+		sid, start := sessions[i].LecturerStaffID, sessions[i].ScheduledStart
+		if sid == "" || start == "" {
 			continue
 		}
-		c, seen := codeByStaff[sid]
+		key := sid + "@" + start
+		c, seen := codeByLecture[key]
 		if !seen {
-			c = lecturerDailyCode(ctx, conn, tenantID, sid)
-			codeByStaff[sid] = c
+			c = lectureShareCode(ctx, conn, tenantID, sid, sessions[i].DayOfWeek, start)
+			codeByLecture[key] = c
 		}
 		sessions[i].SessionCode = c
 	}
 	// NB: the daily session-window gate is applied at the ManifestDaily handler
 	// (live, post-cache) so the cached body always carries the full session list;
 	// freezing an empty list here would survive a later reopening of the window.
+
+	// The full weekly grid for this offering — the same rows /coordinator/overview serves as
+	// "slots", so the phone's cached Timetable matches the online one day for day. Best-effort:
+	// the manifest's core job is attendance, and a grid that failed to build must not cost the
+	// coordinator their roster.
+	slots := make([]manifestSlot, 0)
+	if offeringID != "" {
+		sRows, sErr := conn.Query(ctx, `
+			SELECT s.unit_id, COALESCE(cu.name, s.unit_id), s.day_of_week,
+			       to_char(s.start_time,'HH24:MI'), COALESCE(s.duration_minutes, 0),
+			       COALESCE(NULLIF(s.room,''), s.venue_id, ''),
+			       COALESCE(NULLIF(l.full_name,''), la_l.full_name, ''),
+			       COALESCE(NULLIF(l.phone,''),     la_l.phone,     '')
+			FROM timetable_slots s
+			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
+			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id AND l.tenant_id = s.tenant_id
+			LEFT JOIN LATERAL (
+			    SELECT l2.full_name, l2.phone FROM lecturer_assignments la
+			    JOIN lecturers l2 ON l2.lecturer_id = la.lecturer_id AND l2.tenant_id = la.tenant_id
+			    WHERE la.unit_id = s.unit_id AND la.tenant_id = s.tenant_id
+			    ORDER BY la.academic_year DESC LIMIT 1
+			) la_l ON true
+			WHERE s.offering_id = $1::uuid AND s.tenant_id = $2
+			ORDER BY s.day_of_week, s.start_time`, offeringID, tenantID)
+		if sErr == nil {
+			for sRows.Next() {
+				var s manifestSlot
+				if sRows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime,
+					&s.DurationMinutes, &s.Room, &s.LecturerName, &s.LecturerPhone) == nil {
+					slots = append(slots, s)
+				}
+			}
+			sRows.Close()
+		}
+	}
 
 	roster := make(map[string][]rosterEntry)
 	for _, uid := range unitIDs {
@@ -374,6 +442,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		GeneratedAt:     now.Format(time.RFC3339),
 		ExpiresAt:       now.Truncate(24 * time.Hour).Add(24 * time.Hour).Format(time.RFC3339),
 		Sessions:        sessions,
+		Slots:           slots,
 		Policy:          policy,
 		StudentHashKey:  studentHashKey,
 		Roster:          roster,
@@ -381,28 +450,50 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	}, nil
 }
 
-// lecturerDailyCode returns the lecturer's unique daily 4-digit code IF that lecturer (by staff_id)
-// is the assigned lecturer for units in 2+ distinct offerings this tenant (the multi-coordinator
-// case) — otherwise "". The code is stable for the whole day (get-or-create), unique per tenant/day,
-// so every coordinator sharing the lecturer sees the SAME code. Best-effort: any DB error → "".
-func lecturerDailyCode(ctx context.Context, conn *pgxpool.Conn, tenantID, staffID string) string {
-	if staffID == "" {
+// lectureShareCode returns the 4-digit code for ONE lecture — this lecturer, this weekday, this
+// start time — IF that lecture is genuinely shared: timetabled for 2+ distinct offerings, i.e. 2+
+// coordinators, at the same hour. Otherwise "" (a single coordinator's lecturer just STARTs in the
+// room; no code is needed, and issuing one would only be a spare key lying around).
+//
+// The sharing test reads timetable_slots, and that is the fix for a bug that made this silently
+// useless in exactly the case it exists for. It used to count offerings through
+// lecturer_assignments ALONE — tenant-wide, with no day or time filter. Two consequences, both
+// bad: it issued codes for lecturers nobody was sharing today, and it issued NO code at all for a
+// lecturer attached to their lecture on the timetable slot itself (timetable_slots.lecturer_id)
+// rather than through an assignment. The manifest's own lecturer lookup resolves "the slot's own
+// lecturer, else the unit's assignment", so a slot-attached lecturer shows up by name on every
+// coordinator's timetable and then, at the moment two rooms needed to start, produced nothing.
+// Both attachment styles are in live use.
+//
+// The code is stable for the day (get-or-create) and identical for every coordinator sharing the
+// lecture, which is what lets a coordinator verify it with no internet: it reached their phone in
+// their own manifest. Best-effort — any DB error yields "", never a wrong code.
+func lectureShareCode(ctx context.Context, conn *pgxpool.Conn, tenantID, staffID string, dayOfWeek int, startTime string) string {
+	if staffID == "" || startTime == "" {
 		return ""
 	}
 	var offerings int
 	if err := conn.QueryRow(ctx, `
-		SELECT COUNT(DISTINCT o.offering_id)
-		FROM lecturer_assignments la
-		JOIN lecturers l   ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-		JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-		JOIN course_offerings o ON o.course_id = cu.course_id AND o.tenant_id = cu.tenant_id
-		WHERE la.tenant_id = $1 AND l.staff_id = $2`, tenantID, staffID).Scan(&offerings); err != nil {
+		SELECT COUNT(DISTINCT ts.offering_id)
+		FROM timetable_slots ts
+		JOIN lecturers l ON l.tenant_id = ts.tenant_id AND l.staff_id = $2
+		WHERE ts.tenant_id = $1
+		  AND ts.day_of_week = $3
+		  AND to_char(ts.start_time, 'HH24:MI') = $4
+		  AND ( ts.lecturer_id = l.lecturer_id
+		     OR ( ts.lecturer_id IS NULL AND EXISTS (
+		            SELECT 1 FROM lecturer_assignments la
+		            WHERE la.tenant_id = ts.tenant_id
+		              AND la.unit_id = ts.unit_id
+		              AND la.lecturer_id = l.lecturer_id) ) )`,
+		tenantID, staffID, dayOfWeek, startTime).Scan(&offerings); err != nil {
 		return ""
 	}
 	if offerings < 2 {
-		return "" // single coordinator → the normal on-hotspot START is enough; no code needed
+		return "" // one coordinator → the normal on-hotspot START is enough
 	}
-	return getOrCreateDailyCode(ctx, conn, tenantID, "lec:"+staffID)
+	// Subject includes the hour, so the same lecturer's next lecture gets a different code.
+	return getOrCreateDailyCode(ctx, conn, tenantID, fmt.Sprintf("lec:%s@%d:%s", staffID, dayOfWeek, startTime))
 }
 
 // getOrCreateDailyCode returns a stable 4-digit code for [subject] (e.g. "lec:<staff>" or

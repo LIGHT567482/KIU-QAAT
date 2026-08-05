@@ -104,7 +104,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturer Attendance', path: '/qa/lecturer-attendance' },
     { label: 'Manual Correction',   path: '/qa/correction' },
     { label: 'Coordinator Health',  path: '/qa/coordinator-health' },
-    { label: 'Device Reset',        path: '/qa/device-reset' },
+    { label: 'Device Resets',       path: '/qa/device-reset' },
     { label: 'Messages',            path: '/qa/messages' },
   ],
   COORDINATOR: [],

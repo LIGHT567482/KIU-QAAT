@@ -98,6 +98,12 @@ object SessionController {
         SessionService.session.set(SessionManager(session.sessionId).apply { open() })
 
         val dao = Graph.db.dao()
+        // reg-no → name for THIS unit's cohort, built once at open rather than per check-in: a
+        // full lecture theatre checks in inside a couple of minutes, and a Room query per arrival
+        // on the hub's request path is work the room can feel.
+        val nameByReg = roster
+            .filter { it.studentId.isNotBlank() && it.fullName.isNotBlank() }
+            .associate { it.studentId.trim().lowercase() to it.fullName }
         // Unit name + cohort for the student app's GET /session (so it shows what it's checking into).
         val unit = m.units.firstOrNull { it.unitId == unitId }
         val unitName = unit?.unitName?.takeIf { it.isNotBlank() } ?: unitId
@@ -142,13 +148,24 @@ object SessionController {
                 // Students may only check in once the lecturer has passed the START gate.
                 lecturerStarted = { gateState == GateState.STARTED },
                 onCheckin = { fields, result ->
-                    // Live-roster row: name/reg-no come from the scanned QR (the durable
-                    // ledger keeps the hash). The PRESENT attendance row is written by the validator.
+                    // Live-roster row: reg-no as typed (the durable ledger keeps the hash), and
+                    // the NAME looked up in the cached roster.
+                    //
+                    // The shipping check-in is a typed registration number — there is no QR to
+                    // carry a name — so this arrived blank and the coordinator watched a live
+                    // roster of bare numbers, unable to tell whether the person in front of them
+                    // was the one who had just checked in. The roster cached for this unit holds
+                    // the name; matching is case-insensitive and trimmed because a reg-no typed
+                    // on a phone is not typed the way it is stored.
+                    val typed = fields.studentId.trim()
+                    val name = fields.fullName.ifBlank {
+                        nameByReg[typed.lowercase()].orEmpty()
+                    }
                     dao.putPresentDisplay(
                         PresentDisplayEntity(
                             sessionId = session.sessionId,
-                            studentId = fields.studentId,
-                            fullName = fields.fullName,
+                            studentId = typed,
+                            fullName = name,
                             checkinTimestamp = Instant.now().toString(),
                             status = result.reason?.name ?: result.status.name,
                         )
@@ -162,10 +179,20 @@ object SessionController {
         startTicker()
     }
 
-    /** Multi-coordinator case: mark the assigned lecturer present when the lecturer is physically on
-     *  ANOTHER coordinator's hotspot and can't START here in person. Takes the ONE daily code (which
-     *  covers both the lecturer and the session), delivered offline in this unit's manifest. Returns
-     *  true if it matches — students may then check in exactly as if the lecturer had STARTed. */
+    /**
+     * Multi-coordinator case: mark the assigned lecturer present when they are physically on
+     * ANOTHER coordinator's hotspot and cannot START here in person.
+     *
+     * The code covers ONE LECTURE — this lecturer, this hour — and reached this phone in its own
+     * manifest, which is what lets it be checked with no signal at all: the coordinator in the
+     * next building is offline on their own hotspot and has never spoken to the hub the lecturer
+     * actually walked into. It is deliberately NOT keyed on the unit, because the same lecture is
+     * timetabled under different unit codes and often different unit names in each cohort; what
+     * the sharing coordinators have in common is the lecturer and the hour.
+     *
+     * Returns true if it matches — students may then check in exactly as if the lecturer had
+     * STARTed here, and they are validated against THIS coordinator's own cohort roster.
+     */
     fun startLecturerByCode(entered: String): Boolean {
         if (sessionCode.isBlank() || entered.trim() != sessionCode) return false
         if (gateState != GateState.STARTED) {

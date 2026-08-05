@@ -316,14 +316,34 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// The WHOLE WEEK, not just today.
+		//
+		// This used to be `WHERE ts.day_of_week = <today>`, and the phone cached whatever came
+		// back. A patroller whose last signal was Monday then walked Tuesday's rounds searching
+		// MONDAY's timetable — offline, with nothing on screen to say so, and every answer
+		// confidently wrong. A week of slots is a few hundred rows; the phone filters to the
+		// current weekday itself, so it is right on any day it is opened without signal.
 		iso := clock.ISOWeekday()
 		rows, err := conn.Query(r.Context(), `
 			SELECT ts.unit_id, COALESCE(cu.name, ts.unit_id), COALESCE(cu.course_id, ''),
 			       COALESCE(lec.staff_id, ''), COALESCE(lec.full_name, ''),
 			       COALESCE(NULLIF(ts.room,''), ts.venue_id, ''), COALESCE(ts.venue_id,''), ts.day_of_week,
-			       to_char(ts.start_time, 'HH24:MI'), COALESCE(ts.duration_minutes, 60)
+			       to_char(ts.start_time, 'HH24:MI'), COALESCE(ts.duration_minutes, 60),
+			       -- WHICH COHORT. PatrolSearch has always returned these; this query never did,
+			       -- and this is the one that fills the OFFLINE cache. So two intakes running the
+			       -- same unit at the same hour in different rooms arrived indistinguishable: the
+			       -- phone keyed them to the same cached slot and one silently replaced the other,
+			       -- and the tick uploaded with a blank offering, which collides with the other
+			       -- cohort's on the server's own ux_patrol_logs_slot. One lecture was unfindable
+			       -- and one carried a verdict from a room nobody had visited.
+			       COALESCE(ts.offering_id::text, ''),
+			       COALESCE(NULLIF(CONCAT_WS(' · ', c.name, o.session_type,
+			                                 'Yr' || o.study_year, 'Sem' || o.semester,
+			                                 NULLIF(o.intake, '')), ''), '')
 			FROM timetable_slots ts
 			JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
+			LEFT JOIN course_offerings o ON o.offering_id = ts.offering_id AND o.tenant_id = ts.tenant_id
+			LEFT JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
 			LEFT JOIN LATERAL (
 			    SELECT l.staff_id, l.full_name
 			    FROM lecturers l
@@ -335,8 +355,8 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 			               ORDER BY la.academic_year DESC LIMIT 1) ) )
 			    LIMIT 1
 			) lec ON true
-			WHERE ts.tenant_id = $1 AND ts.day_of_week = $2
-			ORDER BY ts.start_time`, tenantID, iso)
+			WHERE ts.tenant_id = $1
+			ORDER BY ts.day_of_week, ts.start_time`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -347,14 +367,20 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var s patrolSlot
 			if err := rows.Scan(&s.UnitID, &s.UnitName, &s.CourseCode, &s.LecturerStaffID,
-				&s.LecturerName, &s.Room, &s.RoomCode, &s.DayOfWeek, &s.StartTime, &s.DurationMinutes); err != nil {
+				&s.LecturerName, &s.Room, &s.RoomCode, &s.DayOfWeek, &s.StartTime, &s.DurationMinutes,
+				&s.OfferingID, &s.Cohort); err != nil {
 				continue
 			}
 			slots = append(slots, s)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"date":  time.Now().UTC().Format("2006-01-02"),
-			"slots": slots,
+			"date": time.Now().UTC().Format("2006-01-02"),
+			// Which weekday the server considers today (1=Mon…7=Sun). The phone filters the
+			// week's slots by its own calendar, but a handset with a wrong clock — common on
+			// the SIM-less phones this app runs on — would otherwise patrol the wrong day
+			// with no way to notice.
+			"day_of_week": iso,
+			"slots":       slots,
 		})
 	}
 }

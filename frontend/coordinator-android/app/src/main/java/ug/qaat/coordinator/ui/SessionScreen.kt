@@ -94,9 +94,10 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                 Modifier.padding(12.dp), textAlign = TextAlign.Center)
         }
 
-        // Multi-coordinator daily code: if THIS unit's lecturer is shared across coordinators today
-        // and hasn't STARTed here in person (they're in another coordinator's room), the coordinator
-        // enters the lecturer's daily 4-digit code (read out by the lecturer) to unlock check-in here.
+        // Shared-lecture code: if THIS unit's lecturer is teaching several cohorts at this hour and
+        // hasn't STARTed here in person (they are in another coordinator's room), the coordinator
+        // enters the 4-digit code the lecturer read out to unlock check-in here. It belongs to this
+        // lecture, not to the day — their next lecture has a different one.
         if (AppState.currentLecturerHasCode && !AppState.lecturerStartedHere) {
             Spacer(Modifier.height(8.dp))
             var code by remember { mutableStateOf("") }
@@ -109,12 +110,12 @@ fun SessionScreen(onOpenSession: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             code, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { code = v; codeErr = null } },
-                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer/session code") },
+                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer's code for this lecture") },
                         )
                         Spacer(Modifier.width(8.dp))
                         Button(enabled = code.length == 4, onClick = {
                             if (ug.qaat.coordinator.session.SessionController.startLecturerByCode(code)) codeErr = null
-                            else codeErr = "That code isn't right for this lecturer/session today."
+                            else codeErr = "That code isn't right for this lecturer's lecture at this hour."
                         }) { Text("Start") }
                     }
                     codeErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
@@ -127,7 +128,7 @@ fun SessionScreen(onOpenSession: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Code for other rooms teaching this lecturer now:", style = MaterialTheme.typography.labelSmall)
+                    Text("Code for the other rooms this lecturer is teaching this hour:", style = MaterialTheme.typography.labelSmall)
                     Text(c, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                     Text("Read this out — the other coordinator enters it to start their room.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
@@ -136,7 +137,7 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         }
         if (AppState.currentLecturerHasCode && AppState.lecturerStartedHere && AppState.currentSessionCode == null) {
             Spacer(Modifier.height(8.dp))
-            Text("✓ Lecturer marked present via daily code — students can check in.",
+            Text("✓ Lecturer marked present via their shared-lecture code — students can check in.",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
 

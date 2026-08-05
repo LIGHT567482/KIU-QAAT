@@ -57,7 +57,27 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 	r.Get("/metrics", promhttp.Handler().ServeHTTP) // Prometheus scrape endpoint
 
 	// Single passwordless student progress portal: enter reg-no → see attendance.
-	r.With(middleware.PublicIPRateLimit(10, 40)).
+	//
+	// BURST 1500, NOT 40 — the same lesson as app-login above, which was already fixed for it.
+	// Every student on campus Wi-Fi leaves through ONE public IP, and chi's RealIP resolves them
+	// all to it, so the entire institution shares a single bucket. MEASURED (tests/load/storm,
+	// 5000 seeded students, 500 concurrent): with (10, 40), 4932 of 5000 were refused — 98.6%.
+	// The gateway was not struggling; it answered the 68 it admitted with a p50 of 294ms and
+	// never returned a 5xx. It was simply refusing almost everybody, and the hour attendance
+	// eligibility is published is exactly when the whole cohort looks at once.
+	//
+	// The sustained 150/s is set from measured capacity, not taste: with the limiter out of the
+	// way the endpoint served 1400 simultaneous lookups at 338 req/s, 100% answered, p95 2.7s.
+	// 150/s therefore sheds at well under half of what the gateway can actually do — a limiter
+	// that only engages before the service is in trouble — while draining a 5000-student
+	// stampede in about half a minute instead of the ~100 seconds a 50/s cap forced.
+	//
+	// The enumeration tradeoff, stated plainly: this endpoint is passwordless, and registration
+	// numbers are sequential and low-entropy, so a generous burst lets an attacker walk the
+	// student body faster. It was never more than a speed bump — (10, 40) still yielded the
+	// whole roll in minutes — and a rate limit is the wrong tool for that threat. Slowing an
+	// attacker by a few minutes is not worth refusing 98% of legitimate students.
+	r.With(middleware.PublicIPRateLimit(150, 1500)).
 		Get("/api/v1/student/progress", handlers.StudentProgressByReg(adminPool))
 
 	// Native student app: bind this device to the student's reg number (one-device-one-student,
@@ -719,6 +739,19 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/dashboard/qa/attendance-correction", handlers.QAManualCorrection(pool))
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer)).
 			Get("/api/v1/dashboard/qa/coordinator-health", handlers.QACoordinatorHealth(pool))
+
+		// The patroller's handset lock, from the QA officer's own desk.
+		//
+		// The same list/release pair is on /api/v1/admin/patrol-bindings and stays there. But
+		// patrollers are QA's own field staff: when one is locked out mid-round — new phone,
+		// reinstall, a fingerprint that simply changed — the person who needs them working again
+		// is the QA officer, and routing that through an institution administrator is how a
+		// round gets abandoned. Same handlers, same audit trail (this group carries AuditLog),
+		// so a release is recorded whoever performs it.
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/qa/patrol-bindings", handlers.ListPatrolBindings(pool))
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector)).
+			Delete("/api/v1/dashboard/qa/patrol-bindings/{user_id}", handlers.ReleasePatrolBinding(pool))
 
 		// Student attendance (ADMIN + QA + VC + DQA): filterable summary + Excel export/import.
 		// ADMIN reaches this from the Reports hub; it supports course_id/unit_id/session/

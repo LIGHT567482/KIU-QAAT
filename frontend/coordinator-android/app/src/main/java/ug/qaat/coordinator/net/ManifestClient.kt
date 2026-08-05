@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import ug.qaat.coordinator.db.AppDao
 import ug.qaat.coordinator.db.RosterEntity
+import ug.qaat.coordinator.db.TimetableSlotEntity
 
 /**
  * Pulls GET /api/v1/manifest/daily once while online and stores it locally — the app
@@ -39,6 +40,9 @@ class ManifestClient(private val dao: AppDao) {
         val studentHashKey: String,
         val units: List<UnitInfo>,
         val rosterByUnit: Map<String, List<RosterEntity>>,
+        /** The FULL weekly grid — one entry per day a unit runs. [units] carries only the
+         *  earliest slot of the week per unit, which is a picker, not a timetable. */
+        val slots: List<TimetableSlotEntity> = emptyList(),
     )
 
     suspend fun fetchAndStore(token: String): Parsed {
@@ -70,6 +74,28 @@ class ManifestClient(private val dao: AppDao) {
             ))
         }
 
+        // The weekly grid, cached whole so the Timetable tab is complete with no signal. Replaced
+        // rather than merged: a slot the administrator removed has to leave the phone too.
+        val slots = ArrayList<TimetableSlotEntity>()
+        val slotArr = j.optJSONArray("slots")
+        if (slotArr != null) for (i in 0 until slotArr.length()) {
+            val s = slotArr.optJSONObject(i) ?: continue
+            val unitId = s.optString("unit_id", "")
+            val start = s.optString("start_time", "")
+            if (unitId.isBlank() || start.isBlank()) continue
+            slots.add(TimetableSlotEntity(
+                unitId = unitId,
+                unitName = s.optString("unit_name", unitId),
+                dayOfWeek = s.optInt("day_of_week", 0),
+                startTime = start,
+                durationMinutes = s.optInt("duration_minutes", 0),
+                room = s.optString("room", ""),
+                lecturerName = s.optString("lecturer_name", ""),
+                lecturerPhone = s.optString("lecturer_phone", ""),
+            ))
+        }
+        if (slots.isNotEmpty()) dao.replaceTimetable(slots)
+
         val rosterByUnit = LinkedHashMap<String, List<RosterEntity>>()
         val roster = j.optJSONObject("roster")
         if (roster != null) for (unitId in roster.keys()) {
@@ -88,7 +114,7 @@ class ManifestClient(private val dao: AppDao) {
             rosterByUnit[unitId] = rows
             if (rows.isNotEmpty()) dao.upsertRoster(rows)   // cache for offline validation
         }
-        Parsed(academicYear, publicKey, hashKey, units, rosterByUnit)
+        Parsed(academicYear, publicKey, hashKey, units, rosterByUnit, slots)
         }
     }
 }

@@ -66,14 +66,46 @@ data class PresentDisplayEntity(
 )
 
 /**
- * One timetabled slot for today, cached so the QA patroller works with no signal.
+ * One cell of the coordinator's WEEKLY timetable grid — one row per day a unit runs.
+ *
+ * The manifest's per-unit session list carries only the earliest slot of the week, because that is
+ * all the attendance picker needs. Rendering a timetable from it silently dropped every extra day:
+ * a unit taught Monday and Thursday showed on Monday alone. Online the grid was right (it reads
+ * the coordinator overview, which returns the full grid) and offline it was wrong — which is the
+ * one state where the cached grid is the only copy the coordinator has.
+ */
+@Entity(tableName = "timetable_slots", primaryKeys = ["unitId", "dayOfWeek", "startTime"])
+data class TimetableSlotEntity(
+    val unitId: String,
+    val unitName: String,
+    val dayOfWeek: Int,           // 1=Mon…7=Sun
+    val startTime: String,        // "HH:MM"
+    val durationMinutes: Int,
+    val room: String = "",
+    val lecturerName: String = "",
+    val lecturerPhone: String = "",
+)
+
+/**
+ * One timetabled slot, cached so the QA patroller works with no signal.
  *
  * The patroller used to be a separate app with its own plain-SQLite database. It now lives in
  * this one, which means its cached timetable and its queued observations are encrypted at rest
  * by the same SQLCipher key as everything else — a patrol round is a record of who was and
  * wasn't teaching, and that is not something to leave in the clear on a phone.
  */
-@Entity(tableName = "patrol_slots", primaryKeys = ["unitId", "startTime"])
+// The key is (unit, OFFERING, day, start), and every part of it earns its place.
+//
+// dayOfWeek, because the manifest now caches the whole week: a unit taught Monday 08:00 and
+// Wednesday 08:00 is two slots, and keyed on (unit, start) alone the second overwrote the first.
+//
+// offeringId, because two cohorts — Day and Evening, or two intakes — can run the SAME unit at the
+// SAME hour in different rooms with different lecturers. That is what the field below already
+// exists to distinguish, and leaving it out of the key meant one of those two lectures silently
+// replaced the other in the cache: the patroller could only ever find one of them, and the tick
+// they filed carried the surviving row's offering. The server's own uniqueness key
+// (ux_patrol_logs_slot) includes offering_id, so that tick landed against the wrong cohort.
+@Entity(tableName = "patrol_slots", primaryKeys = ["unitId", "offeringId", "dayOfWeek", "startTime"])
 data class PatrolSlotEntity(
     val unitId: String,
     val unitName: String,
@@ -84,8 +116,7 @@ data class PatrolSlotEntity(
     val dayOfWeek: Int,
     val startTime: String,        // "HH:MM"
     val durationMinutes: Int,
-    /** Which cohort's session. Two intakes can run the same unit at the same hour in
-     *  different rooms; without this they look like one duplicated row to the patroller. */
+    /** Which cohort's session. Part of the primary key — see the note above. */
     val offeringId: String = "",
     val cohort: String = "",
 )
@@ -191,6 +222,20 @@ interface AppDao {
     @Query("SELECT COUNT(*) FROM present_display WHERE sessionId = :s AND status = 'PRESENT'")
     fun presentCount(s: String): kotlinx.coroutines.flow.Flow<Int>
 
+    // ── Weekly timetable grid (offline) ─────────────────────────────────────────
+    @Query("DELETE FROM timetable_slots") fun clearTimetable()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun putTimetable(rows: List<TimetableSlotEntity>)
+
+    /** A re-fetched grid is the truth, not an addition — a slot the admin DELETED must
+     *  disappear from the phone too, which merging would never do. */
+    @Transaction
+    fun replaceTimetable(rows: List<TimetableSlotEntity>) { clearTimetable(); putTimetable(rows) }
+
+    @Query("SELECT * FROM timetable_slots ORDER BY dayOfWeek, startTime")
+    fun timetable(): List<TimetableSlotEntity>
+
     // ── QA patrol (offline round) ───────────────────────────────────────────────
     @Query("DELETE FROM patrol_slots") fun clearPatrolSlots()
 
@@ -201,8 +246,14 @@ interface AppDao {
     @Transaction
     fun replacePatrolSlots(rows: List<PatrolSlotEntity>) { clearPatrolSlots(); putPatrolSlots(rows) }
 
-    @Query("SELECT * FROM patrol_slots ORDER BY startTime")
+    @Query("SELECT * FROM patrol_slots ORDER BY dayOfWeek, startTime")
     fun patrolSlots(): List<PatrolSlotEntity>
+
+    /** The cached week narrowed to one weekday — what the patroller is actually walking today.
+     *  Slots with no day recorded (0) are included: an unscheduled slot is not evidence of the
+     *  wrong day, and dropping it would hide a real lecture from the round. */
+    @Query("SELECT * FROM patrol_slots WHERE dayOfWeek = :dow OR dayOfWeek = 0 ORDER BY startTime")
+    fun patrolSlotsForDay(dow: Int): List<PatrolSlotEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun putPatrolLog(log: PatrolLogEntity)
@@ -240,7 +291,7 @@ interface AppDao {
     @androidx.room.Transaction
     fun clearAllForSignOut() {
         clearAttendance(); clearRoster(); clearSessions(); clearPresentDisplay(); clearBindings()
-        clearPatrolLogs(); clearPatrolSlots()
+        clearPatrolLogs(); clearPatrolSlots(); clearTimetable()
     }
 }
 
@@ -250,8 +301,8 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
 @Database(
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
         SessionEntity::class, PresentDisplayEntity::class,
-        PatrolSlotEntity::class, PatrolLogEntity::class],
-    version = 5,
+        PatrolSlotEntity::class, PatrolLogEntity::class, TimetableSlotEntity::class],
+    version = 6,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -313,5 +364,46 @@ val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
         db.execSQL("ALTER TABLE patrol_logs ADD COLUMN foundDate TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE patrol_logs ADD COLUMN venueChanged INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE patrol_logs ADD COLUMN remarks TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
+ * v5→v6: the coordinator's weekly timetable grid is cached, and the patroller caches the WHOLE
+ * WEEK rather than one day.
+ *
+ * Both are offline-completeness fixes. The grid previously had to be rebuilt from the manifest's
+ * one-slot-per-unit summary, so with no signal a unit taught twice a week showed once. The patrol
+ * cache held whatever day it was last refreshed on, so a patroller who last had signal on Monday
+ * searched Monday's timetable on Tuesday and was told, with no hint of trouble, that lectures were
+ * where they had been the day before.
+ *
+ * patrol_slots is REBUILT rather than altered: its primary key gains dayOfWeek AND offeringId,
+ * which SQLite cannot add in place. The offering matters for a second, independent reason — two
+ * cohorts can run the same unit at the same hour in different rooms, and without it in the key one
+ * of those lectures overwrote the other, so the patroller could never find it. The rows are
+ * dropped, not copied: they are a cache of one stale day, the next refresh replaces them
+ * wholesale, and copying them would carry that stale day across the very upgrade meant to end it.
+ * Nothing the patroller RECORDED lives here; patrol_logs, the queue of unsynced ticks, is
+ * untouched.
+ */
+val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS timetable_slots (
+                 unitId TEXT NOT NULL, unitName TEXT NOT NULL, dayOfWeek INTEGER NOT NULL,
+                 startTime TEXT NOT NULL, durationMinutes INTEGER NOT NULL,
+                 room TEXT NOT NULL DEFAULT '', lecturerName TEXT NOT NULL DEFAULT '',
+                 lecturerPhone TEXT NOT NULL DEFAULT '',
+                 PRIMARY KEY(unitId, dayOfWeek, startTime))"""
+        )
+        db.execSQL("DROP TABLE IF EXISTS patrol_slots")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS patrol_slots (
+                 unitId TEXT NOT NULL, unitName TEXT NOT NULL, courseCode TEXT NOT NULL,
+                 lecturerStaffId TEXT NOT NULL, lecturerName TEXT NOT NULL, room TEXT NOT NULL,
+                 dayOfWeek INTEGER NOT NULL, startTime TEXT NOT NULL, durationMinutes INTEGER NOT NULL,
+                 offeringId TEXT NOT NULL DEFAULT '', cohort TEXT NOT NULL DEFAULT '',
+                 PRIMARY KEY(unitId, offeringId, dayOfWeek, startTime))"""
+        )
     }
 }

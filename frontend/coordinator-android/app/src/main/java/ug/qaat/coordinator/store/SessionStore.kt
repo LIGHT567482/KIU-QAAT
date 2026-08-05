@@ -257,6 +257,9 @@ object SessionStore {
             studentHashKey = prefs.getString("m_hashkey", "") ?: "",
             units = units,
             rosterByUnit = roster,
+            // The weekly grid lives in Room alongside the roster, for the same reason: it is a
+            // list, and the encrypted prefs are for scalars.
+            slots = runCatching { dao.timetable() }.getOrDefault(emptyList()),
         )
     }
 }

@@ -469,7 +469,20 @@ func writeAttendanceLogs(ctx context.Context, pool *pgxpool.Pool, payload []byte
 			       $4::timestamptz, $5, COALESCE(NULLIF($6,'')::date, CURRENT_DATE),
 			       $4::timestamptz, NULLIF($7,''),
 			       NULLIF($8,'')::timestamptz, NULLIF($9,''), NULLIF($8,'')::timestamptz,
-			       CASE WHEN $8 <> '' THEN ROUND(EXTRACT(EPOCH FROM ($8::timestamptz - $4::timestamptz)) / 3600.0, 2) END
+			       -- CONTACT HOURS ARE CLAIMED ONCE, by the room the lecturer stood in.
+			       --
+			       -- A lecturer shared across cohorts is marked present in every room that
+			       -- started on their code, and must be: that is what makes those students'
+			       -- attendance verified. But they can only teach one session at a time, so
+			       -- billing each of those rooms an hour credited one person three hours for
+			       -- one lecture, and three reports SUM this column.
+			       --
+			       -- A code-start is distinguishable because the phone records the marker
+			       -- below instead of a real device fingerprint (SessionController.
+			       -- startLecturerByCode). Presence is kept in full; only the HOURS are left
+			       -- to the room where the fingerprint is real.
+			       CASE WHEN $8 <> '' AND $7 NOT LIKE 'daily-code:%'
+			            THEN ROUND(EXTRACT(EPOCH FROM ($8::timestamptz - $4::timestamptz)) / 3600.0, 2) END
 			WHERE NOT EXISTS (
 			   SELECT 1 FROM lecturer_attendance_logs WHERE tenant_id = $1 AND session_id = $2)`,
 			tenantID, pkg.Session.SessionID, pkg.Lecturer.LecturerID, pkg.Lecturer.ScannedAt,

@@ -8,17 +8,22 @@ import (
 	"github.com/qaat/auth-service/internal/models"
 )
 
-// Students and lecturers do not choose a password when their account is made — they are added by
-// registration number and staff ID respectively, and the system seeds a known first-login one that
-// they must replace immediately. That word has been written down in two casings over the life of
-// the system ("Student" when the seeding migrations ran, "student" in the docs handed to staff and
-// in everything created since), so a perfectly correct default was being typed and rejected.
+// Students, lecturers and QA patrollers do not choose a password when their account is made — they
+// are added by registration number, staff ID, or by an administrator, and the system seeds a known
+// first-login one that they must replace immediately. That word has been written down in two
+// casings over the life of the system ("Student" when the seeding migrations ran, "student" in the
+// docs handed to staff and in everything created since), so a perfectly correct default was being
+// typed and rejected.
+//
+// The word is always the role: student → "student", lecturer → "lecturer", patroller →
+// "patroller". Nothing to look up and nothing to be told twice.
 //
 // seededDefaults lists every casing that has ever been seeded, grouped by the word people are told
 // to type. Order matters only for speed.
 var seededDefaults = map[string][]string{
-	"student":  {"student", "Student"},
-	"lecturer": {"lecturer", "Lecturer"},
+	"student":   {"student", "Student"},
+	"lecturer":  {"lecturer", "Lecturer"},
+	"patroller": {"patroller", "Patroller"},
 }
 
 // matchesSeededDefault reports whether `submitted` is a case-variant of the account's OWN, still

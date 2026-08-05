@@ -409,11 +409,32 @@ private fun CoordinatorComposer(onSent: () -> Unit) {
     }
 }
 
+/**
+ * The seeded first-login password for a role that is created FOR someone rather than BY them.
+ * The word is always the role itself, and it mirrors the server's own DefaultPasswordFor
+ * (backend/api-gateway/internal/handlers/default_passwords.go). Roles whose password their
+ * creator chose have no default, so nothing is pre-filled and they type what they were given.
+ */
+private fun defaultPasswordForRole(role: String?): String = when (role) {
+    "STUDENT" -> "student"
+    "LECTURER" -> "lecturer"
+    "QA_PATROLLER" -> "patroller"
+    else -> ""
+}
+
 /** Change-password dialog. In [mandatory] mode (first sign-in with the seeded default password)
  *  it can't be dismissed — the user must set a private password before using the app. */
 @Composable
 internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = false) {
-    var cur by remember { mutableStateOf(if (mandatory) "Student" else "") }
+    // Pre-fill the CURRENT field with this ROLE's seeded default, not with the word "Student".
+    //
+    // It was hardcoded to "Student" for everyone. A lecturer or a patroller was therefore shown
+    // somebody else's password, tapped "Save & proceed", and was told their existing password was
+    // wrong — on the one screen with no way forward and no way around. Even a student was shown
+    // the wrong casing of their own. The defaults are public (they are the role's own name), so
+    // filling the right one in costs nothing and turns first sign-in into: type a new password
+    // twice, proceed.
+    var cur by remember { mutableStateOf(if (mandatory) defaultPasswordForRole(AppState.role) else "") }
     var next by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -444,6 +465,13 @@ internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = fals
                 scope.launch {
                     err = AppState.token?.let { AuthClient().changePassword(it, cur, next) } ?: "Not signed in"
                     if (err == null) {
+                        // The saved credentials still hold the OLD password, and they are what the
+                        // silent re-login uses when a token expires. Left stale, the very next
+                        // launch failed to renew and dumped the user back at the sign-in screen
+                        // with a password that no longer exists — moments after they set one.
+                        SessionStore.appCredentials()?.let { (id, _, org) ->
+                            SessionStore.saveAppCredentials(id, next, org)
+                        }
                         AppState.forcePasswordChange = false
                         // Mandatory (temp-password) flow: save AND go straight into the dashboard.
                         if (mandatory) onClose() else done = true

@@ -61,7 +61,19 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "USER_NOT_FOUND", "account not found")
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)) != nil {
+	// The SAME seeded-default tolerance the login path applies, and it has to be here too.
+	//
+	// Without it the first-login flow was a dead end: Login accepts "student" or "Student"
+	// (matchesSeededDefault), so the person gets in — and is then sent straight to a mandatory
+	// password change that compared the very same word with a strict bcrypt check and answered
+	// "current password is incorrect". They could sign in and could not finish the one step
+	// standing between them and the app, with no way past it and nothing on screen explaining
+	// why. The tolerance stays exactly as narrow as it is at login: only an account still
+	// flagged force_password_change, only a different casing of the word it was actually seeded
+	// with, and it stops the instant they pick a password of their own — which is what the very
+	// next statement does.
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)) != nil &&
+		!matchesSeededDefault(user, req.CurrentPassword) {
 		writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "current password is incorrect")
 		return
 	}

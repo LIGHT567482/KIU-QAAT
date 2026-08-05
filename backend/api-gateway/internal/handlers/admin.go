@@ -339,6 +339,14 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 		req.Department = strings.TrimSpace(req.Department)
 		req.School = strings.TrimSpace(req.School)
+		// A role that has a seeded first-login password does not need one typed here. The
+		// administrator creating a QA patroller previously had to invent a password and then get
+		// it to them somehow; now they can leave it blank and tell them the one word everybody
+		// already knows, which the patroller must replace before the round will open anyway.
+		seeded := DefaultPasswordFor(req.Role)
+		if req.Password == "" && seeded != "" {
+			req.Password = seeded
+		}
 		if req.Email == "" || req.Password == "" || req.Role == "" || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "email, password, role, full_name required"))
 			return
@@ -377,7 +385,11 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 				return
 			}
 		}
-		if len(req.Password) < 8 {
+		// The length rule is for a password somebody CHOSE. A seeded default is exempt: it is
+		// public knowledge by design, the account cannot reach any role UI while it is in place,
+		// and rejecting it here would only mean the role's own word could never be its default.
+		onSeededDefault := seeded != "" && req.Password == seeded
+		if len(req.Password) < 8 && !onSeededDefault {
 			writeJSON(w, http.StatusBadRequest, errBody("WEAK_PASSWORD", "password must be ≥ 8 characters"))
 			return
 		}
@@ -416,11 +428,16 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 		for attempt := 0; attempt < 6; attempt++ {
 			err2 = pool.QueryRow(r.Context(), `
 				INSERT INTO users (tenant_id, email, password_hash, role, full_name, is_active, coordinator_code,
-				                   phone, whatsapp, registration_number, title, gender, department, school)
-				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), NULLIF($13,''))
+				                   phone, whatsapp, registration_number, title, gender, department, school,
+				                   force_password_change)
+				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), NULLIF($13,''), $14)
 				RETURNING user_id::text`,
 				tenantID, req.Email, string(hash), req.Role, req.FullName, coordCode,
 				req.Phone, req.Whatsapp, req.RegistrationNumber, req.Title, req.Gender, req.Department, req.School,
+				// An account left on a public default must not stay on one. This is what makes the
+				// app demand a private password at first sign-in and, once set, stop tolerating
+				// the default's casing at all.
+				onSeededDefault,
 			).Scan(&userID)
 			if err2 != nil && coordCode != nil && strings.Contains(err2.Error(), "coordinator_code") {
 				c := genCoordinatorCode() // code clash — regenerate and retry

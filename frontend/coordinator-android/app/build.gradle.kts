@@ -130,3 +130,14 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
 }
+
+// Let the stress test be dialled from the command line without editing it:
+//   ./gradlew :app:testDebugUnitTest --tests '*InRoomStressTest' -Dqaat.stress.students=5000
+// Gradle's own -D lands on the daemon, not on the test JVM, so it has to be forwarded. The
+// test prints its throughput and latency, so this is also how you re-measure after a change.
+tasks.withType<Test>().configureEach {
+    listOf("qaat.stress.students", "qaat.stress.concurrency").forEach { key ->
+        System.getProperty(key)?.let { systemProperty(key, it) }
+    }
+    testLogging { showStandardStreams = true }
+}

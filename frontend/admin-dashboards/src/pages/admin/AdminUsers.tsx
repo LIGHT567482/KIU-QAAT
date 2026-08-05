@@ -57,12 +57,22 @@ function UsersInner() {
   const titles = (titlesQ.status === 'ok' ? titlesQ.data?.titles : null) ?? []
   const GENDERS = ['', 'Male', 'Female', 'Other']
 
+  const SEEDED_DEFAULTS: Record<string, string> = {
+    LECTURER: 'lecturer',
+    QA_PATROLLER: 'patroller',
+  }
+
   const [creating, setCreating] = useState(false)
   const [changingPasscode, setChangingPasscode] = useState(false)
   const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [issuedCode, setIssuedCode] = useState<string | null>(null)
+
+  // The seeded first-login password for the selected role, or '' when there isn't one. Mirrors
+  // the server's DefaultPasswordFor (backend/api-gateway/internal/handlers/default_passwords.go);
+  // the word is always the role itself, so there is nothing to look up or be told twice.
+  const seededDefault = SEEDED_DEFAULTS[form.role] ?? ''
 
   async function handleCreate() {
     setSaving(true); setError(null)
@@ -146,7 +156,23 @@ function UsersInner() {
                 <span style={{ padding: '8px 10px', borderRadius: '0 6px 6px 0', border: '1px solid #e2e8f0', background: '#f1f5f9', color: 'var(--muted)', fontSize: 13, whiteSpace: 'nowrap' }}>@{domain || '…'}</span>
               </div>
             </label>
-            <Field label="Password"     value={form.password}  onChange={v => setForm(f => ({ ...f, password: v }))}  type="password" />
+            {/* Roles created FOR someone rather than BY them have a seeded first-login password —
+                the role's own name. Leaving this blank uses it, so the administrator has one less
+                secret to invent and then somehow get to the person; they just say the word, and
+                the app makes them replace it before they reach anything. */}
+            <div>
+              <Field
+                label={seededDefault ? `Password (optional — defaults to “${seededDefault}”)` : 'Password'}
+                value={form.password}
+                onChange={v => setForm(f => ({ ...f, password: v }))}
+                type="password"
+              />
+              {seededDefault && !form.password && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                  They sign in with <strong>{seededDefault}</strong> and must set their own password before continuing.
+                </div>
+              )}
+            </div>
             <label>
               <div style={labelStyle}>Role</div>
               <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={{ ...selectStyle, color: form.role ? '#1e293b' : 'var(--muted)' }}>
@@ -183,7 +209,7 @@ function UsersInner() {
             <Field label="WhatsApp (optional)"      value={form.whatsapp} onChange={v => setForm(f => ({ ...f, whatsapp: v }))} />
             <Field label="Registration No. (optional)" value={form.registration_number} onChange={v => setForm(f => ({ ...f, registration_number: v }))} />
           </div>
-          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || !form.password || scopeIncomplete} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || !form.password || scopeIncomplete) ? 0.5 : 1 }}>
+          <button onClick={handleCreate} disabled={saving || !form.role || !form.full_name || !form.local || (!form.password && !seededDefault) || scopeIncomplete} style={{ ...btn, marginTop: 16, opacity: (!form.role || !form.full_name || !form.local || (!form.password && !seededDefault) || scopeIncomplete) ? 0.5 : 1 }}>
             {saving ? 'Creating…' : 'Create User'}
           </button>
         </div>

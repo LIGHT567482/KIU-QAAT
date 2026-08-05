@@ -283,7 +283,12 @@ private fun PatrolRoundTab(reloadKey: Int) {
             // different answer depending on whether the signal happened to be up.
             note = "Offline — searching today's cached timetable."
             val needle = q.lowercase()
-            withContext(Dispatchers.IO) { dao.patrolSlots() }.filter { s ->
+            // TODAY's slots out of the cached week. The cache used to hold whichever single day
+            // the phone last had signal on, so a patroller who refreshed on Monday walked
+            // Tuesday's round against Monday's timetable — wrong lecturers, wrong rooms, and
+            // nothing on screen to say so. The whole week is cached now and narrowed here.
+            val dow = LocalDate.now().dayOfWeek.value
+            withContext(Dispatchers.IO) { dao.patrolSlotsForDay(dow) }.filter { s ->
                 if (mode == "lecturer")
                     s.lecturerStaffId.lowercase().startsWith(needle) || s.lecturerName.lowercase().startsWith(needle)
                 else
@@ -314,7 +319,13 @@ private fun PatrolRoundTab(reloadKey: Int) {
         pending = withContext(Dispatchers.IO) { dao.pendingPatrolCount() }
     }
 
-    val done = logs.associateBy { it.unitId + "@" + it.scheduledTime }
+    // Keyed by COHORT as well as unit and time, matching the server's ux_patrol_logs_slot. Two
+    // intakes can run the same unit at the same hour in different rooms; without the offering,
+    // ticking one of them showed the OTHER as "already marked TAUGHT" — so the patroller would
+    // walk past a lecture believing it had been recorded, and the one that was never visited
+    // carried a verdict nobody had witnessed.
+    fun slotKey(unitId: String, time: String, offeringId: String) = "$unitId@$time#$offeringId"
+    val done = logs.associateBy { slotKey(it.unitId, it.scheduledTime, it.offeringId) }
 
     // The confirm sheet: one lecture, one green tick, one red cross.
     chosen?.let { slot ->
@@ -370,18 +381,23 @@ private fun PatrolRoundTab(reloadKey: Int) {
         }
         Spacer(Modifier.height(12.dp))
 
+        // Read the hits into a local before branching. The LazyColumn's content lambda runs
+        // later, outside this composition, and by then the state can have been cleared back
+        // to null — a filter chip or an emptied query does exactly that — so a `results!!`
+        // inside the lambda is a crash waiting for the patroller's next tap.
+        val hits = results
         when {
             searching -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
             // Nothing searched yet is NOT the same as nothing found, and must not read as it.
-            results == null -> Text(
+            hits == null -> Text(
                 "No lecturer is shown until you search. Enter the staff ID or the unit code for the room you are at.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
-            results!!.isEmpty() -> Text(
+            hits.isEmpty() -> Text(
                 "Nothing timetabled today matches “${query.trim()}”. Check the ID, or try searching the other way.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
             else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(results!!) { s ->
-                    PatrolResultCard(s, done[s.unitId + "@" + s.startTime]) { chosen = s }
+                items(hits) { s ->
+                    PatrolResultCard(s, done[slotKey(s.unitId, s.startTime, s.offeringId)]) { chosen = s }
                 }
             }
         }

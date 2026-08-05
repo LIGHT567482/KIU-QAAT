@@ -63,23 +63,36 @@ fun DashboardScreen() {
                     .filter { s -> s.isNotBlank() }.joinToString(" · ")
             }
         } else if (m != null) {
-            // Offline fallback: derive overview from cached manifest — including each unit's
-            // cached day/start/duration/room so the Timetable grid still renders with no internet.
-            val units = m.units.map { u ->
+            // Offline fallback: the cached WEEKLY grid, one entry per day a unit runs, so the
+            // Timetable tab shows the same week offline that it shows online. m.units carries
+            // only the earliest slot per unit — enough to pick a session, not enough to be a
+            // timetable — so it is the fallback's fallback, for a phone whose manifest predates
+            // the cached grid.
+            val units = m.slots.takeIf { it.isNotEmpty() }?.map { s ->
+                DashboardClient.Unit(s.unitId, s.unitName, 0, 0,
+                    s.dayOfWeek, s.startTime, s.durationMinutes, s.lecturerName, s.room, s.lecturerPhone)
+            } ?: m.units.map { u ->
                 DashboardClient.Unit(u.unitId, u.unitName, 0, 0,
                     u.dayOfWeek, u.startTime, u.durationMinutes, u.lecturerName, u.venueId, u.lecturerPhone)
             }
             overview = DashboardClient.Overview(null, units)
         }
         students = runCatching { client.students(t) }.getOrDefault(emptyList()).ifEmpty {
-            // Offline fallback: derive student list from manifest roster hashes.
+            // Offline fallback: the cohort roster, by REGISTRATION NUMBER AND NAME.
+            //
+            // This used to list the privacy hash with "—" for a name, which is unreadable and
+            // unusable: a coordinator offline could not tell who was in their own cohort. The
+            // hash is what the durable ledger keys on; the reg-no and name have been cached
+            // beside it since the manifest started carrying them, and are display fields.
             if (m != null) {
                 val seen = mutableSetOf<String>()
                 m.rosterByUnit.values.flatten().mapNotNull { e ->
-                    if (seen.add(e.studentIdHash))
-                        DashboardClient.Student(e.studentIdHash, "—", 0, 0, "", "ACTIVE")
-                    else null
-                }
+                    if (!seen.add(e.studentIdHash)) return@mapNotNull null
+                    DashboardClient.Student(
+                        e.studentId.ifBlank { e.studentIdHash.take(12) + "…" },
+                        e.fullName.ifBlank { "—" }, 0, 0, "", "ACTIVE",
+                    )
+                }.sortedBy { it.fullName }
             } else emptyList()
         }
         last = runCatching { client.lastRoster(t) }.getOrNull() ?: withContext(Dispatchers.IO) {
@@ -95,8 +108,17 @@ fun DashboardScreen() {
             val s = (recent + dao.pendingSyncSessions()).maxByOrNull { it.sessionDate }
             if (s != null) {
                 val records = dao.rosterForSession(s.sessionId)
+                // Resolve each ledger hash back to the person. The roster cached for the session's
+                // unit holds the mapping, so "who was present" reads as names offline instead of
+                // a column of hex the coordinator cannot act on.
+                val byHash = dao.roster(s.unitId).associateBy { it.studentIdHash }
                 val rows = records.map { r ->
-                    DashboardClient.RosterRow(r.studentIdHash, "", "PRESENT", r.checkinTimestamp)
+                    val who = byHash[r.studentIdHash]
+                    DashboardClient.RosterRow(
+                        who?.studentId?.ifBlank { null } ?: r.studentIdHash.take(12) + "…",
+                        who?.fullName.orEmpty(),
+                        "PRESENT", r.checkinTimestamp,
+                    )
                 }
                 DashboardClient.LastRoster(s.unitId, s.sessionDate, records.size, records.size, rows)
             } else null
