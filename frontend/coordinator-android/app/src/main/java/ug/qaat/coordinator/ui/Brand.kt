@@ -69,12 +69,19 @@ fun BrandLogo(branding: BrandingClient.Branding?, size: Int = 32) {
         Image(bmp, contentDescription = branding?.name, contentScale = ContentScale.Fit,
             modifier = Modifier.size(size.dp).clip(RoundedCornerShape(6.dp)))
     } else {
-        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.size(size.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Text((branding?.name ?: "KIU").take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary)
-            }
-        }
+        // The BUNDLED logo, not a coloured letter tile.
+        //
+        // This drew a box with "K" in it whenever the server's branding had not arrived — which
+        // is every launch before the first fetch returns, every offline launch, and every launch
+        // where the fetch fails. The app has shipped the real mark as a drawable all along and
+        // used it only on the login screen, so the one screen that greeted you had the logo and
+        // every screen after it had a letter. That is why the header still looked unchanged.
+        Image(
+            painter = painterResource(ug.qaat.coordinator.R.drawable.qaat_logo),
+            contentDescription = branding?.name ?: "KIU QAAT",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(size.dp).clip(RoundedCornerShape(6.dp)),
+        )
     }
 }
 

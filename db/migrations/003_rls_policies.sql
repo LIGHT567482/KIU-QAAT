@@ -79,7 +79,18 @@ BEGIN
     END IF;
 END $$;
 
-GRANT CONNECT ON DATABASE qaat TO qaat_app;
+-- Grant on whatever database we are actually connected to, rather than on a hard-coded name.
+--
+-- This read `GRANT CONNECT ON DATABASE qaat`, which is fine in production and fails outright
+-- anywhere the database is called something else — CI runs against `qaat_test`, so the statement
+-- aborted with `database "qaat" does not exist` and left the migration half-applied: the role
+-- existed with no privileges, and every later test failed for reasons that looked nothing like
+-- the cause. A migration should not care what the database is named.
+DO $$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO qaat_app', current_database());
+END $$;
+
 GRANT USAGE ON SCHEMA public TO qaat_app;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO qaat_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO qaat_app;

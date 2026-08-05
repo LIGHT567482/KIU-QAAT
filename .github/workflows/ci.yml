@@ -7,7 +7,11 @@ on:
     branches: [main, develop]
 
 env:
-  PNPM_VERSION: '9.1.0'
+  # Must match the `packageManager` field every package.json declares (pnpm@9.15.9). pnpm
+  # refuses to run when the two disagree — ERR_PNPM_BAD_PM_VERSION — so a version pinned
+  # here that drifts from the project's own is a hard CI failure, not a warning. Change both
+  # together, or not at all.
+  PNPM_VERSION: '9.15.9'
 
 jobs:
 
@@ -57,18 +61,36 @@ jobs:
           openssl rsa -in keys/auth_private.pem -pubout -out keys/auth_public.pem
         working-directory: .
 
+      # EVERY migration, in order — not a hand-written list.
+      #
+      # The list here stopped at 009 while the repository grew to 76, so CI built a schema 67
+      # migrations behind the code it was testing. The auth query selects title,
+      # registration_number and force_password_change; none of them existed, so login returned
+      # 500 "authentication failed" and the tests failed for a reason that had nothing to do
+      # with authentication. A glob cannot fall behind.
       - name: Run migrations
         run: |
-          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
-            -f ../../db/migrations/001_init_schema.sql \
-            -f ../../db/migrations/002_indexes.sql \
-            -f ../../db/migrations/003_rls_policies.sql \
-            -f ../../db/migrations/004_materialized_views.sql \
-            -f ../../db/migrations/005_tenant_rsa_keys.sql \
-            -f ../../db/migrations/006_sync_package_hmac.sql \
-            -f ../../db/migrations/007_integrity_and_scale.sql \
-            -f ../../db/migrations/008_online_checkin.sql \
-            -f ../../db/migrations/009_force_rls_and_app_role.sql
+          set -e
+          for f in $(ls ../../db/migrations/*.sql | sort); do
+            echo "→ $(basename "$f")"
+            PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      # users.tenant_id is a foreign key, so the auth tests' inserts need their institution row to
+      # exist first — every one of them was failing on users_tenant_id_fkey.
+      #
+      # NOT db/seeds/001_test_tenants.sql: that file seeds a1000000…/a2000000…, while these tests
+      # use a0000000…0001 and b0000000…0002. Loading it looks like a fix and changes nothing, so
+      # the two rows the tests actually name are created here instead. CI-only fixture — no
+      # product code, no schema, and nothing multi-institution about it; the second row exists
+      # solely so TestLogin_CrossTenantIsBlocked has something to be blocked from.
+      - name: Create the tenant rows the auth tests reference
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -v ON_ERROR_STOP=1 -c "
+            INSERT INTO tenants (tenant_id, name, domain, rsa_key_id) VALUES
+              ('a0000000-0000-0000-0000-000000000001', 'CI Test Institution',  'alpha.edu', 'ci-key-a'),
+              ('b0000000-0000-0000-0000-000000000002', 'CI Other Institution', 'beta.edu',  'ci-key-b')
+            ON CONFLICT (tenant_id) DO NOTHING;"
 
       - name: Tidy and download dependencies
         run: go mod tidy && go mod download
@@ -76,8 +98,12 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # No -coverprofile. It made the run fail with `go: no such tool "covdata"`, and the file it
+      # would have produced was never uploaded, read or reported on by anything — so the flag was
+      # costing a red build to generate an artefact nobody consumed. Add it back together with a
+      # step that actually publishes the result, if coverage is wanted.
       - name: Test
-        run: go test ./... -race -count=1 -coverprofile=coverage.out
+        run: go test ./... -race -count=1
         env:
           DB_URL: postgres://qaat:testpass@localhost:5432/qaat_test?sslmode=disable
           REDIS_URL: redis://:@localhost:6379/0
@@ -87,6 +113,11 @@ jobs:
           JWT_AUDIENCE: qaat-api
           JWT_TTL_SECONDS: "3600"
           PORT: "8081"
+          # Login seals a per-device binding key with this, so without it every successful
+          # sign-in returned 500 "could not establish device binding" — a required variable
+          # that the job simply never set. A throwaway 32-byte hex value is right for CI: it
+          # encrypts nothing that outlives the run.
+          KEY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
   # ─── API Gateway ────────────────────────────────────────────────────────────
   api-gateway:
@@ -177,18 +208,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Named "Apply all migrations" while listing nine of seventy-six. It now applies all of
+      # them, so this job tests the schema the code actually runs against — which is the entire
+      # point of a migrations job.
       - name: Apply all migrations
         run: |
-          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
-            -f db/migrations/001_init_schema.sql \
-            -f db/migrations/002_indexes.sql \
-            -f db/migrations/003_rls_policies.sql \
-            -f db/migrations/004_materialized_views.sql \
-            -f db/migrations/005_tenant_rsa_keys.sql \
-            -f db/migrations/006_sync_package_hmac.sql \
-            -f db/migrations/007_integrity_and_scale.sql \
-            -f db/migrations/008_online_checkin.sql \
-            -f db/migrations/009_force_rls_and_app_role.sql
+          set -e
+          for f in $(ls db/migrations/*.sql | sort); do
+            echo "→ $(basename "$f")"
+            PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -v ON_ERROR_STOP=1 -q -f "$f"
+          done
         env:
           PGPASSWORD: testpass
 
