@@ -15,8 +15,13 @@
 -- The loop is deliberate rather than a list. A hand-written list is how the drift happened in the
 -- first place: every table added since is one somebody had to remember. Any future table carrying
 -- a tenant_id now gets the standard isolation policy and both flags automatically.
-
-BEGIN;
+--
+-- NO EXPLICIT BEGIN/COMMIT. cmd/migrate already runs each migration inside its own transaction
+-- and brackets it with a savepoint; a COMMIT in the file ends that transaction underneath the
+-- tool, which then fails on `RELEASE SAVEPOINT can only be used in transaction blocks`. Worse
+-- than the error: the COMMIT means the work IS applied while the tool reports "nothing from the
+-- failing migration was applied" and leaves it out of the ledger. No other migration in this
+-- directory opens its own transaction.
 
 DO $$
 DECLARE
@@ -81,4 +86,3 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO qaat_app;
 -- The append-only ledger keeps its standing prohibition: corrections are new rows.
 REVOKE DELETE ON attendance_logs FROM qaat_app;
 
-COMMIT;
