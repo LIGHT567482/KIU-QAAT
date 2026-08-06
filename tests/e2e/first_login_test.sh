@@ -34,6 +34,13 @@ change() {
     -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
     -d "{\"current_password\":\"$2\",\"new_password\":\"$3\"}" -m 30
 }
+# Can this token actually open the app? The inbox is the right probe: every role has one, the
+# phone loads it on the way into the dashboard, and it is one of the screens that used to answer
+# "Not signed in".
+opens_app() {
+  curl -sk -o /dev/null -w '%{http_code}' "$BASE/api/v1/app-notifications" \
+    -H "Authorization: Bearer $1" -m 20
+}
 jget() { python3 -c "import json,sys
 try: d=json.load(sys.stdin)
 except Exception: print(''); raise SystemExit
@@ -86,8 +93,14 @@ run() { # label identifier typed_default new_password
   check "signs in with the default"                    "yes" "yes"
   check "is told to set a password"                    "$(echo "$B" | jget force_password_change)" "true"
   check "the change screen ACCEPTS that same password" "$(change "$TOK" "$3" "$4")" "200"
+  # "Save & proceed" has to PROCEED. The app keeps the token it already holds and immediately
+  # signs in again with the password just chosen — so both have to work, or the person lands on a
+  # dashboard where every panel says "Not signed in".
+  check "the token it already holds still opens the app" "$(opens_app "$TOK")" "200"
   B2=$(login "$2" "$4")
-  check "signs in with the NEW password"               "$( [ -n "$(echo "$B2" | jget access_token)" ] && echo yes )" "yes"
+  local TOK2; TOK2=$(echo "$B2" | jget access_token)
+  check "signs in with the NEW password"               "$( [ -n "$TOK2" ] && echo yes )" "yes"
+  check "and THAT session opens the app too"           "$(opens_app "$TOK2")" "200"
   check "is NOT asked to change again"                 "$(echo "$B2" | jget force_password_change)" "false"
   check "the old default no longer works"              "$( [ -z "$(login "$2" "$3" | jget access_token)" ] && echo dead )" "dead"
 }

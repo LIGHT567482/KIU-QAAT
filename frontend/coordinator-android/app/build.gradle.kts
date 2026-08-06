@@ -29,8 +29,14 @@ android {
         // 1.2.0: search-first patrol round, the 15-minute auto-close, and the
         // kiu-qaat-* backend. versionCode must rise for the APK to install as an
         // upgrade over 1.1.0 rather than being refused as a downgrade.
-        versionCode = 5
-        versionName = "1.2.0"
+        // 1.3.0: the patrol-round crash, a cache that holds the whole timetable and real
+        // student names offline, shared-lecturer session codes, and a first login that
+        // actually reaches the dashboard. Carries Room schema 6, so MIGRATION_5_6 runs on
+        // first launch after the upgrade — going straight from 1.1.0 works too.
+        // 1.3.1: the mandatory first-password screen signs you straight in on the new password
+        // instead of leaving a session that lapses into "Not signed in".
+        versionCode = 7
+        versionName = "1.3.1"
         // DEFAULT backend URL the app starts with. The app works for BOTH your local server
         // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
         // self-signed cert, and the URL is switchable at runtime (login "server" field /

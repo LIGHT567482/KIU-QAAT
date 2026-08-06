@@ -501,17 +501,31 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 					if l.Taught {
 						verdict = "TAUGHT"
 					}
+					// WHICH lecture, said in full. A lecturer teaching the same unit to three
+					// cohorts used to get "recorded as NOT TAUGHT for Data Structures" and no way
+					// to know which sitting was meant — and since ticks sync from a phone that may
+					// have been offline for a day, the reader cannot assume it means today.
+					when := lectureWhen(l.SessionDate, l.ScheduledTime)
 					subject := fmt.Sprintf("Patrol: %s", l.UnitName)
-					bodyTxt := fmt.Sprintf("You were recorded as %s for %s%s%s by patroller %s.",
+					if when != "" {
+						subject += " — " + when
+					}
+					// No patroller named — see patrolSenderName. The sentence is about the
+					// lecture, and the identity of whoever walked the corridor is on the log row.
+					bodyTxt := fmt.Sprintf("You were recorded as %s for %s%s%s%s.",
 						verdict, l.UnitName,
 						map[bool]string{true: " (" + l.CourseCode + ")", false: ""}[l.CourseCode != ""],
-						map[bool]string{true: " in " + l.Room, false: ""}[l.Room != ""],
-						patrollerName)
+						map[bool]string{true: ", " + when, false: ""}[when != ""],
+						map[bool]string{true: ", in " + l.Room, false: ""}[l.Room != ""])
 					var nid string
+					// sender_id NULL, and the impersonal name. NULL is not tidiness: the inbox
+					// query LEFT JOINs users on sender_id to prefix the sender's title, so leaving
+					// the patroller's id here would render "Mr. QA Patrol" — their honorific
+					// pinned to the very name that replaced them.
 					if conn.QueryRow(r.Context(), `
 						INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, subject, body)
-						VALUES ($1, $2, $3, 'QA_PATROLLER', 'DIRECT', $4, $5) RETURNING notification_id::text`,
-						tenantID, userID, patrollerName, subject, bodyTxt).Scan(&nid) == nil {
+						VALUES ($1, NULL, $2, 'QA_PATROLLER', 'DIRECT', $3, $4) RETURNING notification_id::text`,
+						tenantID, patrolSenderName, subject, bodyTxt).Scan(&nid) == nil {
 						_, _ = conn.Exec(r.Context(),
 							`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)
 							 VALUES ($1, $2, $3::uuid) ON CONFLICT DO NOTHING`, nid, tenantID, lecUser)
@@ -525,12 +539,17 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				// that matters, the alert is a courtesy on top of it.
 				if l.VenueChanged {
 					if recips := venueChangeRecipients(r.Context(), conn, tenantID, l.UnitID, l.LecturerID); len(recips) > 0 {
-						subj, bodyTxt := venueChangeMessage(l, patrollerName)
+						subj, bodyTxt := venueChangeMessage(l)
 						var vid string
+						// One row, several recipients — the lecturer AND their HOD, dean, QA
+						// handler and the DQA — so it cannot name the patroller to the oversight
+						// chain while hiding them from the lecturer. It names them to nobody; the
+						// chain reads patroller_name off lecturer_patrol_logs in the QA reports,
+						// where an audit trail belongs.
 						if conn.QueryRow(r.Context(), `
 							INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, unit_id, subject, body)
-							VALUES ($1, $2, $3, 'QA_PATROLLER', 'DIRECT', $4, $5, $6) RETURNING notification_id::text`,
-							tenantID, userID, patrollerName, l.UnitID, subj, bodyTxt).Scan(&vid) == nil {
+							VALUES ($1, NULL, $2, 'QA_PATROLLER', 'DIRECT', $3, $4, $5) RETURNING notification_id::text`,
+							tenantID, patrolSenderName, l.UnitID, subj, bodyTxt).Scan(&vid) == nil {
 							for _, uid := range recips {
 								_, _ = conn.Exec(r.Context(),
 									`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)

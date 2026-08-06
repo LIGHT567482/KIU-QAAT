@@ -22,9 +22,52 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// patrolSenderName is the name every patrol alert arrives under.
+//
+// It used to be the patroller's own full name, on the notification row AND in the sentence — so
+// a lecturer opening their inbox read "From Jane Doe" above "you were recorded as NOT TAUGHT".
+// That turns an institutional observation into one colleague accusing another, which is the fast
+// way to make patrollers unwilling to record what they saw and lecturers argue with the person
+// rather than the record. The observation belongs to quality assurance; the tick is the same tick
+// whoever walked the corridor.
+//
+// Nothing is lost to accountability: lecturer_patrol_logs still stores patroller_id,
+// patroller_name and patroller_staff_id on every row, and the QA patrol reports read them. The
+// name is simply not what a lecturer is shown.
+const patrolSenderName = "QA Patrol"
+
+// lectureWhen renders a slot the way the timetable says it — "Wed 6 Aug at 14:00" — from the
+// date and start time carried on the tick.
+//
+// Every patrol alert now states it. A lecturer who teaches the same unit to three cohorts got
+// "You were recorded as NOT TAUGHT for Data Structures" and had no way to tell WHICH sitting was
+// meant, so the one question the alert had to answer — was I supposed to be somewhere? — was the
+// one it left open. Ticks also sync late from a phone that was offline, so "today" is not a safe
+// assumption for the reader either.
+//
+// Degrades rather than lies: an unparseable or missing date falls back to whatever it was given,
+// and a slot with neither date nor time renders as "" so the caller can leave the clause out.
+func lectureWhen(date, startTime string) string {
+	date = strings.TrimSpace(date)
+	startTime = strings.TrimSpace(startTime)
+	day := date
+	if t, err := time.Parse("2006-01-02", date); err == nil {
+		day = t.Format("Mon 2 Jan 2006")
+	}
+	switch {
+	case day != "" && startTime != "":
+		return day + " at " + startTime
+	case startTime != "":
+		return "at " + startTime
+	default:
+		return day
+	}
+}
 
 // venueChangeRecipients resolves who should hear about a lecture that moved.
 //
@@ -94,12 +137,33 @@ func venueChangeRecipients(ctx context.Context, conn interface {
 	return out
 }
 
+// nonBlank drops the empty parts so a joined clause never renders a stray separator — a slot with
+// no room must read "(at 16:00)", not "(at 16:00, )".
+func nonBlank(parts ...string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // venueChangeMessage describes the move in the words someone reading their inbox
-// needs: what was scheduled, what actually happened, and who observed it.
-func venueChangeMessage(l patrolLogIn, patroller string) (subject, body string) {
+// needs: which slot on the timetable, what was scheduled, and what actually happened.
+//
+// Not who observed it — see patrolSenderName.
+func venueChangeMessage(l patrolLogIn) (subject, body string) {
+	when := lectureWhen(l.SessionDate, l.ScheduledTime)
+
 	subject = fmt.Sprintf("Lecture moved: %s", strings.TrimSpace(l.UnitName))
 	if l.CourseCode != "" {
 		subject = fmt.Sprintf("Lecture moved: %s (%s)", strings.TrimSpace(l.UnitName), l.CourseCode)
+	}
+	// The time in the SUBJECT, not only the body: a lecturer with two sittings of the same unit
+	// otherwise gets two alerts with identical titles and has to open both to tell them apart.
+	if when != "" {
+		subject += " — " + when
 	}
 
 	var changes []string
@@ -120,14 +184,23 @@ func venueChangeMessage(l patrolLogIn, patroller string) (subject, body string) 
 		changes = append(changes, "details differ from the published timetable")
 	}
 
+	// "its published slot (Thu 6 Aug 2026 at 16:00, LR3)" — the timetable's own answer to where
+	// the reader was expected, stated before the diff that says where they were found.
+	published := "its published slot"
+	if detail := strings.TrimSpace(strings.Join(nonBlank(when, l.Room), ", ")); detail != "" {
+		published += " (" + detail + ")"
+	}
+
 	body = fmt.Sprintf(
-		"QA patrol found this lecture away from its published slot — %s. Observed by %s.\n\n"+
+		"QA patrol found this lecture away from %s — %s.\n\n"+
 			"This change was not recorded on the timetable. If it is permanent, ask the "+
 			"Teaching & Learning Centre to update the published week; students are still "+
 			"being sent to the timetabled room.",
-		strings.Join(changes, "; "), patroller)
+		published, strings.Join(changes, "; "))
 	if r := strings.TrimSpace(l.Remarks); r != "" {
-		body += "\n\nPatroller's note: " + r
+		// "Note recorded on patrol", not "Patroller's note" — the possessive invited the reader
+		// to wonder whose, which is the question these alerts deliberately stop answering.
+		body += "\n\nNote recorded on patrol: " + r
 	}
 	return subject, body
 }

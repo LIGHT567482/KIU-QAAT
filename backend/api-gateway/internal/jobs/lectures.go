@@ -114,7 +114,9 @@ func attendanceMissing(ctx context.Context, pool *pgxpool.Pool, w scheduler.Wind
 		if recorded {
 			continue
 		}
-		subject := fmt.Sprintf("Attendance not recorded: %s", s.UnitName)
+		// The start time in the subject, like the patrol alerts: a lecturer with two sittings of
+		// the same unit on one day otherwise gets two alerts titled identically.
+		subject := fmt.Sprintf("Attendance not recorded: %s at %s", s.UnitName, s.StartTime)
 		body := fmt.Sprintf(
 			"Your %s lecture%s was due to start at %s%s, and neither the coordinator nor a QA patroller has recorded it.\n\n"+
 				"If you are teaching, ask the coordinator to open the session.",
@@ -146,7 +148,7 @@ func qaEscalation(ctx context.Context, pool *pgxpool.Pool, w scheduler.Window) e
 		if recorded {
 			continue
 		}
-		subject := fmt.Sprintf("Please visit the QA office: %s", s.UnitName)
+		subject := fmt.Sprintf("Please visit the QA office: %s at %s", s.UnitName, s.StartTime)
 		body := fmt.Sprintf(
 			"Your %s lecture%s at %s%s has no attendance record — neither the coordinator nor a QA patroller captured it.\n\n"+
 				"If you taught this lecture, please go to the Quality Assurance office within %d minutes so the record can be corrected. "+

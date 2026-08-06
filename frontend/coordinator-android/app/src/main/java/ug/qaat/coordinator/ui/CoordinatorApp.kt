@@ -422,6 +422,46 @@ private fun defaultPasswordForRole(role: String?): String = when (role) {
     else -> ""
 }
 
+/**
+ * The thing the user typed into the sign-in screen — a staff email, a registration number or a
+ * staff id. Needed to sign them back in with their NEW password the moment they set one.
+ *
+ * Two sources because a QA patroller has only the second: their saved credentials are erased the
+ * instant their role is known (a lost handset must not resume a patrol round), so by the time they
+ * change a password from the profile there is nothing under `cred_id`. The session's own record of
+ * who signed in survives that erasure, because it is not a password.
+ */
+private fun signInIdentifier(): String? =
+    SessionStore.appCredentials()?.first?.takeIf { it.isNotBlank() }
+        ?: AppState.coordinatorEmail?.takeIf { it.isNotBlank() }
+
+/**
+ * Adopt a fresh sign-in as THE session: memory, then disk, so a close-and-reopen resumes on the
+ * new token rather than the one it replaced.
+ *
+ * [keepCredentials] is false for anyone whose saved password was deliberately erased — writing it
+ * back here would quietly undo the patroller rule that a handset can never walk back into a round.
+ */
+private fun adoptSession(res: AuthClient.Result, identifier: String, password: String, keepCredentials: Boolean) {
+    AppState.token = res.token
+    AppState.userId = res.userId
+    AppState.tenantId = res.tenantId
+    AppState.deviceBindingKey = res.deviceBindingKey
+    AppState.coordinatorName = res.fullName
+    AppState.coordinatorEmail = identifier
+    AppState.role = res.role
+    AppState.coordinatorTitle = res.title
+    AppState.coordinatorRegNo = res.registrationNo
+    AppState.studentId = res.studentId.ifBlank { null }
+    AppState.staffId = res.staffId.ifBlank { null }
+    SessionStore.saveSession(
+        res.token, res.userId, res.tenantId, res.deviceBindingKey,
+        res.fullName, identifier, res.role, res.title, res.registrationNo,
+        res.studentId, res.staffId, "",
+    )
+    if (keepCredentials) SessionStore.saveAppCredentials(identifier, password, "")
+}
+
 /** Change-password dialog. In [mandatory] mode (first sign-in with the seeded default password)
  *  it can't be dismissed — the user must set a private password before using the app. */
 @Composable
@@ -463,15 +503,62 @@ internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = fals
             else TextButton(enabled = !busy && cur.isNotBlank() && next.length >= 8 && next == confirm, onClick = {
                 busy = true; err = null
                 scope.launch {
-                    err = AppState.token?.let { AuthClient().changePassword(it, cur, next) } ?: "Not signed in"
-                    if (err == null) {
-                        // The saved credentials still hold the OLD password, and they are what the
-                        // silent re-login uses when a token expires. Left stale, the very next
-                        // launch failed to renew and dumped the user back at the sign-in screen
-                        // with a password that no longer exists — moments after they set one.
-                        SessionStore.appCredentials()?.let { (id, _, org) ->
-                            SessionStore.saveAppCredentials(id, next, org)
+                    // EVERYTHING in a runCatching. changePassword and appLogin both THROW on a
+                    // dead network — they do not return a message — and this coroutine has no
+                    // parent to catch that, so a first sign-in on a weak connection took the whole
+                    // app down on the one screen with no way back.
+                    err = runCatching {
+                        val identifier = signInIdentifier()
+                        val keepCredentials = SessionStore.appCredentials() != null
+
+                        // "Not signed in" was a dead end, and it was reachable: the token can
+                        // lapse while this dialog sits open. Recover instead of reporting — the
+                        // password in the CURRENT field is, by definition, one that works.
+                        var token = AppState.token
+                        if (token == null && identifier != null) {
+                            token = AuthClient().appLogin(identifier, cur, null) {}?.also {
+                                adoptSession(it, identifier, cur, keepCredentials)
+                            }?.token
                         }
+                        if (token == null) {
+                            return@runCatching "Your session has ended. Sign in again to set your password."
+                        }
+
+                        val failure = AuthClient().changePassword(token, cur, next)
+                        if (failure != null) return@runCatching failure
+
+                        // SIGN IN AGAIN, with the password they just chose.
+                        //
+                        // The change leaves the app holding a token minted for the old one and
+                        // saved credentials that no longer open anything. Both keep working right
+                        // up until the token lapses — and then the silent renewal presents a dead
+                        // password and the person is dropped at the sign-in screen, or every panel
+                        // that needs a token reports "Not signed in", moments after they were told
+                        // their account was secured. A fresh sign-in here makes the session
+                        // unambiguously good before any role UI asks anything of it, and it is
+                        // also what clears force_password_change on the server's copy.
+                        //
+                        // Best effort, never a barrier: the change itself has already succeeded,
+                        // and the old token stays valid (the server does not revoke it), so if
+                        // this cannot complete — offline, rate-limited, an MFA prompt we have
+                        // nowhere to show — the user still proceeds on the session they have.
+                        if (identifier != null) {
+                            runCatching {
+                                AuthClient().appLogin(identifier, next, null) {}
+                                    ?.let { adoptSession(it, identifier, next, keepCredentials) }
+                            }.onFailure {
+                                // Keep the working token; just make sure the saved password is the
+                                // real one so the NEXT renewal succeeds even though this did not.
+                                if (keepCredentials) SessionStore.saveAppCredentials(identifier, next, "")
+                            }
+                        }
+                        null
+                    }.getOrElse { e ->
+                        if (e is CancellationException) throw e
+                        ug.qaat.coordinator.net.Net.friendly(e)
+                    }
+
+                    if (err == null) {
                         AppState.forcePasswordChange = false
                         // Mandatory (temp-password) flow: save AND go straight into the dashboard.
                         if (mandatory) onClose() else done = true
