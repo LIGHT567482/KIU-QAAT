@@ -14,6 +14,7 @@ import DQACourseHealth from './pages/dqa/DQACourseHealth'
 import DQATrends from './pages/dqa/DQATrends'
 import DQAPunctuality from './pages/dqa/DQAPunctuality'
 import QADeviceReset from './pages/qa/QADeviceReset'
+import QAPresenceClaims from './pages/qa/QAPresenceClaims'
 import QAManualCorrection from './pages/qa/QAManualCorrection'
 import QACoordinatorHealth from './pages/qa/QACoordinatorHealth'
 import AdminHome from './pages/admin/AdminTenants'
@@ -86,6 +87,7 @@ export default function App() {
             <Route path="/dqa/alerts"              element={<Alerts />} />
             <Route path="/dqa/employee-attendance" element={<EmployeeAttendance />} />
             <Route path="/dqa/messages"            element={<Messages />} />
+            <Route path="/dqa/presence-claims"     element={<QAPresenceClaims />} />
           </Route>
 
           {/* ── QA Officer ─────────────────────────────────────────────── */}
@@ -94,6 +96,7 @@ export default function App() {
             <Route path="/qa/device-reset"      element={<QADeviceReset />} />
             <Route path="/qa/correction"        element={<QAManualCorrection />} />
             <Route path="/qa/coordinator-health" element={<QACoordinatorHealth />} />
+            <Route path="/qa/presence-claims"    element={<QAPresenceClaims />} />
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />
@@ -187,6 +190,7 @@ export default function App() {
             <Route path="/qa-school/reports"   element={<QAOrgReports />} />
             <Route path="/qa-school/timetable" element={<Timetable readOnly />} />
             <Route path="/qa-school/messages"  element={<Messages />} />
+            <Route path="/qa-school/presence-claims" element={<QAPresenceClaims />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />

@@ -628,6 +628,20 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleLecturer)).
 			Get("/api/v1/lecturer/sessions/{session_id}/students", handlers.LecturerSessionStudents(adminPool))
 
+		// ── The lecturer's own side of the patrol record ─────────────────────
+		//
+		// A patrol tick is one person's account of a moment, and it is the only one on file. These
+		// two give the lecturer a contemporaneous account of their own: their whole week, cached
+		// so the PHONE can resolve which lecture it is with no signal, and somewhere to file what
+		// the phone recorded once there is signal again.
+		//
+		// The timetable is on adminPool like every other lecturer read; the claim upload is on the
+		// RLS-enforced pool, because it WRITES a record that is later read as evidence.
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Get("/api/v1/lecturer/timetable", handlers.LecturerTimetable(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleLecturer)).
+			Post("/api/v1/lecturer/presence-claims", handlers.SubmitPresenceClaims(pool))
+
 		// ── Cross-role in-app notifications ──────────────────────────────────
 		// Lecturer → his students / the coordinator; Coordinator → his students / the
 		// lecturers. Students, coordinators and lecturers all read their own inbox.
@@ -752,6 +766,19 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/dashboard/qa/patrol-bindings", handlers.ListPatrolBindings(pool))
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector)).
 			Delete("/api/v1/dashboard/qa/patrol-bindings/{user_id}", handlers.ReleasePatrolBinding(pool))
+
+		// "The patroller never reached my room." The lecturer's own contemporaneous record of the
+		// same moment, each claim carrying the patrol tick for that lecturer, unit and day beside
+		// it — because the question is never what the lecturer said on its own, it is whether the
+		// two records agree.
+		//
+		// The QA_SCHOOL_HANDLER is on this list and not on patrol-bindings above, deliberately:
+		// releasing a handset is an operational action on QA's own staff, while reading a disputed
+		// lecture is the school handler's core work — they are who a lecturer's complaint reaches
+		// first. DQA sees everything; ADMIN is here because complaints escalate.
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleQASchool,
+			middleware.RoleDQADirector, middleware.RoleAdmin)).
+			Get("/api/v1/dashboard/qa/presence-claims", handlers.ListPresenceClaims(pool))
 
 		// Student attendance (ADMIN + QA + VC + DQA): filterable summary + Excel export/import.
 		// ADMIN reaches this from the Reports hub; it supports course_id/unit_id/session/

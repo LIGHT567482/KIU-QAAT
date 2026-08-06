@@ -43,6 +43,17 @@ fun LecturerApp() {
     var showChangePw by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
 
+    // Flush any presence claims filed offline, then re-cache the week they are matched against.
+    //
+    // Keyed on the REFRESH button and the session, not on `tab`: the claim a lecturer filed in a
+    // basement lecture theatre has to go up the moment the phone finds signal again, whichever tab
+    // they happen to be looking at. And the timetable has to already be on the phone BEFORE the
+    // room with no signal — a cache fetched on demand is a cache that is empty exactly when it
+    // matters. See PresenceSync.
+    LaunchedEffect(AppState.loggedIn, reloadKey) {
+        if (AppState.loggedIn) runCatching { ug.qaat.coordinator.sync.PresenceSync.refresh() }
+    }
+
     Scaffold(
         containerColor = (if (!AppState.darkTheme) appBackgroundColor(AppState.branding) else null)
             ?: MaterialTheme.colorScheme.background,
@@ -372,6 +383,11 @@ private fun LecturerAlertsTab() {
             onSent = { composing = false; load() },
         )
         Spacer(Modifier.height(8.dp))
+        // ABOVE the inbox, deliberately. A lecturer opens this tab because they were told they
+        // were recorded as NOT TAUGHT; the way to answer that has to be the thing they see, not
+        // something they scroll past a week of alerts to find.
+        PresenceClaimCard()
+        Spacer(Modifier.height(12.dp))
         NotificationInboxList(inbox) { load() }
     }
 }

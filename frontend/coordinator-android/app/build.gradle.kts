@@ -35,8 +35,10 @@ android {
         // first launch after the upgrade — going straight from 1.1.0 works too.
         // 1.3.1: the mandatory first-password screen signs you straight in on the new password
         // instead of leaving a session that lapses into "Not signed in".
-        versionCode = 7
-        versionName = "1.3.1"
+        // 1.4.0: the lecturer's "I am in the room" record — GPS fix, phone clock and the matched
+        // timetable slot, filed offline against a patrol tick. Carries Room schema 7.
+        versionCode = 8
+        versionName = "1.4.0"
         // DEFAULT backend URL the app starts with. The app works for BOTH your local server
         // AND the cloud from ONE build — it trusts the cloud's real CA cert AND the embedded
         // self-signed cert, and the URL is switchable at runtime (login "server" field /

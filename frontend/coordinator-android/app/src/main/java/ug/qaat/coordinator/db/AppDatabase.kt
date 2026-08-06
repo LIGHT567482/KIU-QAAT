@@ -146,6 +146,56 @@ data class PatrolLogEntity(
     val remarks: String = "",
 )
 
+/**
+ * A lecturer's own record of standing in the room, filed offline.
+ *
+ * A patrol tick is one person's account of a moment and it is the only one on file — so a lecturer
+ * marked NOT TAUGHT in a room the patroller never reached has nothing to answer with but their
+ * word, offered days later against a record made at the time. This is a record made at the time by
+ * the other party: one press of a button captures where the phone is, when, and which timetabled
+ * slot that lands in.
+ *
+ * IT LIVES HERE, in the SQLCipher database, for two reasons that pull the same way. Lecture rooms
+ * are where signal is worst, and the lecturer who needs this is by definition someone who could not
+ * reach the server at the time; and a claim is only worth anything if it exists from the moment it
+ * is made rather than from the moment connectivity returns. GPS needs no network, and neither does
+ * this table.
+ *
+ * The id is minted on the phone, so an upload retried after a timeout — the normal case on the
+ * connection these are filed on — cannot file the same moment twice: the server's primary key
+ * rejects the duplicate.
+ */
+@Entity(tableName = "presence_claims", indices = [Index("capturedAt")])
+data class PresenceClaimEntity(
+    @PrimaryKey val id: String,
+    /** Null when the phone could not get a fix. A claim with no coordinates is still a claim —
+     *  "I was here at 14:07" — and refusing to file it would punish a lecturer for teaching in a
+     *  basement theatre. [locationStatus] says which case this is. */
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val accuracyMetres: Double? = null,
+    /** OK | NO_FIX | PERMISSION_DENIED | DISABLED */
+    val locationStatus: String = "NO_FIX",
+    val capturedAt: String,        // RFC3339, the phone's clock
+    val sessionDate: String,       // YYYY-MM-DD (local)
+    // The slot the phone matched, from its own cached week. Blank/0 is meaningful: a claim filed
+    // when nothing is timetabled may be the lecturer being wrong about the day, and hiding that
+    // would make the record less useful to the person reading both sides.
+    val unitId: String = "",
+    val unitName: String = "",
+    val room: String = "",
+    val dayOfWeek: Int = 0,
+    val scheduledTime: String = "",
+    /** IN_SLOT | NEAR_SLOT | NEAREST | NONE — how the match was arrived at, so a reviewer can
+     *  weigh it rather than take it. */
+    val matchKind: String = "NONE",
+    /** Signed minutes from the slot's start: negative = filed early, positive = late. The number
+     *  a reviewer wants when the patrol log says 14:00 and this says 14:07. */
+    val minutesFromStart: Int? = null,
+    val note: String = "",
+    val synced: Boolean = false,
+)
+
 @Dao
 interface AppDao {
     @Query("SELECT * FROM device_bindings WHERE fingerprintHash = :fp LIMIT 1")
@@ -236,6 +286,33 @@ interface AppDao {
     @Query("SELECT * FROM timetable_slots ORDER BY dayOfWeek, startTime")
     fun timetable(): List<TimetableSlotEntity>
 
+    /** The cached week narrowed to one weekday. Slots with no day recorded (0) are included for
+     *  the same reason the patrol round includes them: an unscheduled slot is not evidence of the
+     *  wrong day, and dropping it would hide a real lecture. */
+    @Query("SELECT * FROM timetable_slots WHERE dayOfWeek = :dow OR dayOfWeek = 0 ORDER BY startTime")
+    fun timetableForDay(dow: Int): List<TimetableSlotEntity>
+
+    // ── Lecturer presence claims (offline, append-only) ─────────────────────────
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun putPresenceClaim(c: PresenceClaimEntity)
+
+    @Query("SELECT * FROM presence_claims WHERE synced = 0 ORDER BY capturedAt")
+    fun unsyncedPresenceClaims(): List<PresenceClaimEntity>
+
+    @Query("UPDATE presence_claims SET synced = 1 WHERE id = :id")
+    fun markPresenceClaimSynced(id: String)
+
+    /** The lecturer's own list, newest first — their receipt that the claim exists, and the
+     *  evidence that it reached the server (or has not yet). */
+    @Query("SELECT * FROM presence_claims ORDER BY capturedAt DESC LIMIT 50")
+    fun recentPresenceClaims(): kotlinx.coroutines.flow.Flow<List<PresenceClaimEntity>>
+
+    @Query("SELECT COUNT(*) FROM presence_claims WHERE synced = 0")
+    fun pendingPresenceClaimCount(): Int
+
+    /** Signing out must not leave one lecturer's claims on a handset the next one picks up. */
+    @Query("DELETE FROM presence_claims") fun clearPresenceClaims()
+
     // ── QA patrol (offline round) ───────────────────────────────────────────────
     @Query("DELETE FROM patrol_slots") fun clearPatrolSlots()
 
@@ -291,7 +368,7 @@ interface AppDao {
     @androidx.room.Transaction
     fun clearAllForSignOut() {
         clearAttendance(); clearRoster(); clearSessions(); clearPresentDisplay(); clearBindings()
-        clearPatrolLogs(); clearPatrolSlots(); clearTimetable()
+        clearPatrolLogs(); clearPatrolSlots(); clearTimetable(); clearPresenceClaims()
     }
 }
 
@@ -301,8 +378,9 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
 @Database(
     entities = [BindingEntity::class, AttendanceEntity::class, RosterEntity::class,
         SessionEntity::class, PresentDisplayEntity::class,
-        PatrolSlotEntity::class, PatrolLogEntity::class, TimetableSlotEntity::class],
-    version = 6,
+        PatrolSlotEntity::class, PatrolLogEntity::class, TimetableSlotEntity::class,
+        PresenceClaimEntity::class],
+    version = 7,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -405,5 +483,30 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
                  offeringId TEXT NOT NULL DEFAULT '', cohort TEXT NOT NULL DEFAULT '',
                  PRIMARY KEY(unitId, offeringId, dayOfWeek, startTime))"""
         )
+    }
+}
+
+/** v6→v7: the lecturer's presence claims — their own contemporaneous answer to a patrol tick.
+ *
+ *  Purely additive: one new table, nothing dropped and nothing rewritten. That matters more here
+ *  than usual. A lecturer disputing a tick is going to update the app to get this button, and a
+ *  migration that took the opportunity to rebuild anything would be discarding a coordinator's
+ *  queued sessions or a patroller's queued round on the same handset. */
+val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS presence_claims (
+                 id TEXT NOT NULL,
+                 latitude REAL, longitude REAL, accuracyMetres REAL,
+                 locationStatus TEXT NOT NULL DEFAULT 'NO_FIX',
+                 capturedAt TEXT NOT NULL, sessionDate TEXT NOT NULL,
+                 unitId TEXT NOT NULL DEFAULT '', unitName TEXT NOT NULL DEFAULT '',
+                 room TEXT NOT NULL DEFAULT '', dayOfWeek INTEGER NOT NULL DEFAULT 0,
+                 scheduledTime TEXT NOT NULL DEFAULT '',
+                 matchKind TEXT NOT NULL DEFAULT 'NONE', minutesFromStart INTEGER,
+                 note TEXT NOT NULL DEFAULT '', synced INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY(id))"""
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_presence_claims_capturedAt ON presence_claims (capturedAt)")
     }
 }
