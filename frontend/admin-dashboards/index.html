@@ -4,11 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KIU QAAT</title>
-    <!-- The institution mark sits beside "KIU QAAT" in every browser tab. There was no icon
-         at all before, so each tab showed a blank globe next to the name — the one place a
-         user picks this app out of fifteen open tabs. Generated from the repo-root logo.png
-         and served from public/, which Vite copies into dist/ verbatim. -->
-    <link rel="icon" type="image/png" href="/favicon.png" />
+    <!-- The institution mark sits beside "KIU QAAT" in every browser tab, generated from the
+         repo-root logo.png.
+
+         The tab icon is EMBEDDED, not linked.
+         A linked /favicon.png is a second request for a file that has to exist at the deploy
+         root, and when a deployment is stale or the SPA catch-all rewrite answers first, the
+         browser gets index.html where it expected a PNG and falls back to its own globe. That is
+         exactly what was being served. Inlined, the icon arrives with the HTML that references
+         it: no second request, nothing for a rewrite to intercept, nothing to cache separately.
+         The file below still ships for anything that wants a real URL. ~2.9 KB. -->
+    <link rel="icon" type="image/png" href="data:image/png;base64,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" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#1a7a3f" />
     <!-- Pre-paint brand colours so the very first frame is KIU-green (no black/white
