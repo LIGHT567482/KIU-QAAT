@@ -47,14 +47,19 @@ build, and the fixes that were applied to make it all work.
 > `…-<hash>-…vercel.app` snapshot URL that never updates — don't bookmark those.
 
 ### Backend (Render)
-| Service | Kind | ID | URL |
-|---------|------|----|-----|
-| qaat-gateway | web (public) | `srv-d9j04furnols73802mn0` | https://qaat-gateway.onrender.com |
-| qaat-auth | web | `srv-d9j03l37uimc73c8r9v0` | https://qaat-auth.onrender.com |
-| qaat-session | web | `srv-d9j04bn41pts73bu1h5g` | https://qaat-session.onrender.com |
-| qaat-sync | web | `srv-d9j04cernols73802g0g` | https://qaat-sync.onrender.com |
-| qaat-qr | web | `srv-d9j04d7lk1mc73fc9480` | https://qaat-qr.onrender.com |
-| qaat-notify | web | `srv-d9j04f4vikkc73d8i0p0` | https://qaat-notify.onrender.com |
+
+Names and URLs below are the ones [render.yaml](render.yaml) declares — the `kiu-qaat-*`
+generation. The earlier `qaat-*` services (and `qaat-qr`, which no longer exists in the blueprint
+at all) were retired; their URLs now answer 404. The old service IDs are gone with them, so this
+table records what is reachable rather than stale identifiers.
+
+| Service | Kind | URL |
+|---------|------|-----|
+| kiu-qaat-gateway | web (public) | https://kiu-qaat-gateway.onrender.com |
+| kiu-qaat-auth | web | https://kiu-qaat-auth.onrender.com |
+| kiu-qaat-session | web | https://kiu-qaat-session.onrender.com |
+| kiu-qaat-sync | web | https://kiu-qaat-sync.onrender.com |
+| kiu-qaat-notify | web | https://kiu-qaat-notify.onrender.com |
 | Postgres 15 | database | `dpg-d9ivn03tthos73c16ph0-a` | internal host `dpg-d9ivn03tthos73c16ph0-a` |
 | Redis (Key Value) | keyvalue | `red-d9ivn3jtqb8s739h3gog` | `redis://red-d9ivn3jtqb8s739h3gog:6379` |
 
@@ -75,7 +80,7 @@ Each app is its own Vercel project (created on first deploy), built remotely by 
 **The API URL is editable via a committed env file.** Each app has
 `frontend/<app>/.env.production` with:
 ```
-VITE_API_URL=https://qaat-gateway.onrender.com
+VITE_API_URL=https://kiu-qaat-gateway.onrender.com
 ```
 Vite bakes it into the build; edit + redeploy to repoint an app at a different backend.
 
@@ -135,7 +140,7 @@ dashboard "New → Blueprint" launch, but the live stack was created via API cal
 | `RSA_PUBLIC_KEY_PATH` | all verifiers | `/etc/secrets/auth_public.pem` |
 | `RSA_PRIVATE_KEY_PATH` | auth | `/etc/secrets/auth_private.pem` |
 | `CORS_ORIGINS` | gateway | the 4 Vercel aliases |
-| `WEBAUTHN_RP_ID` / `_ORIGINS`, `*_CHECKIN_BASE_URL` | gateway | `qaat-gateway.onrender.com` |
+| `WEBAUTHN_RP_ID` / `_ORIGINS`, `*_CHECKIN_BASE_URL` | gateway | `kiu-qaat-gateway.onrender.com` |
 | `STUDENT_PORTAL_URL` | qr | student-portal Vercel URL (so student QRs open the portal) |
 | `SMTP_*`, `VAPID_*` | qr / notify | **not set** — add real creds for QR email + web push |
 
@@ -238,7 +243,7 @@ export PATH=$JAVA_HOME/bin:$PATH
 **Output:** `app/build/outputs/apk/debug/app-debug.apk` → install with `adb install -r app-debug.apk`.
 
 - **Default backend URL** is set in `app/build.gradle.kts` (`qaat.apiBase`, defaults to
-  `https://qaat-gateway.onrender.com`). Override per build: `-Pqaat.apiBase=https://…`, or
+  `https://kiu-qaat-gateway.onrender.com`). Override per build: `-Pqaat.apiBase=https://…`, or
   switch at runtime via the login "Change server" field.
 - For a **Play Store** build you need a signing keystore: `./gradlew assembleRelease
   -Pqaat.apiBase=https://…` and sign the AAB. (Debug APK is for sideloading/pilot.)
@@ -295,15 +300,15 @@ export PATH=$JAVA_HOME/bin:$PATH
 
 ```bash
 # Gateway health
-curl https://qaat-gateway.onrender.com/health
+curl https://kiu-qaat-gateway.onrender.com/health
 
 # Super-admin login (full chain: gateway → auth → Postgres → RS256 JWT)
-curl -X POST https://qaat-gateway.onrender.com/api/v1/auth/login \
+curl -X POST https://kiu-qaat-gateway.onrender.com/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"superadmin@qaat.platform","password":"Super1234!","tenant_id":"00000000-0000-0000-0000-000000000000"}'
 
 # Lecturer-login endpoint present (expect 400 INVALID_REQUEST, not 404)
-curl -X POST https://qaat-gateway.onrender.com/api/v1/auth/lecturer-login -d '{}'
+curl -X POST https://kiu-qaat-gateway.onrender.com/api/v1/auth/lecturer-login -d '{}'
 ```
 
 Full flow: super-admin logs in → create tenant → admin adds a student → coordinator app

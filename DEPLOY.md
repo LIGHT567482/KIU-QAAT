@@ -70,21 +70,45 @@ Replace every `changeme_*` placeholder before `make up`:
 > The RSA **private** key is mounted only into `auth-service`. The api-gateway gets the
 > **public** key only. Never commit `keys/` or `.env` (both are gitignored).
 
-### 3.2 Database migrations & seeds (local)
+### 3.2 Database migrations & seeds
 
-Migrations in [db/migrations/](db/migrations/) (`001`–`013`) are mounted into the Postgres
-container's `/docker-entrypoint-initdb.d` and run **in order on first boot** of an empty volume.
+Migrations live in [db/migrations/](db/migrations/) and are applied by a **ledger-tracked tool**
+([backend/api-gateway/cmd/migrate](backend/api-gateway/cmd/migrate)): it records each file in
+`schema_migrations`, applies only what is pending, runs each inside its own transaction, and is
+safe to re-run any number of times.
 
 ```bash
-make migrate    # re-applies 001_init_schema.sql into a running DB (idempotent-ish; see note)
-make seed       # loads the two test tenants + 5 users for RLS isolation testing
-# For E2E testing, also apply the E2E seed:
+make migrate-status   # what is applied, what is pending
+make migrate          # apply everything pending
+make seed             # the two test tenants + 5 users for RLS isolation testing
+```
+
+**Against the deployed database** — point it at the remote and run the same target. This is not
+optional and it is not automatic: `render.yaml` has **no migration step**, so a deploy ships new
+code against whatever schema the database already has. Code that reads a table its migration never
+created fails at runtime, not at deploy time.
+
+```bash
+make migrate MIGRATE_DB_URL="postgres://…@…render.com/qaat?sslmode=require"
+```
+
+Run it **before** promoting the code that needs it. If the deploy has already gone out, run it
+immediately — the symptom is a 500 from one endpoint while everything else looks healthy.
+
+> **First run against a database migrated by hand:** `make migrate-adopt`. It steps over objects
+> that already exist and records them as applied, so the ledger starts from the truth instead of
+> trying to recreate half a schema.
+
+For E2E testing, also apply the E2E seed:
+
+```bash
 PGPASSWORD=changeme_db psql -h 127.0.0.1 -p 5434 -U qaat -d qaat \
   -f db/seeds/003_e2e_test_data.sql
 ```
 
-> `make migrate` only re-runs `001`. For a clean slate (re-run all five migrations), drop the
-> volume: `make down && docker volume rm qaat_pgdata` then `make up`.
+> Postgres also runs `db/migrations` from `/docker-entrypoint-initdb.d` on the **first boot of an
+> empty volume**, which is how a fresh `make up` arrives already migrated. That path only ever
+> fires once; every change after it comes through `make migrate`.
 
 ### 3.3 Tear down
 
@@ -298,5 +322,6 @@ via §4 (or wire a deploy job/GitOps separately).
 | auth-service crashloops on boot | RSA key not mounted / wrong path (`/run/secrets/auth_private.pem`) |
 | api-gateway 401 on valid token | public key mismatch, or `JWT_ISSUER`/`JWT_AUDIENCE` differ from auth-service |
 | Queries return no rows across tenants | missing `SET LOCAL app.current_tenant` — check tenant middleware / JWT `tenant_id` claim |
-| Migrations didn't apply | Postgres volume already initialized; init scripts run on **empty** volume only |
-| `make migrate` only ran one file | by design it re-runs `001` only; recreate the volume for a full re-run |
+| Migrations didn't apply | Postgres volume already initialized; init scripts run on **empty** volume only — use `make migrate` |
+| One endpoint 500s, the rest are fine | its migration has not run on that database. `make migrate-status` against the deployed URL |
+| `make migrate` says nothing is pending, but a table is missing | the ledger was baselined past it; check `SELECT * FROM schema_migrations` |

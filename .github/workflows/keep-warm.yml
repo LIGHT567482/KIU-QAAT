@@ -3,7 +3,19 @@ name: keep-warm
 # Keeps the free-tier Render services awake so sign-in is instant instead of waiting out a
 # 15–60s cold start. Render free services sleep after ~15 min idle; we ping every 5 min.
 # (GitHub scheduled runs are best-effort and can be delayed under load — if you need rock-solid
-#  uptime, also add an UptimeRobot monitor on the two URLs below. Free, 5-min interval.)
+#  uptime, also add an UptimeRobot monitor on the URLs below. Free, 5-min interval.)
+#
+# THE NAMES MUST MATCH render.yaml. This job spent weeks pinging `qaat-gateway`, `qaat-auth`,
+# `qaat-qr`, `qaat-session` and `qaat-sync` — the PREVIOUS generation of services, retired when
+# the deployment moved to its own kiu-qaat-* names. All five had been deleted and answered 404,
+# so the job "succeeded" every five minutes while the services it was supposed to keep awake slept
+# through the whole thing. Nothing failed, nothing was logged as wrong, and every first sign-in of
+# the morning paid a cold start.
+#
+# That is why the check below is not just a ping. A 404 or a 000 means the URL is wrong or the
+# service is gone, and this job now FAILS on it — the one signal that would have caught the drift.
+# A 5xx does not fail the run: a service waking up can legitimately answer badly for a moment, and
+# waking it is the entire point.
 
 on:
   schedule:
@@ -16,12 +28,22 @@ jobs:
     steps:
       - name: Wake all backend services
         run: |
+          missing=0
           for url in \
-            "https://qaat-gateway.onrender.com/health" \
-            "https://qaat-auth.onrender.com/health" \
-            "https://qaat-qr.onrender.com/health" \
-            "https://qaat-session.onrender.com/health" \
-            "https://qaat-sync.onrender.com/health"; do
+            "https://kiu-qaat-gateway.onrender.com/health" \
+            "https://kiu-qaat-auth.onrender.com/health" \
+            "https://kiu-qaat-session.onrender.com/health" \
+            "https://kiu-qaat-sync.onrender.com/health" \
+            "https://kiu-qaat-notify.onrender.com/health"; do
             code=$(curl -s -o /dev/null -w "%{http_code}" -m 60 "$url" || echo "000")
             echo "$url -> $code"
+            case "$code" in
+              404|000) echo "   ^ no service at this URL — has it been renamed or deleted?"
+                       missing=$((missing+1)) ;;
+            esac
           done
+          if [ "$missing" -gt 0 ]; then
+            echo
+            echo "$missing service URL(s) do not exist. Reconcile this list with render.yaml."
+            exit 1
+          fi

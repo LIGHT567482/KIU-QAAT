@@ -69,7 +69,7 @@ Deploy each as a **Render Web Service from this repo** (each has a Dockerfile): 
 > generate a fresh `KEY_ENCRYPTION_KEY` + VAPID keys, and keep `sslmode=require` everywhere.
 
 **Public entry:** the **api-gateway** is the only service that must be public (Render gives it
-`https://qaat-gateway.onrender.com` or your custom domain + free TLS). The others can be **private
+`https://kiu-qaat-gateway.onrender.com` or your custom domain + free TLS). The others can be **private
 services** the gateway reaches internally. (Render terminates HTTPS, so you don't need Caddy in the
 cloud — Caddy stays for the offline laptop/hotspot deployments.)
 
@@ -80,7 +80,7 @@ They connect **only to the gateway URL**, never the DB.
 - **Dashboards / student portal** (static React): the API base is `VITE_API_URL` (falls back to the
   current host). **Rebuild each with the cloud gateway URL baked in**, then host on **Render Static Sites**:
   ```bash
-  VITE_API_URL=https://qaat-gateway.onrender.com pnpm --filter admin-dashboards build   # etc.
+  VITE_API_URL=https://kiu-qaat-gateway.onrender.com pnpm --filter admin-dashboards build   # etc.
   ```
 - **Coordinator Android app — ONE build serves BOTH:** the same APK works against your **local server**
   (testing/maintenance) **and** the **cloud** (world), no rebuild:
@@ -90,7 +90,7 @@ They connect **only to the gateway URL**, never the DB.
   - **URL is switchable at runtime** — the login screen's **"Change server"** field points it at a LAN IP
     or your domain; it's remembered. You can also set the *default* per build:
     ```bash
-    ./gradlew assembleRelease -Pqaat.apiBase=https://qaat-gateway.onrender.com   # default; still overridable in-app
+    ./gradlew assembleRelease -Pqaat.apiBase=https://kiu-qaat-gateway.onrender.com   # default; still overridable in-app
     ```
   Sign the release APK/AAB and upload to Play.
 - **Coordinator PWA:** build with `VITE_API_URL=<gateway>`; host as a Render Static Site.
