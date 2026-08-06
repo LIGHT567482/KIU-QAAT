@@ -61,6 +61,7 @@ func buildSemesterArchive(ctx context.Context, q rowQuerier, tenantID string, st
 		if err != nil {
 			return nil, counts, err
 		}
+		writeCSVBOM(w) // the archive's CSVs are opened in Excel like any other; see report_text.go
 		cw := csv.NewWriter(w)
 		_ = cw.Write([]string{"log_id", "session_id", "student_id", "full_name", "intake_session",
 			"academic_year", "unit_id", "unit_name", "session_date", "checkin_timestamp", "entry_method"})
@@ -103,6 +104,7 @@ func buildSemesterArchive(ctx context.Context, q rowQuerier, tenantID string, st
 		if err != nil {
 			return nil, counts, err
 		}
+		writeCSVBOM(w) // the archive's CSVs are opened in Excel like any other; see report_text.go
 		cw := csv.NewWriter(w)
 		_ = cw.Write([]string{"session_id", "unit_id", "unit_name", "coordinator_id", "session_date", "session_status"})
 		if len(sessIDs) > 0 {
@@ -136,6 +138,7 @@ func buildSemesterArchive(ctx context.Context, q rowQuerier, tenantID string, st
 		if err != nil {
 			return nil, counts, err
 		}
+		writeCSVBOM(w) // the archive's CSVs are opened in Excel like any other; see report_text.go
 		cw := csv.NewWriter(w)
 		_ = cw.Write([]string{"session_id", "lecturer_id", "unit_id", "session_date", "gate_open_time", "gate_close_time", "contact_hours"})
 		if len(sessIDs) > 0 {

@@ -80,12 +80,15 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 		pdf := fpdf.New("L", "mm", "A4", "")
 		pdf.SetMargins(15, 15, 15)
 		pdf.AddPage()
+		// cp1252 core fonts: every string below has to be converted or its non-ASCII characters
+		// are drawn one glyph per UTF-8 byte. The title's own em dash was arriving as "â€"".
+		enc := pdfEncoder(pdf)
 
 		// Header.
 		pdf.SetFont("Helvetica", "B", 18)
-		pdf.CellFormat(0, 10, "QAAT — Session Audit Report", "", 1, "C", false, 0, "")
+		pdf.CellFormat(0, 10, enc("KIU QAAT — Session Audit Report"), "", 1, "C", false, 0, "")
 		pdf.SetFont("Helvetica", "", 10)
-		pdf.CellFormat(0, 6, tenantName+" · Generated: "+time.Now().UTC().Format("2006-01-02 15:04 UTC"), "", 1, "C", false, 0, "")
+		pdf.CellFormat(0, 6, enc(tenantName+" · Generated: "+time.Now().UTC().Format("2006-01-02 15:04 UTC")), "", 1, "C", false, 0, "")
 		pdf.Ln(6)
 
 		// Table header.
@@ -96,7 +99,7 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(255, 255, 255)
 		for i, h := range headers {
-			pdf.CellFormat(widths[i], 7, h, "1", 0, "C", true, 0, "")
+			pdf.CellFormat(widths[i], 7, enc(h), "1", 0, "C", true, 0, "")
 		}
 		pdf.Ln(-1)
 
@@ -111,7 +114,7 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			vals := []string{s.Date, s.UnitName, s.VenueID, s.CoordID, s.Status, fmt.Sprint(s.StudentCount), s.AuditFlags}
 			for j, v := range vals {
-				pdf.CellFormat(widths[j], 6, v, "1", 0, "L", true, 0, "")
+				pdf.CellFormat(widths[j], 6, enc(v), "1", 0, "L", true, 0, "")
 			}
 			pdf.Ln(-1)
 		}
@@ -126,7 +129,7 @@ func VCAuditPDF(pool *pgxpool.Pool) http.HandlerFunc {
 
 		pdf.Ln(8)
 		pdf.SetFont("Helvetica", "B", 10)
-		pdf.CellFormat(0, 6, fmt.Sprintf("Ghost lectures suspected (last 30 days): %d", ghostCount), "", 1, "L", false, 0, "")
+		pdf.CellFormat(0, 6, enc(fmt.Sprintf("Ghost lectures suspected (last 30 days): %d", ghostCount)), "", 1, "L", false, 0, "")
 
 		w.Header().Set("Content-Type", "application/pdf")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-audit-%s.pdf"`, clock.Today()))
@@ -171,6 +174,7 @@ func DQAEligibilityCSV(pool *pgxpool.Pool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="qaat-eligibility-%s.csv"`, clock.Today()))
 
+		writeCSVBOM(w) // so Excel reads it as UTF-8 rather than the system codepage
 		cw := csv.NewWriter(w)
 		cw.Write([]string{ //nolint:errcheck
 			"student_id", "full_name", "email", "course_id",

@@ -657,7 +657,13 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector,
 			middleware.RoleVC, middleware.RoleDVC, middleware.RolePatroller,
 		}
-		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool)).
+		// QA_OFFICER and DQA_DIRECTOR added: the two roles that RUN the patrol round had no way to
+		// send a patroller anything at all, so a reassigned round or a changed room was a phone
+		// call. See the audience map in SendAppNotification — they reach PATROLLERS/PATROLLER,
+		// and the lecturers and coordinators they already oversee.
+		r.With(middleware.RequireRole(middleware.RoleLecturer, middleware.RoleCoordinator, middleware.RoleHOD,
+			middleware.RoleDean, middleware.RoleQADeptRep, middleware.RoleQASchool,
+			middleware.RoleQAOfficer, middleware.RoleDQADirector)).
 			Post("/api/v1/app-notifications", handlers.SendAppNotification(adminPool))
 		r.With(middleware.RequireRole(inboxRoles...)).
 			Get("/api/v1/app-notifications", handlers.ListAppNotifications(adminPool))
@@ -779,6 +785,11 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleQASchool,
 			middleware.RoleDQADirector, middleware.RoleAdmin)).
 			Get("/api/v1/dashboard/qa/presence-claims", handlers.ListPresenceClaims(pool))
+
+		// Who QA can address a briefing to. Feeds the "one patroller" picker on the composer;
+		// see SendAppNotification's PATROLLERS / PATROLLER audiences.
+		r.With(middleware.RequireRole(middleware.RoleQAOfficer, middleware.RoleDQADirector)).
+			Get("/api/v1/dashboard/qa/patrollers", handlers.ListPatrollers(pool))
 
 		// Student attendance (ADMIN + QA + VC + DQA): filterable summary + Excel export/import.
 		// ADMIN reaches this from the Reports hub; it supports course_id/unit_id/session/

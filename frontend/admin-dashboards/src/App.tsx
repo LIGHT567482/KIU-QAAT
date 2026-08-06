@@ -15,6 +15,7 @@ import DQATrends from './pages/dqa/DQATrends'
 import DQAPunctuality from './pages/dqa/DQAPunctuality'
 import QADeviceReset from './pages/qa/QADeviceReset'
 import QAPresenceClaims from './pages/qa/QAPresenceClaims'
+import QAPatrollerBriefing from './pages/qa/QAPatrollerBriefing'
 import QAManualCorrection from './pages/qa/QAManualCorrection'
 import QACoordinatorHealth from './pages/qa/QACoordinatorHealth'
 import AdminHome from './pages/admin/AdminTenants'
@@ -88,6 +89,7 @@ export default function App() {
             <Route path="/dqa/employee-attendance" element={<EmployeeAttendance />} />
             <Route path="/dqa/messages"            element={<Messages />} />
             <Route path="/dqa/presence-claims"     element={<QAPresenceClaims />} />
+            <Route path="/dqa/patroller-messages"  element={<QAPatrollerBriefing />} />
           </Route>
 
           {/* ── QA Officer ─────────────────────────────────────────────── */}
@@ -97,6 +99,7 @@ export default function App() {
             <Route path="/qa/correction"        element={<QAManualCorrection />} />
             <Route path="/qa/coordinator-health" element={<QACoordinatorHealth />} />
             <Route path="/qa/presence-claims"    element={<QAPresenceClaims />} />
+            <Route path="/qa/patroller-messages" element={<QAPatrollerBriefing />} />
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />

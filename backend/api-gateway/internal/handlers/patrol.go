@@ -563,3 +563,52 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "SYNCED", "records_written": written})
 	}
 }
+
+// ListPatrollers — GET /api/v1/dashboard/qa/patrollers
+//
+// Who QA can address. Distinct from ListPatrolBindings, which answers "whose handset is claimed":
+// that list only ever contains patrollers who have signed in on a phone, so composing a message
+// from it would silently omit the new patroller who has not started yet — precisely the person a
+// round briefing is for.
+//
+// Inactive accounts are excluded. A message that reports "sent to 9" when three of them cannot
+// sign in is worse than no number at all.
+func ListPatrollers(pool *pgxpool.Pool) http.HandlerFunc {
+	type row struct {
+		UserID   string `json:"user_id"`
+		StaffID  string `json:"staff_id"`
+		FullName string `json:"full_name"`
+		Email    string `json:"email"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenantID := middleware.GetTenantID(r.Context())
+		conn, err := pool.Acquire(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		defer conn.Release()
+		if err := middleware.SetTenantConn(r.Context(), conn, tenantID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
+			return
+		}
+		rows, err := conn.Query(r.Context(), `
+			SELECT user_id::text, COALESCE(staff_id,''), COALESCE(full_name,''), COALESCE(email,'')
+			FROM users
+			WHERE tenant_id = $1 AND role = 'QA_PATROLLER' AND COALESCE(is_active, true)
+			ORDER BY full_name`, tenantID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
+			return
+		}
+		defer rows.Close()
+		out := []row{}
+		for rows.Next() {
+			var x row
+			if rows.Scan(&x.UserID, &x.StaffID, &x.FullName, &x.Email) == nil {
+				out = append(out, x)
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}

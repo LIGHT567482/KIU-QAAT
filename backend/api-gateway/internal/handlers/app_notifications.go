@@ -188,6 +188,46 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 			return nil, nil
 		}
 
+	// ── Quality Assurance → its own field staff ──────────────────────────────
+	//
+	// The QA officer and the DQA director could not send a notification to ANYONE. Every other
+	// role with people under it had a channel; the two roles that run the patrol round had none,
+	// so the only way to tell a patroller anything — a round reassigned, a room changed, a phone
+	// to bring in — was to find their number.
+	//
+	// Patrollers are institution-wide, not scoped to a department or a school, which is why this
+	// is its own branch rather than another audience on the org-role case above: those queries all
+	// hang off the sender's department/school, and a patroller has neither. QA is the one office
+	// whose remit is the whole institution, so the scope is the tenant.
+	case middleware.RoleQAOfficer, middleware.RoleDQADirector:
+		switch audience {
+		case "PATROLLERS": // every patroller in the institution
+			// is_active, because a suspended or departed patroller must not receive a round
+			// briefing — and because a message that reports "sent to 9" when 3 of them cannot
+			// sign in is worse than no number at all.
+			sql = `SELECT user_id::text FROM users
+				WHERE tenant_id = $1 AND role = 'QA_PATROLLER' AND COALESCE(is_active, true)`
+		case "PATROLLER": // one patroller, addressed by their staff id
+			args = append(args, targetID)
+			sql = `SELECT user_id::text FROM users
+				WHERE tenant_id = $1 AND role = 'QA_PATROLLER' AND COALESCE(is_active, true)
+				  AND btrim(lower(COALESCE(staff_id,''))) = btrim(lower($2))`
+		// The rest of QA's reach, for the same reason: these roles had no way to write to anyone.
+		case "LECTURERS":
+			sql = `SELECT l.user_id::text FROM lecturers l
+				WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL`
+		case "LECTURER":
+			args = append(args, targetID)
+			sql = `SELECT l.user_id::text FROM lecturers l
+				WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL
+				  AND btrim(lower(l.staff_id)) = btrim(lower($2))`
+		case "COORDINATORS":
+			sql = `SELECT user_id::text FROM users
+				WHERE tenant_id = $1 AND role = 'COORDINATOR' AND COALESCE(is_active, true)`
+		default:
+			return nil, nil
+		}
+
 	default:
 		return nil, nil
 	}
@@ -247,11 +287,11 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tenantID := middleware.GetTenantID(r.Context())
 		senderID := middleware.GetUserID(r.Context())
+		// The route already restricts this to the sending roles (see router.go); the `valid` map
+		// below is what decides who may address whom. This early check used to hardcode
+		// lecturer-or-coordinator and had silently fallen behind the map — an HOD passed the route
+		// and was then refused here with a message naming two roles they are neither of.
 		role := middleware.GetRole(r.Context())
-		if role != middleware.RoleLecturer && role != middleware.RoleCoordinator {
-			writeJSON(w, http.StatusForbidden, errBody("FORBIDDEN", "only a lecturer or coordinator can send notifications"))
-			return
-		}
 
 		var req struct {
 			Audience string `json:"audience"`
@@ -284,12 +324,18 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "HODS": true, "HOD": true, "DQA": true, "ADMIN": true},
 			middleware.RoleQADeptRep:   {"LECTURERS": true, "LECTURER": true, "DEAN": true, "DQA": true, "ADMIN": true},
 			middleware.RoleQASchool:    {"LECTURERS": true, "LECTURER": true, "HODS": true, "HOD": true, "DQA": true, "ADMIN": true},
+			// Quality Assurance reaches its own field staff. PATROLLERS is the round briefing —
+			// institution-wide, because that is the scope patrollers work at; PATROLLER is one
+			// person, by staff id.
+			middleware.RoleQAOfficer:   {"PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
+			middleware.RoleDQADirector: {"PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))
 			return
 		}
-		if (req.Audience == "STUDENT" || req.Audience == "LECTURER" || req.Audience == "HOD") && req.TargetID == "" {
+		if (req.Audience == "STUDENT" || req.Audience == "LECTURER" || req.Audience == "HOD" ||
+			req.Audience == "PATROLLER") && req.TargetID == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick a recipient"))
 			return
 		}

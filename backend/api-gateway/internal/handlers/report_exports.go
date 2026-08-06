@@ -68,6 +68,9 @@ func reportTenantName(r *http.Request, pool *pgxpool.Pool, tenantID string) stri
 func writeReportCSV(w http.ResponseWriter, filename string, t reportTable) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filename))
+	// Before the first row: Excel reads a downloaded .csv as the system codepage unless the file
+	// opens with this, which is how a correct UTF-8 export still showed "â€"" on a marker's screen.
+	writeCSVBOM(w)
 	cw := csv.NewWriter(w)
 	_ = cw.Write(t.Headers)
 	for _, row := range t.Rows {
@@ -124,6 +127,10 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 	pdf := fpdf.New("L", "mm", "A4", "")
 	pdf.SetMargins(margin, margin, margin)
 	pdf.SetAutoPageBreak(true, 16)
+	// Every string below goes through this. The core fonts are cp1252, and handing them raw UTF-8
+	// is what turned every em dash into "â€"". See report_text.go — it also has to happen BEFORE
+	// the width measurement and the clip loop further down, or both operate on the wrong bytes.
+	enc := pdfEncoder(pdf)
 
 	// Column widths from the relative weights (equal when none were given).
 	weights := t.Weights
@@ -147,7 +154,7 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 		pdf.SetFillColor(30, 41, 59)
 		pdf.SetTextColor(255, 255, 255)
 		for i, h := range t.Headers {
-			pdf.CellFormat(widths[i], 7, h, "1", 0, "L", true, 0, "")
+			pdf.CellFormat(widths[i], 7, enc(h), "1", 0, "L", true, 0, "")
 		}
 		pdf.Ln(-1)
 		pdf.SetFont("Helvetica", "", 8)
@@ -174,14 +181,14 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 	if institution != "" {
 		title = institution + " — " + t.Title
 	}
-	pdf.CellFormat(0, 8, title, "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 8, enc(title), "", 1, "L", false, 0, "")
 	pdf.SetFont("Helvetica", "", 9)
 	pdf.SetTextColor(100, 116, 139)
 	sub := t.Subtitle
 	if sub != "" {
 		sub += " · "
 	}
-	pdf.CellFormat(0, 5, sub+"Generated "+clock.Now().Format("2006-01-02 15:04"), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 5, enc(sub+"Generated "+clock.Now().Format("2006-01-02 15:04")), "", 1, "L", false, 0, "")
 	pdf.Ln(3)
 
 	header()
@@ -194,9 +201,14 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 		for j := range t.Headers {
 			cell := ""
 			if j < len(row) {
-				cell = row[j]
+				cell = enc(row[j])
 			}
 			// Clip rather than wrap, so every record stays on exactly one line.
+			//
+			// Safe to trim a byte at a time ONLY because enc() ran first: the text is now
+			// single-byte cp1252, so one byte is one character. On the raw UTF-8 it used to
+			// receive, this loop could stop mid-rune and leave a broken character behind — the
+			// clipper manufacturing the very corruption it was trimming to avoid.
 			for pdf.GetStringWidth(cell) > widths[j]-2 && len(cell) > 1 {
 				cell = cell[:len(cell)-1]
 			}
@@ -207,7 +219,7 @@ func writeReportPDF(w http.ResponseWriter, filename, institution string, t repor
 	if len(t.Rows) == 0 {
 		pdf.SetFont("Helvetica", "I", 9)
 		pdf.SetTextColor(100, 116, 139)
-		pdf.CellFormat(0, 8, "No records match the selected filters.", "", 1, "L", false, 0, "")
+		pdf.CellFormat(0, 8, enc("No records match the selected filters."), "", 1, "L", false, 0, "")
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
