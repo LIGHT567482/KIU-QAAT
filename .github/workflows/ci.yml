@@ -223,14 +223,31 @@ jobs:
 
       - name: Verify RLS is ENABLED and FORCED on all tenant tables
         run: |
-          PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -c "
-            SELECT relname
-            FROM pg_class
-            WHERE relkind = 'r'
-              AND relnamespace = 'public'::regnamespace
-              AND relname NOT IN ('tenants')
-              AND (NOT relrowsecurity OR NOT relforcerowsecurity);
-          " | grep -q "(0 rows)" || (echo "RLS not ENABLED+FORCED on all tables!" && exit 1)
+          # Counted, not grepped for "(0 rows)". The old form depended on psql's human-readable
+          # formatting: any change to it — a pager, a different client version, a locale — and the
+          # grep stops matching, which fails a green build or, worse, passes a broken one. -tA
+          # returns the bare number.
+          #
+          # It also NAMES the offenders before failing. "RLS not ENABLED+FORCED on all tables!"
+          # told you the state of the schema and nothing about which table was wrong.
+          missing=$(PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -tA -c "
+            SELECT COUNT(*)::int
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind = 'r' AND n.nspname = 'public'
+              AND c.relname NOT IN ('tenants', 'schema_migrations')
+              AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity);")
+          if [ "$missing" != "0" ]; then
+            echo "RLS not ENABLED+FORCED on $missing table(s):"
+            PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -c "
+              SELECT c.relname AS table_name, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
+              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE c.relkind = 'r' AND n.nspname = 'public'
+                AND c.relname NOT IN ('tenants', 'schema_migrations')
+                AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
+              ORDER BY c.relname;"
+            exit 1
+          fi
+          echo "RLS enabled + forced on every tenant table."
 
       - name: Ensure qaat_app cannot bypass RLS
         run: |
