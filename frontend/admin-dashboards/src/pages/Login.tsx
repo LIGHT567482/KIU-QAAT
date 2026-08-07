@@ -29,6 +29,62 @@ const NO_WEB_DASHBOARD: Partial<Record<Role, string>> = {
   COORDINATOR: 'Coordinators run sessions from the KIU QAAT mobile app — there is no web dashboard for this account. Sign in there with the same details, or with your coordinator code.',
 }
 
+/**
+ * Fetch that survives a sleeping backend, and reports what actually happened.
+ *
+ * THE BUG THIS REPLACES. handleSubmit called `await res.json()` before looking at the status. The
+ * services run on a free tier that hibernates after ~15 minutes idle, and a hibernating one
+ * answers with an HTML holding page (502) or a plain-text throttle (429,
+ * `x-render-routing: hibernate-rate-limited`). Calling .json() on either THROWS, the throw landed
+ * in the outer catch, and every one of those became **"Network error"** — on a machine with a
+ * perfectly good network, for a user whose password was never even checked. There was no way to
+ * tell that from a real outage, and the honest answer ("the server is waking up, wait a moment")
+ * was never shown.
+ *
+ * So: read the body as TEXT first, decide from the status and the content, and retry through the
+ * wake-up rather than reporting it as a failure. The phone app has done this since the beginning
+ * (AuthClient.appLogin) — the console simply never learned.
+ *
+ * @param onWaking called when a wake-up is detected, so the form can say so instead of freezing.
+ */
+async function fetchJSON(
+  url: string, init: RequestInit, onWaking: (msg: string) => void, attempts = 5,
+): Promise<{ status: number; data: Record<string, unknown> }> {
+  let lastText = ''
+  for (let i = 0; i < attempts; i++) {
+    let res: Response
+    try {
+      res = await fetch(url, init)
+    } catch {
+      // A genuine network failure — no server reached at all. This, and only this, is what
+      // "network error" should ever have meant.
+      if (i === attempts - 1) throw new Error('Could not reach the server. Check your connection.')
+      await new Promise(r => setTimeout(r, 1500 * (i + 1)))
+      continue
+    }
+    lastText = await res.text()
+    const looksJSON = lastText.trimStart().startsWith('{') || lastText.trimStart().startsWith('[')
+
+    // 429 with a plain-text body, or 5xx with an HTML holding page: the service is asleep and
+    // spinning up. Not an error the user can act on — wait it out.
+    const waking = res.status === 429 || (res.status >= 500 && !looksJSON)
+    if (waking && i < attempts - 1) {
+      const after = Number(res.headers.get('Retry-After')) || 0
+      const wait = Math.min(Math.max(after * 1000, 2000 * (i + 1)), 10000)
+      onWaking('The server is waking up — this takes up to a minute on the first sign-in of the day. Still trying…')
+      await new Promise(r => setTimeout(r, wait))
+      continue
+    }
+    if (!looksJSON) {
+      throw new Error(res.status === 429
+        ? 'The server is busy waking up. Wait about a minute and try again.'
+        : `The server is not answering properly yet (HTTP ${res.status}). Wait a moment and try again.`)
+    }
+    return { status: res.status, data: JSON.parse(lastText) as Record<string, unknown> }
+  }
+  throw new Error('The server is still waking up. Wait about a minute and try again.')
+}
+
 export default function Login() {
   const { login } = useAuth()
   const { theme, toggle } = useTheme()
@@ -37,12 +93,15 @@ export default function Login() {
   const [needsMFA, setNeedsMFA] = useState(false)
   const [resolvedTenantId, setResolvedTenantId] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Said out loud while a hibernating service spins up, so the button does not just sit there
+  // looking broken for a minute.
+  const [waking, setWaking] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   async function resolveTenant(email: string): Promise<string> {
-    const res = await fetch(`${API}/api/v1/auth/tenant-lookup?email=${encodeURIComponent(email)}`)
-    if (!res.ok) throw new Error('No account found for that email address.')
-    const data = await res.json()
+    const { status, data } = await fetchJSON(
+      `${API}/api/v1/auth/tenant-lookup?email=${encodeURIComponent(email)}`, {}, setWaking)
+    if (status !== 200 || !data.tenant_id) throw new Error('No account found for that email address.')
     return data.tenant_id as string
   }
 
@@ -63,12 +122,13 @@ export default function Login() {
         }
       }
 
-      const res = await fetch(`${API}/api/v1/auth/login`, {
+      const { status: loginStatus, data } = await fetchJSON(`${API}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, tenant_id: tid }),
-      })
-      const data = await res.json()
+      }, setWaking)
+      setWaking(null)
+      const res = { status: loginStatus, ok: loginStatus >= 200 && loginStatus < 300 }
 
       if (res.status === 403 && data.error === 'MFA_REQUIRED') {
         setNeedsMFA(true)
@@ -76,7 +136,7 @@ export default function Login() {
         return
       }
       if (!res.ok) {
-        setError(data.message ?? 'Login failed')
+        setError((data.message as string) ?? 'Login failed')
         setLoading(false)
         return
       }
@@ -91,22 +151,23 @@ export default function Login() {
         return
       }
 
-      sessionStorage.setItem('qaat_welcome', data.full_name || form.email)
-      login(data.access_token, {
-        userId:    data.user_id,
+      sessionStorage.setItem('qaat_welcome', (data.full_name as string) || form.email)
+      login(data.access_token as string, {
+        userId:    data.user_id as string,
         tenantId:  tid,
         role:      data.role as Role,
-        expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
+        expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in as number),
         // Carried so every dashboard can greet the person by title and name,
         // rather than only the four-second toast that fires once at sign-in.
-        fullName:  data.full_name,
-        title:     data.title,
+        fullName:  data.full_name as string,
+        title:     data.title as string,
       })
       navigate(dest)
-    } catch {
-      setError('Network error')
+    } catch (e) {
+      // The real reason, whatever it is — never a blanket "Network error".
+      setError(e instanceof Error ? e.message : 'Sign-in failed')
     } finally {
-      setLoading(false)
+      setLoading(false); setWaking(null)
     }
   }
 
@@ -129,6 +190,12 @@ export default function Login() {
         </div>
         <p style={{ color: 'var(--muted)', marginBottom: 28 }}>Sign in to your dashboard</p>
 
+        {waking && (
+          <div style={{ background: '#fffbeb', color: '#92400e', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
+            {waking}
+          </div>
+        )}
+
         {error && (
           <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '10px 14px', borderRadius: 6, marginBottom: 16 }}>
             {error}
@@ -147,7 +214,7 @@ export default function Login() {
               required autoFocus style={inp} />
           )}
           <button type="submit" disabled={loading} style={btn}>
-            {loading ? 'Signing in…' : needsMFA ? 'Verify' : 'Sign In'}
+            {loading ? (waking ? 'Waking the server…' : 'Signing in…') : needsMFA ? 'Verify' : 'Sign In'}
           </button>
         </form>
       </div>
