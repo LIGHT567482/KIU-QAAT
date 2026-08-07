@@ -402,6 +402,10 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Patch("/api/v1/admin/tenants/{tenant_id}/schools/{school_id}", handlers.UpdateSchool(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/departments", handlers.ListDepartments(adminPool))
+		// The org chart in one upload — colleges and their departments together, because that is
+		// the shape institutions already hold it in. See org_io.go.
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/org/import", handlers.ImportOrgChart(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/departments", handlers.CreateDepartment(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
@@ -488,6 +492,15 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturers/import", handlers.ImportLecturers(adminPool))
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Get("/api/v1/admin/tenants/{tenant_id}/lecturers/export.xlsx", handlers.ExportLecturersXLSX(adminPool))
+		// Removing a lecturer. The teaching record survives — lecturer_attendance_logs and the
+		// patrol logs key on the staff id as text, not by foreign key — while their assignments,
+		// biometrics and passkey go with them and their login is deactivated. See lecturers_io.go.
+		// Bulk is a POST, not a DELETE-with-body: proxies drop those bodies, and an empty list
+		// would delete nothing while reporting success.
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Delete("/api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}", handlers.DeleteLecturer(adminPool))
+		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
+			Post("/api/v1/admin/tenants/{tenant_id}/lecturers/bulk-delete", handlers.BulkDeleteLecturers(adminPool))
 		// Issue a one-time biometric-enrolment link the lecturer opens on their phone.
 		r.With(middleware.RequireRole(middleware.RoleAdmin), middleware.RequireOwnTenant).
 			Post("/api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}/enroll-link", handlers.AdminLecturerEnrollLink(adminPool, rdb))

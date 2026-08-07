@@ -4,9 +4,16 @@ import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
 // email is OPTIONAL — correspondence only; the staff ID is the lecturer's identity.
-// No `department` column: a lecturer's department comes from the units they are assigned to,
-// so an import cannot set it and a template that offered it would invite the attempt.
-const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'title', 'gender']
+//
+// `school` IS here and `department` is not, and the difference is the org model. Every lecturer
+// sits under one college, stored on the person, so a new lecturer with no units yet still belongs
+// somewhere. Their department is not stored at all: they can teach across several at once, so it
+// comes from the units they are assigned to. Offering a department column would invite an entry
+// that is then ignored.
+//
+// The school cell accepts the short form or the full title — "SOMAC" and "School of Mathematics
+// and Computing" resolve to the same college.
+const LECT_COLS = ['staff_id', 'full_name', 'email', 'phone', 'title', 'gender', 'school']
 function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
   const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
@@ -31,6 +38,16 @@ interface Lecturer {
   // `schools` above which lists everywhere they happen to teach.
   school_id: string
   school_name: string
+  /** The short form — "SOMAC". What the table column shows, because a column of full college
+   *  titles pushes every other column off the screen. */
+  school_abbrev: string
+}
+
+interface DeleteResult {
+  deleted: number
+  assignments_removed: number
+  timetable_slots_kept: number
+  logins_deactivated: number
 }
 
 const GENDERS = ['', 'Male', 'Female', 'Other']
@@ -102,10 +119,13 @@ export default function AdminLecturers() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState<string | null>(null)
-  const [dept, setDept] = useState('')
-  // The filter list is the union of the DERIVED departments, so it offers exactly the departments
-  // some lecturer actually teaches in.
-  const departments = Array.from(new Set((data ?? []).flatMap(l => l.departments ?? []).filter(Boolean))).sort()
+  // Filtered by COLLEGE, not by department. A department was the wrong axis for this screen: it is
+  // derived from assignments, so the filter silently hid every lecturer who had not been given a
+  // unit yet — exactly the people an administrator opens this page to find. A college is stored on
+  // the lecturer, so everyone appears under exactly one.
+  const [school, setSchool] = useState('')
+  const schoolOptions = Array.from(new Set(
+    (data ?? []).map(l => l.school_abbrev || l.school_name).filter(Boolean))).sort()
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -121,13 +141,56 @@ export default function AdminLecturers() {
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = '' }
   }
 
+  // ── Removing lecturers ─────────────────────────────────────────────────────
+  const [selected, setSelected] = useState<string[]>([])
+  const [deleting, setDeleting] = useState(false)
+
+  /**
+   * Delete, with the consequences shown BEFORE the confirm rather than after it.
+   *
+   * An administrator pressing this cannot see what hangs off a lecturer, so the prompt says it:
+   * their unit assignments, fingerprint and passkey go, their timetabled lectures survive with
+   * nobody attached, and their sign-in is disabled. It also says what does NOT go — the teaching
+   * record — because that is the thing people assume a delete erases, and being wrong about it in
+   * either direction is bad: someone deletes expecting the history gone, or refuses to tidy the
+   * list for fear of losing it.
+   */
+  async function handleDelete(ids: string[], label?: string) {
+    if (ids.length === 0) return
+    const who = label ? `"${label}"` : `${ids.length} lecturers`
+    if (!window.confirm(
+      `Delete ${who}?\n\n` +
+      `This removes their unit assignments, enrolled fingerprint and passkey, and disables their sign-in. ` +
+      `Their timetabled lectures stay on the timetable with no lecturer attached.\n\n` +
+      `Their teaching record is NOT deleted — attendance logs, patrol ticks and presence claims are kept.\n\n` +
+      `This cannot be undone.`)) return
+    setDeleting(true); setImportMsg(null)
+    try {
+      const res = ids.length === 1
+        ? await api.delete<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/${ids[0]}`)
+        : await api.post<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/bulk-delete`, { lecturer_ids: ids })
+      setImportMsg(
+        `Deleted ${res.deleted} lecturer(s). ` +
+        `${res.assignments_removed} assignment(s) removed, ` +
+        `${res.timetable_slots_kept} timetabled lecture(s) kept without a lecturer, ` +
+        `${res.logins_deactivated} sign-in(s) disabled.`)
+      setSelected([])
+      refetch()
+    } catch (e) {
+      setImportMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed')
+    } finally { setDeleting(false) }
+  }
+
   const [search, setSearch] = useState('')
   const q = search.trim().toLowerCase()
-  // A lecturer teaching in two departments matches BOTH — the point of dropping the single field.
   const lecturers = (status === 'ok' ? (data ?? []) : []).filter(l =>
-    (!dept || (l.departments ?? []).includes(dept)) &&
-    (!q || [l.full_name, l.staff_id, l.phone, l.title, ...(l.departments ?? [])]
+    (!school || (l.school_abbrev || l.school_name) === school) &&
+    (!q || [l.full_name, l.staff_id, l.phone, l.title, l.school_abbrev, l.school_name, ...(l.departments ?? [])]
       .some(v => (v || '').toLowerCase().includes(q))))
+
+  // Every VISIBLE row, not every row in the institution: the header checkbox must mean what the
+  // user can see, or filtering to one college and pressing it would silently select all 389.
+  const allShownSelected = lecturers.length > 0 && lecturers.every(l => selected.includes(l.lecturer_id))
 
   return (
     <div>
@@ -143,7 +206,7 @@ export default function AdminLecturers() {
             View Assignments
           </a>
           <button onClick={() => downloadText('lecturers_template.csv', LECT_COLS.join(',') + '\n')} style={btnSmall} title="Download a blank CSV with the lecturer columns">Template</button>
-          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/lecturers/export.xlsx${dept ? `?department=${encodeURIComponent(dept)}` : ''}`, 'lecturers.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall} title="Exports the filtered lecturers">Export Excel</button>
+          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/lecturers/export.xlsx`, 'lecturers.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall} title="Exports every lecturer">Export Excel</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
           <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnSmall}>{importing ? 'Importing…' : 'Import (CSV/Excel)'}</button>
           <button onClick={() => setCreating(c => !c)} style={btnPrimary}>
@@ -204,18 +267,43 @@ export default function AdminLecturers() {
       )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, staff ID, department taught or phone…"
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, staff ID, school/college or phone…"
           style={{ flex: 1, minWidth: 260, maxWidth: 420, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
-        <select value={dept} onChange={e => setDept(e.target.value)} style={{ ...selectStyle, width: 'auto', minWidth: 180 }}>
-          <option value="">All departments</option>
-          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+        <select value={school} onChange={e => setSchool(e.target.value)} style={{ ...selectStyle, width: 'auto', minWidth: 200 }}>
+          <option value="">All schools / colleges</option>
+          {schoolOptions.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
       </div>
+
+      {selected.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', marginBottom: 12,
+                      background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+          <strong style={{ color: '#b91c1c' }}>{selected.length} selected</strong>
+          <button onClick={() => handleDelete(selected)} disabled={deleting}
+            style={{ ...btnSmall, background: '#b91c1c', color: '#fff', borderColor: '#b91c1c' }}>
+            {deleting ? 'Deleting…' : `Delete ${selected.length} lecturer${selected.length > 1 ? 's' : ''}`}
+          </button>
+          <button onClick={() => setSelected([])} style={btnSmall}>Clear selection</button>
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'College', 'Teaches in', ''].map(h => (
+            <th style={{ padding: '8px 12px', width: 34, borderBottom: '1px solid #e2e8f0' }}>
+              <input
+                type="checkbox"
+                aria-label="Select every lecturer shown"
+                checked={allShownSelected}
+                onChange={e => setSelected(e.target.checked ? lecturers.map(l => l.lecturer_id) : [])}
+              />
+            </th>
+            {/* ONE college column, not the two this had. "College" and "Teaches in" sat side by
+                side showing a stored college and a derived department list, which read as two
+                answers to the same question — and the derived one was blank for every lecturer
+                without an assignment. The short form is shown because the full titles are long
+                enough that a column of them pushes the rest of the table off screen. */}
+            {['Title', 'Name', 'Gender', 'Staff ID', 'Phone', 'School / College', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -244,30 +332,31 @@ export default function AdminLecturers() {
               </td>
             </tr>
           ) : (
-            <tr key={l.lecturer_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+            <tr key={l.lecturer_id} style={{ borderBottom: '1px solid #f1f5f9', background: selected.includes(l.lecturer_id) ? '#eff6ff' : undefined }}>
+              <td style={{ padding: '10px 12px' }}>
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${l.full_name}`}
+                  checked={selected.includes(l.lecturer_id)}
+                  onChange={e => setSelected(s => e.target.checked ? [...s, l.lecturer_id] : s.filter(x => x !== l.lecturer_id))}
+                />
+              </td>
               <td style={{ padding: '10px 12px' }}>{l.title || '—'}</td>
               <td style={{ padding: '10px 12px', fontWeight: 600 }}>{l.full_name}</td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.gender || '—'}</td>
               <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 12 }}>{l.staff_id || '—'}</td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{l.phone || '—'}</td>
-              {/* The lecturer's HOME college: stored, one per lecturer, and set even when they
-                  have no unit yet. Distinct from the derived departments beside it. */}
-              <td style={{ padding: '10px 12px' }}>
-                {l.school_name
-                  ? l.school_name
-                  : <span style={{ color: '#b45309', fontSize: 12 }}>no college set</span>}
-              </td>
-              {/* Read-only, and derived: every department the lecturer reaches through a unit they
-                  are assigned to. Blank means no assignment yet — which is exactly why no HOD or
-                  dean can see them, so it is worth saying rather than showing a dash. */}
-              <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 13 }}>
-                {(l.departments ?? []).length > 0
-                  ? (l.departments ?? []).join(', ')
-                  : <span style={{ color: '#b45309' }}>no unit assigned</span>}
+              {/* The short form, with the full title on hover — and said plainly when there is
+                  none, because a lecturer under no college is invisible to every dean and HOD. */}
+              <td style={{ padding: '10px 12px', fontWeight: 600 }} title={l.school_name || undefined}>
+                {l.school_abbrev || l.school_name
+                  ? (l.school_abbrev || l.school_name)
+                  : <span style={{ color: '#b45309', fontSize: 12, fontWeight: 400 }}>no college set</span>}
               </td>
               <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                 <button onClick={() => startEdit(l)} style={btnSmall}>Edit</button>
                 <button onClick={() => makeEnroll(l)} style={{ ...btnSmall, marginLeft: 6, background: '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}>Enroll FP</button>
+                <button onClick={() => handleDelete([l.lecturer_id], l.full_name)} style={{ ...btnSmall, marginLeft: 6, background: '#fef2f2', borderColor: '#fecaca', color: '#b91c1c' }}>Delete</button>
               </td>
             </tr>
           ))}

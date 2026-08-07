@@ -863,7 +863,7 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT l.lecturer_id::text, COALESCE(l.title,''), l.full_name, COALESCE(l.gender,''),
 			       COALESCE(l.email,''), COALESCE(l.phone,''), COALESCE(l.staff_id,''),
-			       COALESCE(l.school_id::text,''), COALESCE(hs.name,''),
+			       COALESCE(l.school_id::text,''), COALESCE(hs.name,''), COALESCE(hs.abbreviation,''),
 			       COALESCE(ARRAY_AGG(DISTINCT c.department) FILTER (WHERE COALESCE(c.department,'') <> ''), '{}') AS departments,
 			       COALESCE(ARRAY_AGG(DISTINCT c.school)     FILTER (WHERE COALESCE(c.school,'')     <> ''), '{}') AS schools
 			FROM lecturers l
@@ -873,7 +873,7 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
 			WHERE l.tenant_id = $1
 			GROUP BY l.lecturer_id, l.title, l.full_name, l.gender, l.email, l.phone, l.staff_id,
-			         l.school_id, hs.name
+			         l.school_id, hs.name, hs.abbreviation
 			ORDER BY l.full_name`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -893,6 +893,10 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			// before they are given any unit.
 			SchoolID   string `json:"school_id"`
 			SchoolName string `json:"school_name"`
+			// The short form — "SOMAC", not "School of Mathematics and Computing". It is what
+			// the table column shows, because the full titles are long enough that a column of
+			// them pushes everything else off the screen.
+			SchoolAbbrev string `json:"school_abbrev"`
 			// Every department/school the lecturer reaches through a unit they teach. Plural
 			// because teaching across two colleges is ordinary, not an edge case.
 			Departments []string `json:"departments"`
@@ -902,7 +906,7 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var l lecturer
 			rows.Scan(&l.LecturerID, &l.Title, &l.FullName, &l.Gender, &l.Email, &l.Phone, &l.StaffID, //nolint:errcheck
-				&l.SchoolID, &l.SchoolName, &l.Departments, &l.Schools)
+				&l.SchoolID, &l.SchoolName, &l.SchoolAbbrev, &l.Departments, &l.Schools)
 			list = append(list, l)
 		}
 		if list == nil {

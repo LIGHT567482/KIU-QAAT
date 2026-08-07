@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
@@ -9,6 +9,24 @@ import { useQuery } from '../../lib/useApi'
 // SUPPORT departments — Finance, Admissions, Bursary, Library, ICT, Estates… — are
 // institution-wide and belong to NO school. They get their own section below, and are stored with
 // school_id NULL (migration 066) rather than parked under a fictional "Support Services" school.
+
+// ONE file carries both, because that is the shape an institution already holds its org chart in.
+// The school column repeats down a college's block exactly as a spreadsheet renders a merged cell;
+// a blank department creates the college alone, and a department with no school is a standalone
+// SUPPORT unit. See org_io.go.
+const ORG_COLS = ['school', 'abbreviation', 'department', 'kind']
+const ORG_SAMPLE = [
+  ORG_COLS.join(','),
+  'School of Mathematics and Computing,SOMAC,Computer Science,ACADEMIC',
+  'School of Mathematics and Computing,SOMAC,Information Technology,ACADEMIC',
+  'College of Economics and Management,CEM,Accounting and Finance,ACADEMIC',
+  ',,Finance,SUPPORT',
+].join('\n') + '\n'
+
+function downloadText(name: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }))
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
+}
 
 interface School { school_id: string; name: string; abbreviation: string; dept_count: number }
 interface Dept { department_id: string; school_id: string; name: string; kind: string }
@@ -41,6 +59,28 @@ export default function AdminSchools() {
   const supportDepts = depts.filter(d => d.school_id === '')
 
   function reload() { schoolsQ.refetch(); deptsQ.refetch() }
+
+  // ── Bulk import of the whole chart ─────────────────────────────────────────
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true); setImportMsg(null); setError(null)
+    try {
+      const fd = new FormData(); fd.append('roster', file)
+      const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
+        `/api/v1/admin/tenants/${tenantId}/org/import`, fd)
+      setImportMsg(
+        `Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped` +
+        (res.errors?.length ? ` · ${res.errors.length} problem(s): ${res.errors.slice(0, 3).join('; ')}` : ''))
+      reload()
+    } catch (err) {
+      setImportMsg(err instanceof Error ? `Import failed: ${err.message}` : 'Import failed')
+    } finally { setImporting(false); if (fileRef.current) fileRef.current.value = '' }
+  }
 
   async function addSchool() {
     if (!newSchool.trim() || !newAbbr.trim()) return
@@ -105,15 +145,37 @@ export default function AdminSchools() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <a href="/admin" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Admin</a>
-        <h2 style={{ margin: '4px 0 0' }}>Schools &amp; Departments</h2>
-        <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
-          Add schools/colleges and the departments under each. Courses inherit from these.
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div>
+          <a href="/admin" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Admin</a>
+          <h2 style={{ margin: '4px 0 0' }}>Schools &amp; Departments</h2>
+          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
+            Add schools/colleges and the departments under each. Courses inherit from these.
+          </p>
+        </div>
+        {/* Typing a whole org chart one college at a time is the reason these pages sit empty.
+            The template is filled in rather than a bare header row: the shape — a repeating
+            school column, a blank department for a college alone, a blank school for a support
+            unit — is the part that needs showing, and a header row alone cannot show it. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => downloadText('org_chart_template.csv', ORG_SAMPLE)} style={btnGhostSm}
+            title="A CSV with the columns and a worked example of each case">Template</button>
+          <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={handleImport}
+            accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhostSm}>
+            {importing ? 'Importing…' : 'Import (CSV/Excel)'}
+          </button>
+        </div>
       </div>
 
       {error && <div style={errorBox}>{error}</div>}
+      {importMsg && (
+        <div style={{
+          background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4',
+          color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534',
+          padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13,
+        }}>{importMsg}</div>
+      )}
 
       {/* A school has TWO names and both are needed: the full title for reports and letters, and
           the short form everyone actually says. The short form is not decoration — the backend
