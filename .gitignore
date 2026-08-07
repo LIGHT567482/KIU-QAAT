@@ -80,3 +80,7 @@ backend/notification-service/notification-service
 frontend/coordinator-android/**/build/
 frontend/coordinator-android/.gradle/
 frontend/coordinator-android/local.properties
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc
