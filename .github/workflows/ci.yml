@@ -221,33 +221,50 @@ jobs:
         env:
           PGPASSWORD: testpass
 
-      - name: Verify RLS is ENABLED and FORCED on all tenant tables
+      - name: Verify RLS is ENABLED with a policy on all tenant tables
         run: |
-          # Counted, not grepped for "(0 rows)". The old form depended on psql's human-readable
-          # formatting: any change to it — a pager, a different client version, a locale — and the
-          # grep stops matching, which fails a green build or, worse, passes a broken one. -tA
-          # returns the bare number.
+          # ENABLED + a policy. NOT forced — and the difference locked an institution out of its
+          # own system, so it is worth spelling out.
           #
-          # It also NAMES the offenders before failing. "RLS not ENABLED+FORCED on all tables!"
-          # told you the state of the schema and nothing about which table was wrong.
+          # This check used to demand relforcerowsecurity. FORCE applies a table's policies to its
+          # OWNER too, and the owner is what the auth-service, the sync-receiver and the admin
+          # handlers connect as. On managed Postgres that role is not a superuser, so forcing it
+          # meant `SELECT COUNT(*) FROM users` returned 0 and nobody could sign in. Locally the
+          # owner IS a superuser and ignores RLS entirely, so the assertion passed on every machine
+          # it was written on. See migration 082.
+          #
+          # What actually protects tenants is the policy binding qaat_app — the non-owner role the
+          # gateway serves tenant traffic with — and that is asserted for real by the isolation
+          # suite below, which runs AS qaat_app against seeded multi-tenant data.
+          #
+          # Counted, not grepped for "(0 rows)": the old form depended on psql's human-readable
+          # formatting, so a pager or a locale change could fail a green build or pass a broken
+          # one. -tA returns the bare number. It also NAMES the offenders before failing.
           missing=$(PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -tA -c "
             SELECT COUNT(*)::int
             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE c.relkind = 'r' AND n.nspname = 'public'
-              AND c.relname NOT IN ('tenants', 'schema_migrations')
-              AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity);")
+              -- tenants is the tenant REGISTRY (isolating it would hide the row a connection
+              -- must resolve BEFORE it can set app.current_tenant); schema_migrations is the
+              -- migrator's ledger; scheduled_job_runs is the scheduler's own bookkeeping and has
+              -- no tenant_id to write a policy against. None of the three is tenant data.
+              AND c.relname NOT IN ('tenants', 'schema_migrations', 'scheduled_job_runs')
+              AND (NOT c.relrowsecurity
+                   OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid));")
           if [ "$missing" != "0" ]; then
-            echo "RLS not ENABLED+FORCED on $missing table(s):"
+            echo "RLS not ENABLED, or no policy, on $missing table(s):"
             PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -c "
-              SELECT c.relname AS table_name, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced
+              SELECT c.relname AS table_name, c.relrowsecurity AS enabled,
+                     (SELECT COUNT(*) FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE c.relkind = 'r' AND n.nspname = 'public'
-                AND c.relname NOT IN ('tenants', 'schema_migrations')
-                AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
+                AND c.relname NOT IN ('tenants', 'schema_migrations', 'scheduled_job_runs')
+                AND (NOT c.relrowsecurity
+                     OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
               ORDER BY c.relname;"
             exit 1
           fi
-          echo "RLS enabled + forced on every tenant table."
+          echo "RLS enabled with a policy on every tenant table."
 
       - name: Ensure qaat_app cannot bypass RLS
         run: |
