@@ -179,6 +179,56 @@ def room_key(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+# The courtesy titles the published timetable actually uses, longest first so "Assoc.Prof." is
+# matched before the "Prof." inside it.
+TITLE_RE = re.compile(
+    r"^(assoc\.?\s*prof\.?|asst\.?\s*prof\.?|prof\.?|dr\.?|mrs\.?|mr\.?|ms\.?|miss|eng\.?|rev\.?|sr\.?|hon\.?)"
+    r"\s*\.?\s+", re.I)
+
+# One spelling per title. The file writes 'Mr.', 'MR.' and 'Mr' for the same thing, and the
+# dashboards render title + name as one string, so three spellings become three different-looking
+# people on the same screen.
+TITLE_CANON = {"dr": "Dr.", "mr": "Mr.", "mrs": "Mrs.", "ms": "Ms.", "miss": "Miss",
+               "prof": "Prof.", "assocprof": "Assoc. Prof.", "asstprof": "Asst. Prof.",
+               "eng": "Eng.", "rev": "Rev.", "sr": "Sr.", "hon": "Hon."}
+
+
+# 'PendingO', 'Pending_SEAS_2', 'Not Set 23' — the timetable office's marker for a lecture with
+# nobody assigned yet. Spelled at least eight ways, so matching only 'Pending' missed sixteen of
+# the seventeen and let them through as if they were staff.
+PLACEHOLDER_RE = re.compile(r"^\s*(pending|not\s*set|tba|tbd)", re.I)
+# No \b after the group: the file writes 'PendingO', 'Pending11' and 'Pending_SEAS' with no
+# boundary between the word and what follows, so a \b matched two of the sixteen. And no 'n/a'
+# in the alternation — unanchored it would swallow every name beginning "Na".
+
+
+def is_placeholder(name: str) -> bool:
+    return bool(PLACEHOLDER_RE.match(name or ""))
+
+
+def split_title(published: str):
+    """'Assoc.Prof. Arthur Sunday' -> ('Assoc. Prof.', 'Arthur Sunday').
+
+    The lecturers table holds title and full_name in separate columns and every dashboard joins
+    them back together for display, so leaving the title inside the name would print it twice.
+    A name with no title keeps a blank one — 17 of the 389 have none, and inventing one would be
+    asserting something about a person that the source never said.
+    """
+    name = published.strip()
+    found = []
+    # A LOOP, not one match: 'Assoc.Prof. Dr. Kareyo Margaret' carries two titles — an academic
+    # rank and a doctorate — and stripping only the first leaves 'Dr.' inside the name, where
+    # every dashboard would print it after the title it already shows.
+    while True:
+        m = TITLE_RE.match(name)
+        if not m:
+            break
+        key = re.sub(r"[^a-z]", "", m.group(1).lower())
+        found.append(TITLE_CANON.get(key, m.group(1).strip()))
+        name = name[m.end():].strip()
+    return " ".join(found), name
+
+
 def normalise_phone(s: str) -> str:
     """Ugandan mobile numbers, written five different ways in this file, to a single 07XXXXXXXX."""
     d = re.sub(r"\D", "", s or "")
@@ -225,7 +275,7 @@ def main() -> int:
         return 1
 
     lect_path, unit_path = os.path.join(args.out, "lecturers.csv"), os.path.join(args.out, "units.csv")
-    known_lect, known_unit = read_worksheet(lect_path, "lecturer_name"), read_worksheet(unit_path, "unit_id")
+    known_lect, known_unit = read_worksheet(lect_path, "full_name"), read_worksheet(unit_path, "unit_id")
     second_pass = bool(known_lect or known_unit)
 
     problems, out_rows = [], []
@@ -274,10 +324,13 @@ def main() -> int:
             flag(i, "room looks contaminated", f"{room!r} — unit text appears to have bled into this column")
 
         lect = r["Lecturer Name"].strip()
-        if lect.lower().startswith("pending"):
-            flag(i, "no lecturer", f"{lect!r} is a placeholder", "slot kept, staff_id left blank")
-        lecturers.setdefault(lect, {"lecturer_name": lect, "phone": normalise_phone(r["Mobile Number"]),
-                                    "college": college, "staff_id": "", "email": ""})
+        if is_placeholder(lect):
+            flag(i, "no lecturer", f"{lect!r} is a placeholder, not a person",
+                 "slot kept, staff_id left blank — assign someone before the term starts")
+        title, full_name = split_title(lect)
+        lecturers.setdefault(lect, {"staff_id": "", "full_name": full_name, "email": "",
+                                    "phone": normalise_phone(r["Mobile Number"]),
+                                    "title": title, "gender": ""})
 
         for code in codes:
             unit_names[code][name] += 1
@@ -315,7 +368,7 @@ def main() -> int:
         by_lect[(row["lecturer"], row["day"], row["start_time"])].append(row)
     for (lect, day, start), group in sorted(by_lect.items()):
         # Rows expanded from ONE cell are one lecture, not a clash with itself.
-        if len({g["_line"] for g in group}) > 1 and not lect.lower().startswith("pending"):
+        if len({g["_line"] for g in group}) > 1 and not is_placeholder(lect):
             where = "; ".join(f"{g['unit_id']} in {g['room']}" for g in group)
             flag(", ".join(str(g["_line"]) for g in group), "lecturer double-booked",
                  f"{lect} — {day} {start}: {where}", "both kept; the timetable office must resolve it")
@@ -331,18 +384,25 @@ def main() -> int:
                  "both kept")
 
     # Pass B — merge the worksheets and write the import file.
-    for name, row in lecturers.items():
-        if name in known_lect:
-            row["staff_id"] = known_lect[name].get("staff_id", "").strip()
-            row["email"] = known_lect[name].get("email", "").strip()
+    for _, row in lecturers.items():
+        prev = known_lect.get(row["full_name"])
+        if prev:
+            # Every column is carried back, not just staff_id: a corrected phone, a supplied
+            # gender or a fixed-up title are edits too, and silently discarding them would
+            # teach the operator that re-running loses work.
+            for f in ("staff_id", "email", "phone", "title", "gender"):
+                if prev.get(f, "").strip():
+                    row[f] = prev[f].strip()
     for code, row in units.items():
         if code in known_unit:
             for f in ("course_id", "level", "study_year", "semester"):
                 if known_unit[code].get(f, "").strip():
                     row[f] = known_unit[code][f].strip()
 
-    write_worksheet(lect_path, ["lecturer_name", "phone", "college", "staff_id", "email"],
-                    sorted(lecturers.values(), key=lambda r: r["lecturer_name"]))
+    # EXACTLY the column set and order of the lecturers table, so this file is also the
+    # lecturer-account import — one file, not two, and no re-typing of 389 names.
+    write_worksheet(lect_path, ["staff_id", "full_name", "email", "phone", "title", "gender"],
+                    sorted(lecturers.values(), key=lambda r: r["full_name"]))
     write_worksheet(unit_path, ["unit_id", "unit_name", "college", "course_id", "level", "study_year", "semester"],
                     sorted(units.values(), key=lambda r: r["unit_id"]))
 
