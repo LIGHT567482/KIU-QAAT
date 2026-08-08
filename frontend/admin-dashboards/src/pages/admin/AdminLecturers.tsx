@@ -118,7 +118,14 @@ export default function AdminLecturers() {
   // ── Bulk import / export + department filter ───────────────────────────────
   const fileRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
-  const [importMsg, setImportMsg] = useState<string | null>(null)
+  // ONE notice bar for import, export and delete, carrying its own kind.
+  //
+  // It used to be an import-only string, and whether it rendered red was decided by
+  // `startsWith('Import failed')`. Delete reused it, so a failed DELETE announced itself as
+  // "Import failed: HTTP 404" — naming the wrong feature and hiding which one actually broke.
+  // A message that has to be pattern-matched to find out if it is an error is a message that
+  // will eventually lie.
+  const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
   // Filtered by COLLEGE, not by department. A department was the wrong axis for this screen: it is
   // derived from assignments, so the filter silently hid every lecturer who had not been given a
   // unit yet — exactly the people an administrator opens this page to find. A college is stored on
@@ -130,14 +137,14 @@ export default function AdminLecturers() {
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    setImporting(true); setImportMsg(null)
+    setImporting(true); setNotice(null)
     try {
       const fd = new FormData(); fd.append('roster', file)
       const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
         `/api/v1/admin/tenants/${tenantId}/lecturers/import`, fd)
-      setImportMsg(`Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped${res.errors?.length ? ` · ${res.errors.length} error(s): ${res.errors.slice(0, 3).join('; ')}` : ''}`)
+      setNotice({ kind: 'ok', text: `Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped${res.errors?.length ? ` · ${res.errors.length} error(s): ${res.errors.slice(0, 3).join('; ')}` : ''}` })
       refetch()
-    } catch (e) { setImportMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed') }
+    } catch (e) { setNotice({ kind: 'error', text: e instanceof Error ? `Import failed: ${e.message}` : 'Import failed' }) }
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = '' }
   }
 
@@ -164,20 +171,26 @@ export default function AdminLecturers() {
       `Their timetabled lectures stay on the timetable with no lecturer attached.\n\n` +
       `Their teaching record is NOT deleted — attendance logs, patrol ticks and presence claims are kept.\n\n` +
       `This cannot be undone.`)) return
-    setDeleting(true); setImportMsg(null)
+    setDeleting(true); setNotice(null)
     try {
       const res = ids.length === 1
         ? await api.delete<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/${ids[0]}`)
         : await api.post<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/bulk-delete`, { lecturer_ids: ids })
-      setImportMsg(
+      setNotice({ kind: 'ok', text:
         `Deleted ${res.deleted} lecturer(s). ` +
         `${res.assignments_removed} assignment(s) removed, ` +
         `${res.timetable_slots_kept} timetabled lecture(s) kept without a lecturer, ` +
-        `${res.logins_deactivated} sign-in(s) disabled.`)
+        `${res.logins_deactivated} sign-in(s) disabled.` })
       setSelected([])
       refetch()
     } catch (e) {
-      setImportMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed')
+      const msg = e instanceof Error ? e.message : String(e)
+      // A 404 here does not mean "no such lecturer" — it means this SERVER has no delete route,
+      // i.e. it is running a build from before the feature. Saying "HTTP 404" sends someone
+      // hunting for a lecturer that is sitting right there in the table.
+      setNotice({ kind: 'error', text: /\b404\b/.test(msg)
+        ? 'This server does not have the delete feature yet — it is running an older build. Redeploy the API gateway from the current source, then try again.'
+        : `Delete failed: ${msg}` })
     } finally { setDeleting(false) }
   }
 
@@ -262,8 +275,12 @@ export default function AdminLecturers() {
 
       {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
-      {importMsg && (
-        <div style={{ background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>{importMsg}</div>
+      {notice && (
+        <div style={{
+          background: notice.kind === 'error' ? '#fef2f2' : '#f0fdf4',
+          color: notice.kind === 'error' ? '#b91c1c' : '#166534',
+          padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 13,
+        }}>{notice.text}</div>
       )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
