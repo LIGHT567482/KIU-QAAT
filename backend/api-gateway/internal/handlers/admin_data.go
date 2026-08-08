@@ -1165,6 +1165,15 @@ func DeleteLecturerAssignment(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		assignmentID := chi.URLParam(r, "assignment_id")
 
+		// An id that is not a UUID is a bad request, not a server fault. Passed straight to
+		// `$1::uuid` it came back as SQLSTATE 22P02 — a 500 carrying the raw Postgres error to
+		// the browser, so the Remove button reported an internal error (and leaked the query's
+		// shape) for what is simply a stale row on a page that has not been reloaded.
+		if !middleware.ValidTenantID(assignmentID) {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "assignment_id must be a UUID"))
+			return
+		}
+
 		// IDOR guard: confine callers to their own tenant's assignment.
 		tag, err := adminPool.Exec(r.Context(),
 			`DELETE FROM lecturer_assignments WHERE assignment_id = $1::uuid AND ($2 = '' OR tenant_id::text = $2)`,
@@ -1423,13 +1432,13 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			    lal.gate_open_time,
 			    lal.gate_close_time,
 			    COALESCE(lal.contact_hours, 0),
-			    COALESCE(s.session_status::text, 'UNKNOWN')
+			    COALESCE(s.session_status::text, 'UNKNOWN'),`+lecturerLogColumns+`
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers  l  ON l.lecturer_id::text = lal.lecturer_id
 			                       AND l.tenant_id = lal.tenant_id
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
 			LEFT JOIN courses      c  ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
-			LEFT JOIN sessions     s  ON s.session_id = lal.session_id
+			LEFT JOIN sessions     s  ON s.session_id = lal.session_id`+lecturerLogMonitorJoin+`
 			WHERE lal.tenant_id = $1
 			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
 		if err != nil {
@@ -1450,6 +1459,7 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			GateCloseTime string  `json:"gate_close_time"`
 			ContactHours  float64 `json:"contact_hours"`
 			SessionStatus string  `json:"session_status"`
+			lecturerLogExtras
 		}
 		var list []logRow
 		for rows.Next() {
@@ -1458,9 +1468,10 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			var gateOpen time.Time
 			var gateClose *time.Time
 			var contactHours float64
-			rows.Scan(&lr.LogID, &lr.LecturerID, &lr.LecturerName, &lr.Department,
+			rows.Scan(append([]interface{}{&lr.LogID, &lr.LecturerID, &lr.LecturerName, &lr.Department,
 				&lr.UnitID, &lr.UnitName, &sessionDate,
-				&gateOpen, &gateClose, &contactHours, &lr.SessionStatus) //nolint:errcheck
+				&gateOpen, &gateClose, &contactHours, &lr.SessionStatus},
+				lr.lecturerLogExtras.scanTargets()...)...) //nolint:errcheck
 			lr.SessionDate = sessionDate.Format("2006-01-02")
 			lr.GateOpenTime = gateOpen.Format(time.RFC3339)
 			lr.ContactHours = contactHours

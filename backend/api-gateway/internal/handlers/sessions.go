@@ -92,10 +92,33 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		// Everything from the "already open?" check to the INSERT runs in ONE
+		// transaction, under an advisory lock held per coordinator.
+		//
+		// The check and the insert used to be two loose statements, and two taps that
+		// arrived together — a double-tap, or the PWA retrying on a bad hotspot —
+		// both saw no open session and both inserted. Measured: 20 simultaneous opens
+		// produced 2 sessions. That splits one lecture across two rosters, each with
+		// its own room code, so half the hall checks into a session the coordinator
+		// is not looking at. The lock is transaction-scoped, so it is released on
+		// commit OR rollback and cannot be leaked back into the pool.
+		tx, err := conn.Begin(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "INTERNAL_ERROR"})
+			return
+		}
+		defer tx.Rollback(context.Background()) //nolint:errcheck
+
+		if _, err := tx.Exec(r.Context(),
+			`SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`, tenantID, coordID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "INTERNAL_ERROR"})
+			return
+		}
+
 		// One open session per coordinator: if they already have an ACTIVE (or
 		// awaiting-lecturer) session, make them end it before starting another.
 		var openID string
-		_ = conn.QueryRow(r.Context(),
+		_ = tx.QueryRow(r.Context(),
 			`SELECT session_id::text FROM sessions
 			 WHERE coordinator_id = $1 AND tenant_id = $2
 			   AND session_status IN ('ACTIVE','PENDING_LECTURER') LIMIT 1`,
@@ -111,7 +134,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// Check-in window length comes from tenant policy.
 		var windowMinutes int
-		if err := conn.QueryRow(r.Context(),
+		if err := tx.QueryRow(r.Context(),
 			`SELECT checkin_window_minutes FROM tenants WHERE tenant_id = $1`, tenantID).
 			Scan(&windowMinutes); err != nil || windowMinutes <= 0 {
 			windowMinutes = 30
@@ -123,14 +146,14 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 		// Resolve the coordinator's offering (session cohort) so the attendance
 		// session + roster are scoped to it (one coordinator can't see another's).
 		var offeringID string
-		_ = conn.QueryRow(r.Context(),
+		_ = tx.QueryRow(r.Context(),
 			`SELECT offering_id::text FROM course_offerings WHERE coordinator_id = $1 AND tenant_id = $2`,
 			coordID, tenantID).Scan(&offeringID)
 
 		// Units are mapped to lecturers via lecturer_assignments — auto-pick the
 		// unit's assigned lecturer so the coordinator doesn't choose one manually.
 		if req.LecturerID == "" {
-			_ = conn.QueryRow(r.Context(),
+			_ = tx.QueryRow(r.Context(),
 				`SELECT la.lecturer_id::text FROM lecturer_assignments la
 				 WHERE la.unit_id = $1 AND la.tenant_id = $2
 				 ORDER BY la.created_at LIMIT 1`,
@@ -143,7 +166,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 		// The coordinator's egress IP anchors the LAN-proximity anti-proxy gate:
 		// the lecturer's gate scan must later originate from this same network.
 		coordIP := middleware.ClientIP(r)
-		err = conn.QueryRow(r.Context(), `
+		err = tx.QueryRow(r.Context(), `
 			INSERT INTO sessions
 			    (tenant_id, coordinator_id, unit_id, venue_id, lecturer_id, session_date,
 			     gate_open_time, checkin_window_start, checkin_window_end,
@@ -180,12 +203,17 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 		// attendance entry even before the session closes. gate_close_time and
 		// contact_hours are filled by CloseSession.
 		if req.LecturerID != "" {
-			conn.Exec(r.Context(), `
+			tx.Exec(r.Context(), `
 				INSERT INTO lecturer_attendance_logs
 				    (tenant_id, session_id, lecturer_id, gate_open_time, unit_id, venue_id, session_date)
 				VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7)
 				ON CONFLICT DO NOTHING`,
 				tenantID, sessionID, req.LecturerID, now, req.UnitID, req.VenueID, sessionDate) //nolint:errcheck
+		}
+
+		if err := tx.Commit(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "INTERNAL_ERROR"})
+			return
 		}
 
 		writeJSON(w, http.StatusCreated, openSessionResponse{

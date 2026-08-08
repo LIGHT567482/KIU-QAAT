@@ -8,6 +8,12 @@ export type Role =
   // Teaching & Learning Centre — owns the timetable. It used to be the IT
   // administrator's by default, which was an accident of who had the button.
   | 'TLC'
+  // Roles with no web dashboard. They are in the union because sign-in has to be able to NAME
+  // them: a role the type does not know about falls through to "this account has no dashboard",
+  // which reads like a fault rather than "your round is on the phone". The stored value of the
+  // monitor role is still QA_PATROLLER — see lib/roleLabel.ts for why the word and the value
+  // differ.
+  | 'QA_PATROLLER' | 'STUDENT'
 
 interface AuthUser {
   userId: string

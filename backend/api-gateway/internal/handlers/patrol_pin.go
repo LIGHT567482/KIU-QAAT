@@ -338,7 +338,7 @@ func ResetPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		auditAdmin(r, pool, tenantID, actorID, "PATROL_PIN_RESET", "user", targetID,
-			`{"note":"patrol PIN cleared; the patroller must set a new one on next sign-in"}`)
+			`{"note":"round PIN cleared; the QA monitor must set a new one on next sign-in"}`)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "PIN_RESET"})
 	}
 }

@@ -32,12 +32,12 @@ func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(l.full_name, lal.lecturer_id), COALESCE(c.department,''),
 			       lal.unit_id, COALESCE(cu.name, lal.unit_id), lal.session_date,
 			       lal.gate_open_time, lal.gate_close_time, COALESCE(lal.contact_hours,0),
-			       COALESCE(s.session_status::text,'UNKNOWN')
+			       COALESCE(s.session_status::text,'UNKNOWN'),`+lecturerLogColumns+`
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id AND l.tenant_id = lal.tenant_id
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
 			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
-			LEFT JOIN sessions s ON s.session_id = lal.session_id
+			LEFT JOIN sessions s ON s.session_id = lal.session_id`+lecturerLogMonitorJoin+`
 			WHERE lal.tenant_id = $1
 			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
 		if err != nil {
@@ -58,14 +58,17 @@ func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 			GateCloseTime string  `json:"gate_close_time"`
 			ContactHours  float64 `json:"contact_hours"`
 			SessionStatus string  `json:"session_status"`
+			lecturerLogExtras
 		}
 		out := []logRow{}
 		for rows.Next() {
 			var l logRow
 			var sd time.Time
 			var open, close *time.Time
-			rows.Scan(&l.LogID, &l.LecturerID, &l.LecturerName, &l.Department, &l.UnitID, &l.UnitName, //nolint:errcheck
-				&sd, &open, &close, &l.ContactHours, &l.SessionStatus)
+			rows.Scan(append([]interface{}{ //nolint:errcheck
+				&l.LogID, &l.LecturerID, &l.LecturerName, &l.Department, &l.UnitID, &l.UnitName,
+				&sd, &open, &close, &l.ContactHours, &l.SessionStatus},
+				l.lecturerLogExtras.scanTargets()...)...)
 			l.SessionDate = sd.Format("2006-01-02")
 			if open != nil {
 				l.GateOpenTime = open.Format(time.RFC3339)

@@ -247,6 +247,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
     var results by remember { mutableStateOf<List<PatrolSlotEntity>?>(null) }   // null = nothing searched yet
     var searching by remember { mutableStateOf(false) }
     var chosen by remember { mutableStateOf<PatrolSlotEntity?>(null) }
+    var manualOpen by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf(0) }
     val logs by dao.patrolLogsForDay(today()).collectAsStateWithLifecycle(emptyList())
@@ -297,7 +298,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
         searching = false
     }
 
-    fun tick(s: PatrolSlotEntity, taught: Boolean, found: FoundElsewhere?) = scope.launch {
+    fun tick(s: PatrolSlotEntity, taught: Boolean, found: FoundElsewhere?, comp: Compensation?) = scope.launch {
         withContext(Dispatchers.IO) {
             dao.putPatrolLog(PatrolLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -311,6 +312,8 @@ private fun PatrolRoundTab(reloadKey: Int) {
                 foundDate = found?.date.orEmpty(),
                 venueChanged = found != null,
                 remarks = found?.remarks.orEmpty(),
+                isCompensation = comp != null,
+                compensationFor = comp?.forDate.orEmpty(),
             ))
         }
         chosen = null
@@ -327,11 +330,21 @@ private fun PatrolRoundTab(reloadKey: Int) {
     val done = logs.associateBy { slotKey(it.unitId, it.scheduledTime, it.offeringId) }
 
     // The confirm sheet: one lecture, one green tick, one red cross.
+    // MANUAL ENTRY — the way in for a lecture the timetable does not know about. It sits on the
+    // round screen rather than in a menu because that is where the monitor already is when they
+    // discover the timetable is wrong.
+    if (manualOpen) {
+        ManualAttendanceSheet(
+            onDismiss = { manualOpen = false },
+            onRecorded = { note = it },
+        )
+    }
+
     chosen?.let { slot ->
         PatrolConfirmSheet(
             slot = slot,
             onDismiss = { chosen = null },
-            onDecide = { taught, found -> tick(slot, taught, found) },
+            onDecide = { taught, found, comp -> tick(slot, taught, found, comp) },
         )
     }
 
@@ -353,6 +366,8 @@ private fun PatrolRoundTab(reloadKey: Int) {
                 label = { Text("By lecturer ID") })
             FilterChip(selected = mode == "unit", onClick = { mode = "unit"; results = null },
                 label = { Text("By unit code") })
+            Spacer(Modifier.weight(1f))
+            AssistChip(onClick = { manualOpen = true }, label = { Text("Not timetabled?") })
         }
         OutlinedTextField(
             value = query,
@@ -404,6 +419,9 @@ private fun PatrolRoundTab(reloadKey: Int) {
 }
 
 /** What the patroller found, when it was not where the timetable said. */
+/** What the monitor recorded about a lecture making good an earlier one. */
+private data class Compensation(val forDate: String)
+
 private data class FoundElsewhere(
     val venue: String,
     val time: String,
@@ -465,9 +483,13 @@ private fun PatrolResultCard(
 private fun PatrolConfirmSheet(
     slot: PatrolSlotEntity,
     onDismiss: () -> Unit,
-    onDecide: (taught: Boolean, found: FoundElsewhere?) -> Unit,
+    onDecide: (taught: Boolean, found: FoundElsewhere?, comp: Compensation?) -> Unit,
 ) {
     var moved by remember { mutableStateOf(false) }
+    // A COMPENSATION — this lecture is making good an earlier one. Only the monitor standing in
+    // the room can establish it, so it is asked here and nowhere else.
+    var isComp by remember { mutableStateOf(false) }
+    var compFor by remember { mutableStateOf("") }
     var venue by remember { mutableStateOf(slot.room) }
     var time by remember { mutableStateOf(slot.startTime) }
     var date by remember { mutableStateOf(today()) }
@@ -483,6 +505,10 @@ private fun PatrolConfirmSheet(
         return if (changed || remarks.isNotBlank())
             FoundElsewhere(venue.trim(), time.trim(), date.trim(), remarks.trim()) else null
     }
+
+    // The date is optional: a monitor told "this is a compensation" but not which lecture it makes
+    // good is still recording something true, and refusing it would lose the fact entirely.
+    fun compensation(): Compensation? = if (isComp) Compensation(compFor.trim()) else null
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(20.dp)) {
@@ -500,18 +526,36 @@ private fun PatrolConfirmSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = isComp, onCheckedChange = { isComp = it })
+                Column {
+                    Text("This is a compensation lecture", fontWeight = FontWeight.SemiBold)
+                    Text("Making good a lecture that did not happen",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (isComp) {
+                OutlinedTextField(
+                    value = compFor, onValueChange = { compFor = it },
+                    label = { Text("For the lecture of (YYYY-MM-DD, optional)") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             Spacer(Modifier.height(20.dp))
             Text("Is the lecturer teaching?", fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
                     modifier = Modifier.weight(1f).height(56.dp),
-                    onClick = { onDecide(true, found()) },
+                    onClick = { onDecide(true, found(), compensation()) },
                 ) { Text("✓  Yes", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                 Button(
                     modifier = Modifier.weight(1f).height(56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    onClick = { onDecide(false, found()) },
+                    onClick = { onDecide(false, found(), compensation()) },
                 ) { Text("✗  No", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
             }
 

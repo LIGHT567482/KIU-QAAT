@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
+import CompensationTag from '../../components/CompensationTag'
 
-// Lecturer attendance — QA PATROL record.
+// Lecturer attendance — QA MONITOR record.
 //
 // The second, independent witness to the same lectures. The coordinator's page records what the
-// lecturer themselves started and ended; this records what a QA patroller saw when they walked into
+// lecturer themselves started and ended; this records what a QA monitor saw when they walked into
 // the room. The two are kept apart on purpose: where they disagree — a session the coordinator
-// logged but the patroller found empty — is precisely what QA is looking for, and merging them
+// logged but the monitor found empty — is precisely what QA is looking for, and merging them
 // would hide it.
 
 interface Summary {
@@ -16,9 +17,12 @@ interface Summary {
   patrolled: number; taught: number; missed: number; rate: number; last_patrol_date: string
 }
 interface Visit {
-  patrol_id: string; lecturer_id: string; unit_id: string; unit_name: string
+  patrol_id: string; lecturer_id: string; lecturer_name: string; unit_id: string; unit_name: string
   room: string; session_date: string; scheduled_time: string; taught: boolean
   patroller_name: string; patroller_staff_id: string; taken_at: string
+  qa_monitor: string; qa_monitor_staff_id: string
+  class_group: string; students_attended: number
+  is_compensation: boolean; compensation_for: string
 }
 
 export default function PatrolLecturerAttendance() {
@@ -51,7 +55,7 @@ export default function PatrolLecturerAttendance() {
     <div style={{ color: 'var(--text)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13, maxWidth: 620 }}>
-          What a QA patroller observed on walking into the room — an independent check against the
+          What a QA monitor observed on walking into the room — an independent check against the
           coordinator's record. One row per lecturer; open it for every visit.
         </p>
         <ExportButtons base="/api/v1/dashboard/lecturer-attendance/patrol/export"
@@ -78,21 +82,21 @@ export default function PatrolLecturerAttendance() {
       {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
       {status === 'ok' && summary.length === 0 && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 10, padding: 16, fontSize: 13 }}>
-          No patrols recorded yet. Records appear here once a QA patroller submits their rounds from
-          the Patrol app.
+          No monitor visits recorded yet. Records appear here once a QA monitor submits their
+          rounds from the phone app.
         </div>
       )}
 
       {summary.length > 0 && (
         <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 8 }}>
-          Overall: <strong style={{ color: 'var(--text)' }}>{totals.t}</strong> of {totals.p} patrols found the lecturer teaching
+          Overall: <strong style={{ color: 'var(--text)' }}>{totals.t}</strong> of {totals.p} monitor visits found the lecturer teaching
           {totals.p > 0 && ` (${Math.round((totals.t / totals.p) * 100)}%)`}.
         </div>
       )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead><tr style={{ background: 'var(--surface,#f8fafc)' }}>
-          {['Lecturer', 'Staff ID', 'Department', 'Patrolled', 'Teaching', 'Missed', 'Rate', 'Last patrol', ''].map(h =>
+          {['Lecturer', 'Staff ID', 'Department', 'Monitored', 'Teaching', 'Missed', 'Rate', 'Last visit', ''].map(h =>
             <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid var(--border,#e2e8f0)', whiteSpace: 'nowrap' }}>{h}</th>)}
         </tr></thead>
         <tbody>
@@ -118,7 +122,7 @@ export default function PatrolLecturerAttendance() {
               {open.has(s.lecturer_id) && (
                 <tr key={`${s.lecturer_id}-v`}><td colSpan={9} style={{ padding: '0 12px 14px', background: 'var(--surface,#f8fafc)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr>{['Date', 'Time', 'Unit', 'Room', 'Verdict', 'Patroller', 'Recorded'].map(h =>
+                    <thead><tr>{['Date', 'Time', 'Unit', 'Class/Group', 'Room', 'Verdict', 'Students', 'QA Monitor', 'Recorded'].map(h =>
                       <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)' }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {visitsFor(s.lecturer_id).map(v => (
@@ -128,7 +132,9 @@ export default function PatrolLecturerAttendance() {
                           <td style={{ padding: '6px 10px' }}>
                             {v.unit_name || v.unit_id}
                             <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>{v.unit_id}</span>
+                            {v.is_compensation && <CompensationTag forDate={v.compensation_for} />}
                           </td>
+                          <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{v.class_group || '—'}</td>
                           <td style={{ padding: '6px 10px' }}>{v.room || '—'}</td>
                           <td style={{ padding: '6px 10px' }}>
                             <span style={{
@@ -137,9 +143,11 @@ export default function PatrolLecturerAttendance() {
                               color: v.taught ? '#166534' : '#b91c1c',
                             }}>{v.taught ? 'TEACHING' : 'NOT TEACHING'}</span>
                           </td>
+                          <td style={{ padding: '6px 10px' }}>{v.students_attended}</td>
                           <td style={{ padding: '6px 10px' }}>
-                            {v.patroller_name || '—'}
-                            {v.patroller_staff_id && <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 6 }}>{v.patroller_staff_id}</span>}
+                            {v.qa_monitor || v.patroller_name || '—'}
+                            {(v.qa_monitor_staff_id || v.patroller_staff_id) &&
+                              <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 6 }}>{v.qa_monitor_staff_id || v.patroller_staff_id}</span>}
                           </td>
                           <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>
                             {v.taken_at ? new Date(v.taken_at).toLocaleString() : '—'}
@@ -147,7 +155,7 @@ export default function PatrolLecturerAttendance() {
                         </tr>
                       ))}
                       {visitsFor(s.lecturer_id).length === 0 && (
-                        <tr><td colSpan={7} style={{ padding: 12, color: 'var(--muted)' }}>No visits in this date range.</td></tr>
+                        <tr><td colSpan={9} style={{ padding: 12, color: 'var(--muted)' }}>No visits in this date range.</td></tr>
                       )}
                     </tbody>
                   </table>

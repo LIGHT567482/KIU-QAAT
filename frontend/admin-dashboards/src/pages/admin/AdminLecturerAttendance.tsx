@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
 import RecordTabs from '../../components/RecordTabs'
+import CompensationTag from '../../components/CompensationTag'
 import PatrolLecturerAttendance from '../shared/PatrolLecturerAttendance'
 
 interface SummaryRow {
@@ -29,6 +30,16 @@ interface LogRow {
   gate_close_time: string
   contact_hours:  number
   session_status: string
+  /** How many students were marked present in that session, counted from the check-in ledger. */
+  students_attended: number
+  /** The cohort that sat in it, as YEAR:SEMESTER — "2:1". */
+  class_group: string
+  /** The QA monitor who independently witnessed the same lecture, if one did. */
+  qa_monitor: string
+  qa_monitor_staff_id: string
+  /** Recorded by that monitor as making good an earlier lecture. */
+  is_compensation: boolean
+  compensation_for: string
 }
 
 // Two independent records of the same lectures, on two pages of one feature — the coordinator's
@@ -143,7 +154,7 @@ function CoordinatorRecord() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                       <thead>
                         <tr>
-                          {['Date', 'Unit', 'Gate Open', 'Gate Close', 'Contact Hrs', 'Status'].map(h => (
+                          {['Date', 'Unit', 'Class/Group', 'Students', 'Gate Open', 'Gate Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => (
                             <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>{h}</th>
                           ))}
                         </tr>
@@ -152,15 +163,28 @@ function CoordinatorRecord() {
                         {logsFor(s.lecturer_id).map(l => (
                           <tr key={l.log_id} style={{ borderTop: '1px solid #e8eef4' }}>
                             <td style={{ padding: '6px 10px', fontWeight: 600 }}>{fmtDate(l.session_date)}</td>
-                            <td style={{ padding: '6px 10px' }}>{l.unit_name} <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span></td>
+                            <td style={{ padding: '6px 10px' }}>
+                              {l.unit_name} <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span>
+                              {l.is_compensation && <CompensationTag forDate={l.compensation_for} />}
+                            </td>
+                            <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{l.class_group || '—'}</td>
+                            {/* How many actually came. A lecture the lecturer started and nobody
+                                attended is a very different event from a full room, and the log
+                                could not tell them apart. */}
+                            <td style={{ padding: '6px 10px', fontWeight: 600 }}>{l.students_attended}</td>
                             <td style={{ padding: '6px 10px', color: '#475569' }}>{fmt(l.gate_open_time)}</td>
                             <td style={{ padding: '6px 10px', color: l.gate_close_time ? '#475569' : 'var(--muted)' }}>{l.gate_close_time ? fmt(l.gate_close_time) : 'In progress'}</td>
                             <td style={{ padding: '6px 10px' }}>{l.contact_hours > 0 ? `${Number(l.contact_hours).toFixed(2)} h` : '—'}</td>
+                            <td style={{ padding: '6px 10px' }}>
+                              {l.qa_monitor
+                                ? <>{l.qa_monitor}{l.qa_monitor_staff_id && <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}> {l.qa_monitor_staff_id}</span>}</>
+                                : <span style={{ color: 'var(--muted)' }}>Not visited</span>}
+                            </td>
                             <td style={{ padding: '6px 10px' }}>{statusBadge(l.session_status)}</td>
                           </tr>
                         ))}
                         {logsFor(s.lecturer_id).length === 0 && (
-                          <tr><td colSpan={6} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>
+                          <tr><td colSpan={9} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>
                         )}
                       </tbody>
                     </table>

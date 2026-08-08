@@ -192,15 +192,15 @@ func venueChangeMessage(l patrolLogIn) (subject, body string) {
 	}
 
 	body = fmt.Sprintf(
-		"QA patrol found this lecture away from %s — %s.\n\n"+
+		"The QA monitor found this lecture away from %s — %s.\n\n"+
 			"This change was not recorded on the timetable. If it is permanent, ask the "+
 			"Teaching & Learning Centre to update the published week; students are still "+
 			"being sent to the timetabled room.",
 		published, strings.Join(changes, "; "))
 	if r := strings.TrimSpace(l.Remarks); r != "" {
-		// "Note recorded on patrol", not "Patroller's note" — the possessive invited the reader
+		// "Note recorded by the QA monitor", not "QA monitor's note" — the possessive invited the reader
 		// to wonder whose, which is the question these alerts deliberately stop answering.
-		body += "\n\nNote recorded on patrol: " + r
+		body += "\n\nNote recorded by the QA monitor: " + r
 	}
 	return subject, body
 }

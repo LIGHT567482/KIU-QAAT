@@ -36,7 +36,7 @@ export default function QAReports() {
 
       {/* ── Lecturer teaching report ─────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h3 style={{ margin: '0 0 8px' }}>Lecturer teaching (from patrols)</h3>
+        <h3 style={{ margin: '0 0 8px' }}>Lecturer teaching (from QA monitor rounds)</h3>
         <ExportButtons base="/api/v1/reports/lecturer-teaching/export" filename="lecturer-teaching"
           query={qs} disabled={rows.length === 0} />
       </div>
@@ -52,11 +52,11 @@ export default function QAReports() {
           </select>
         </Field>
       </div>
-      {rep.status === 'loading' ? <div style={muted}>Loading…</div> : rows.length === 0 ? <div style={muted}>No patrol data for these filters.</div> : (
+      {rep.status === 'loading' ? <div style={muted}>Loading…</div> : rows.length === 0 ? <div style={muted}>No QA monitor data for these filters.</div> : (
         <>
-          <div style={{ ...muted, marginBottom: 6 }}>Overall: {rep.data?.total_taught}/{rep.data?.total_patrolled} patrols found teaching.</div>
+          <div style={{ ...muted, marginBottom: 6 }}>Overall: {rep.data?.total_taught}/{rep.data?.total_patrolled} monitor visits found teaching.</div>
           <table style={table}>
-            <thead><tr style={htr}><th style={th}>Lecturer</th><th style={th}>Staff ID</th><th style={th}>Department</th><th style={th}>School</th><th style={th}>Taught / Patrolled</th></tr></thead>
+            <thead><tr style={htr}><th style={th}>Lecturer</th><th style={th}>Staff ID</th><th style={th}>Department</th><th style={th}>School</th><th style={th}>Taught / Monitored</th></tr></thead>
             <tbody>
               {rows.map(l => {
                 const pct = l.patrolled ? Math.round((l.taught / l.patrolled) * 100) : null

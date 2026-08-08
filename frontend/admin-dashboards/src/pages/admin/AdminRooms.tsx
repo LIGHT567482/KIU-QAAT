@@ -88,7 +88,7 @@ export default function AdminRooms() {
           <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Rooms &amp; Room Codes</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
-            The room code is what the timetable and the patroller app point at — pick it once, then keep it.
+            The room code is what the timetable and the QA monitor app point at — pick it once, then keep it.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>

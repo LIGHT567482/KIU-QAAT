@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../lib/api'
+import { roleLabel } from '../../lib/roleLabel'
 import { useAuth } from '../../contexts/AuthContext'
 
 interface Msg {
@@ -119,7 +120,7 @@ function MessageList({ box }: { box: 'inbox' | 'sent' }) {
                   {m.subject}
                 </span>
                 <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  {box === 'sent' ? `To: ${audienceLabel(m)}` : `From: ${m.sender_name} (${m.sender_role.replace(/_/g, ' ')})`}
+                  {box === 'sent' ? `To: ${audienceLabel(m)}` : `From: ${m.sender_name} (${roleLabel(m.sender_role)})`}
                   {m.has_attachment && ' · 📎'}
                 </span>
               </span>

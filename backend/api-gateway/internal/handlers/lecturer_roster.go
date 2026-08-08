@@ -145,11 +145,23 @@ func LecturerSessions(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(o.study_year,0), COALESCE(o.semester,0), COALESCE(o.level,''), COALESCE(o.intake,''),
 			       ses.session_status::text,
 			       (SELECT count(*) FROM attendance_logs al WHERE al.session_id = ses.session_id) AS present,
-			       (SELECT count(*) FROM students_extended s WHERE s.offering_id = ses.offering_id AND s.enrollment_status='ACTIVE') AS enrolled
+			       (SELECT count(*) FROM students_extended s WHERE s.offering_id = ses.offering_id AND s.enrollment_status='ACTIVE') AS enrolled,
+			       -- The QA monitor's side of the same lecture, so the lecturer sees the second
+			       -- record about them rather than only hearing of it when it is quoted back.
+			       COALESCE(mon.patroller_name,''), COALESCE(mon.is_compensation,false),
+			       COALESCE(mon.compensation_for::text,'')
 			FROM sessions ses
 			JOIN lecturer_assignments la ON la.unit_id = ses.unit_id AND la.tenant_id = ses.tenant_id AND la.lecturer_id = $2::uuid
 			LEFT JOIN course_units cu     ON cu.unit_id = ses.unit_id AND cu.tenant_id = ses.tenant_id
 			LEFT JOIN course_offerings o  ON o.offering_id = ses.offering_id AND o.tenant_id = ses.tenant_id
+			LEFT JOIN LATERAL (
+			    SELECT pl.patroller_name, pl.is_compensation, pl.compensation_for
+			      FROM lecturer_patrol_logs pl
+			     WHERE pl.tenant_id = ses.tenant_id AND pl.unit_id = ses.unit_id
+			       AND pl.session_date = ses.session_date
+			     ORDER BY pl.is_compensation DESC, pl.taken_at DESC
+			     LIMIT 1
+			) mon ON true
 			WHERE ses.tenant_id = $1`+unitWhere+`
 			ORDER BY ses.session_date DESC, ses.gate_open_time DESC`, args...)
 		if err != nil {
@@ -165,9 +177,15 @@ func LecturerSessions(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Date      string `json:"session_date"`
 			DayOfWeek int    `json:"day_of_week"`
 			Cohort    string `json:"cohort"`
-			Status    string `json:"status"`
-			Present   int    `json:"present_count"`
-			Enrolled  int    `json:"enrolled_count"`
+			// The same cohort as YEAR:SEMESTER ("2:1"), which is how the institution says it
+			// aloud and how it is written on every other attendance record.
+			ClassGroup      string `json:"class_group"`
+			Status          string `json:"status"`
+			Present         int    `json:"present_count"`
+			Enrolled        int    `json:"enrolled_count"`
+			QAMonitor       string `json:"qa_monitor"`
+			IsCompensation  bool   `json:"is_compensation"`
+			CompensationFor string `json:"compensation_for"`
 		}
 		out := []sess{}
 		for rows.Next() {
@@ -175,10 +193,12 @@ func LecturerSessions(adminPool *pgxpool.Pool) http.HandlerFunc {
 			var yr, sm int
 			var lvl, intake string
 			if rows.Scan(&x.SessionID, &x.UnitID, &x.UnitName, &x.Date, &x.DayOfWeek,
-				&yr, &sm, &lvl, &intake, &x.Status, &x.Present, &x.Enrolled) != nil {
+				&yr, &sm, &lvl, &intake, &x.Status, &x.Present, &x.Enrolled,
+				&x.QAMonitor, &x.IsCompensation, &x.CompensationFor) != nil {
 				continue
 			}
 			x.Cohort = cohortLabel(yr, sm, lvl, intake)
+			x.ClassGroup = classGroup(yr, sm)
 			out = append(out, x)
 		}
 		writeJSON(w, http.StatusOK, out)

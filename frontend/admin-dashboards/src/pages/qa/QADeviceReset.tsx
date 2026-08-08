@@ -121,14 +121,14 @@ function PatrollerHandsets() {
       setRows(r.bindings ?? [])
     } catch (e) {
       setRows([])
-      setErr(e instanceof Error ? e.message : 'Could not load patroller handsets')
+      setErr(e instanceof Error ? e.message : 'Could not load monitor handsets')
     }
   }, [])
 
   useEffect(() => { void load() }, [load])
 
   async function release(b: PatrolBinding) {
-    const who = b.full_name || b.staff_id || b.email || 'this patroller'
+    const who = b.full_name || b.staff_id || b.email || 'this monitor'
     if (!confirm(`Release ${who}'s handset?\n\nThey will claim whichever phone they next sign in on. This is recorded in the audit trail.`)) return
     setBusy(b.user_id); setNote(''); setErr('')
     try {
@@ -150,9 +150,9 @@ function PatrollerHandsets() {
 
   return (
     <section style={{ marginTop: 44, borderTop: '1px solid #e2e8f0', paddingTop: 28 }}>
-      <h2 style={{ marginBottom: 4 }}>Patroller handsets</h2>
+      <h2 style={{ marginBottom: 4 }}>QA monitor handsets</h2>
       <p style={{ color: 'var(--muted)', marginBottom: 20 }}>
-        Which phone each QA patroller is registered on. Release one when a patroller has changed
+        Which phone each QA monitor is registered on. Release one when a monitor has changed
         phone or is locked out of their round — they claim the new handset on their next sign-in.
         Every release is written to the audit trail.
       </p>
@@ -162,7 +162,7 @@ function PatrollerHandsets() {
 
       {rows === null && <div style={{ color: 'var(--muted)' }}>Loading…</div>}
       {rows !== null && rows.length === 0 && !err && (
-        <div style={{ color: 'var(--muted)' }}>No patroller has claimed a handset yet.</div>
+        <div style={{ color: 'var(--muted)' }}>No QA monitor has claimed a handset yet.</div>
       )}
 
       {rows !== null && rows.length > 0 && (
@@ -170,7 +170,7 @@ function PatrollerHandsets() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
-                <th style={th}>Patroller</th>
+                <th style={th}>QA Monitor</th>
                 <th style={th}>Staff ID</th>
                 <th style={th}>Claimed</th>
                 <th style={th}>Last used</th>

@@ -58,8 +58,12 @@ inbox(){ curl -sk "$BASE/api/v1/app-notifications" -H "Authorization: Bearer $1"
 echo; echo "── 1. QA officer briefs every patroller ──"
 # Counted from the database, not hardcoded: this institution already has patrollers of its own,
 # and a fixed number would have failed for a reason that had nothing to do with the code.
+# Scoped to the SENDER'S tenant, like the broadcast is: any other institution in the same
+# database has patrollers of its own, and counting those made this fail for a reason that had
+# nothing to do with the code.
 ACTIVE=$(docker exec -i "$PG" psql -U qaat -d qaat -tAc \
-  "SELECT COUNT(*) FROM users WHERE role='QA_PATROLLER' AND COALESCE(is_active,true);")
+  "SELECT COUNT(*) FROM users u WHERE u.role='QA_PATROLLER' AND COALESCE(u.is_active,true)
+     AND u.tenant_id = (SELECT tenant_id FROM users WHERE staff_id='QPTEST-QA');")
 R=$(send "$QA" PATROLLERS "" "QPTEST round change" "Start at the Science block today.")
 echo "   $R  (active patrollers: $ACTIVE)"
 check "reached every ACTIVE patroller and no inactive one" "$(python3 -c "import json,sys;print(json.load(sys.stdin)['recipients'])" <<<"$R")" "$ACTIVE"

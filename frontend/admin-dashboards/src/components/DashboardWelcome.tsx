@@ -28,6 +28,9 @@ const ROLE_LABEL: Record<Role, string> = {
   QA_SCHOOL_HANDLER: 'QA School Handler',
   QA_DEPT_REP: 'QA Department Representative',
   TLC: 'Teaching & Learning Centre',
+  // No web dashboard — present only so the type covers every role sign-in can return.
+  QA_PATROLLER: 'QA Monitor',
+  STUDENT: 'Student',
 }
 
 function partOfDay(h: number): string {

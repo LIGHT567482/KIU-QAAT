@@ -191,7 +191,9 @@ class PatrolClient {
                 .put("offering_id", l.offeringId)
                 .put("found_venue", l.foundVenue).put("found_start_time", l.foundStartTime)
                 .put("found_date", l.foundDate).put("venue_changed", l.venueChanged)
-                .put("remarks", l.remarks))
+                .put("remarks", l.remarks)
+                .put("is_compensation", l.isCompensation)
+                .put("compensation_for", l.compensationFor))
         }
         val r = http.post("$base/api/v1/patrol/sync") {
             auth(token, fingerprint)
@@ -211,4 +213,93 @@ class PatrolClient {
         /** The signed-in patroller's token, or null when the session has gone. */
         val token: String? get() = AppState.token
     }
+
+    /** GET /api/v1/patrol/reference — the pick-lists, in one call so the form cannot half-load. */
+    suspend fun reference(token: String, fingerprint: String): PatrolReference = withContext(Dispatchers.IO) {
+        val r = http.get("$base/api/v1/patrol/reference") { auth(token, fingerprint) }
+        if (!r.status.isSuccess()) return@withContext PatrolReference()
+        val o = JSONObject(r.bodyAsText())
+        fun arr(key: String) = o.optJSONArray(key) ?: JSONArray()
+        val rooms = (0 until arr("rooms").length()).map {
+            val x = arr("rooms").getJSONObject(it)
+            RefItem(x.optString("venue_id"), x.optString("name").ifBlank { x.optString("venue_id") },
+                x.optString("building"))
+        }
+        val defaults = mutableMapOf<String, Pair<String, String>>()
+        val units = (0 until arr("units").length()).map {
+            val x = arr("units").getJSONObject(it)
+            defaults[x.optString("unit_id")] = x.optString("class_group") to x.optString("school")
+            RefItem(x.optString("unit_id"), x.optString("unit_name").ifBlank { x.optString("unit_id") },
+                x.optString("course_id"))
+        }
+        val lecturers = (0 until arr("lecturers").length()).map {
+            val x = arr("lecturers").getJSONObject(it)
+            RefItem(x.optString("staff_id"), x.optString("full_name").ifBlank { x.optString("staff_id") },
+                x.optString("department"))
+        }
+        val schools = (0 until arr("schools").length()).map { arr("schools").getString(it) }
+        PatrolReference(rooms, units, lecturers, schools, defaults)
+    }
+
+    /**
+     * POST /api/v1/patrol/manual — file a lecture that is not on the timetable.
+     *
+     * Unlike a tick, this is sent immediately rather than queued: the monitor is describing a
+     * lecture from scratch, and holding that in a local queue means the one record nobody else
+     * has is also the one most likely to be lost with the handset. Returns the server's message
+     * on refusal so the form can say WHICH field it wants, rather than "failed".
+     */
+    suspend fun manual(token: String, fingerprint: String, e: ManualEntry): String? = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("room_id", e.roomId).put("room", e.room)
+            .put("unit_id", e.unitId).put("unit_name", e.unitName)
+            .put("lecturer_staff_id", e.lecturerStaffId).put("lecturer_name", e.lecturerName)
+            .put("class_group", e.classGroup).put("school", e.school)
+            .put("students_counted", e.studentsCounted)
+            .put("session_date", e.sessionDate).put("time_of_day", e.timeOfDay)
+            .put("taught", e.taught).put("remarks", e.remarks)
+            .put("is_compensation", e.isCompensation).put("compensation_for", e.compensationFor)
+        val r = http.post("$base/api/v1/patrol/manual") {
+            auth(token, fingerprint); contentType(ContentType.Application.Json); setBody(payload.toString())
+        }
+        if (r.status.value == 403) throw DeviceRejected(deviceMessage(r.bodyAsText()))
+        if (r.status.isSuccess()) null
+        else runCatching { JSONObject(r.bodyAsText()).optString("message") }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: "Could not record it (${r.status.value})"
+    }
+
 }
+
+/**
+ * The reference lists behind the manual-entry form, and the call that files one.
+ *
+ * Kept in this file because they belong to the same round as the search and the sync above, and
+ * because they share its device header: a manual record accuses a named lecturer exactly as a tick
+ * does, and it must be answerable to the same handset.
+ */
+
+/** One entry of a pick-list. `id` is what the server keys on, `label` what the monitor reads. */
+data class RefItem(val id: String, val label: String, val extra: String = "")
+
+/** Everything the manual form offers to pick from, fetched in ONE call and cached for the round. */
+data class PatrolReference(
+    val rooms: List<RefItem> = emptyList(),
+    val units: List<RefItem> = emptyList(),
+    val lecturers: List<RefItem> = emptyList(),
+    val schools: List<String> = emptyList(),
+    /** unit_id → the class/group and college the curriculum already knows, so picking a unit
+     *  fills them in and the monitor is not asked to retype what the system has. */
+    val unitDefaults: Map<String, Pair<String, String>> = emptyMap(),
+)
+
+/** What the monitor saw, for a lecture with nothing on the timetable to tick. */
+data class ManualEntry(
+    val roomId: String = "", val room: String = "",
+    val unitId: String = "", val unitName: String = "",
+    val lecturerStaffId: String = "", val lecturerName: String = "",
+    val classGroup: String = "", val school: String = "",
+    val studentsCounted: Int = 0,
+    val sessionDate: String = "", val timeOfDay: String = "",
+    val taught: Boolean = true, val remarks: String = "",
+    val isCompensation: Boolean = false, val compensationFor: String = "",
+)

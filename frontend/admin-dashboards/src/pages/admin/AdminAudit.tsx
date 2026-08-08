@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../lib/api'
+import { roleLabel } from '../../lib/roleLabel'
 import { useQuery } from '../../lib/useApi'
 
 /**
@@ -33,8 +34,8 @@ interface Resp { entries: Entry[]; actions: string[] }
 const LABEL: Record<string, string> = {
   USER_DELETED: 'Deleted an account',
   STUDENT_DEVICE_RESET: 'Reset a student’s device binding',
-  PATROL_DEVICE_RELEASED: 'Released a patroller’s handset',
-  PATROL_PIN_RESET: 'Cleared a patroller’s PIN',
+  PATROL_DEVICE_RELEASED: 'Released a QA monitor’s handset',
+  PATROL_PIN_RESET: 'Cleared a QA monitor’s PIN',
 }
 
 // Which actions are worth a second glance in a list of hundreds.
@@ -115,7 +116,7 @@ export default function AdminAudit() {
                   <td style={td}>
                     {e.actor_name || <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{e.actor_id}</span>}
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      {e.actor_role.replace(/_/g, ' ')}{e.ip_address ? ` · ${e.ip_address}` : ''}
+                      {roleLabel(e.actor_role)}{e.ip_address ? ` · ${e.ip_address}` : ''}
                     </div>
                   </td>
                   <td style={{ ...td, fontWeight: 600 }}>

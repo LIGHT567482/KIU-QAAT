@@ -47,7 +47,8 @@ func CoordinatorRateLimit() func(http.Handler) http.Handler {
 			if GetRole(r.Context()) == RoleCoordinator {
 				limiter = getCoordinatorLimiter(GetUserID(r.Context()))
 			} else {
-				limiter = getGlobalLimiter(r.RemoteAddr)
+				// ClientIP, not RemoteAddr — see the note in PublicIPRateLimit.
+				limiter = getGlobalLimiter(ClientIP(r))
 			}
 
 			if !limiter.Allow() {
@@ -69,6 +70,15 @@ func CoordinatorRateLimit() func(http.Handler) http.Handler {
 // human action, so a few requests/second per IP is generous; the cap exists only
 // to blunt scripted abuse / room-code brute force (the signed-QR gate already
 // restricts attempts to holders of a real, enrolled QR).
+//
+// KEYED ON ClientIP, NOT RemoteAddr. Both limiters in this file used to bucket on
+// r.RemoteAddr, which is "host:port" — a fresh port on every TCP connection, so a
+// caller that did not reuse its connection got a fresh, full bucket every request
+// and neither limiter limited anything (a brute-force loop ran unthrottled, and
+// the map grew one entry per connection). Behind Caddy, RemoteAddr is also always
+// the proxy's own address, so what survived of the limit was shared by the whole
+// internet rather than applied per caller. ClientIP reads Caddy's X-Forwarded-For,
+// which the LAN-proximity gate already trusts, and Caddy is the only ingress.
 func PublicIPRateLimit(perSec rate.Limit, burst int) func(http.Handler) http.Handler {
 	type entry struct {
 		lim  *rate.Limiter
@@ -110,7 +120,7 @@ func PublicIPRateLimit(perSec rate.Limit, burst int) func(http.Handler) http.Han
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !get(r.RemoteAddr).Allow() {
+			if !get(ClientIP(r)).Allow() {
 				// Retry-After lets a client back off intelligently instead of hammering or
 				// giving up. This matters most on sign-in: a whole cohort opening the app in a
 				// lecture hall arrives from ONE public IP (the campus NAT), so they share a

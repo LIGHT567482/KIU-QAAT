@@ -40,7 +40,7 @@ export default function QAPatrollerBriefing() {
   useEffect(() => {
     api.get<Patroller[]>('/api/v1/dashboard/qa/patrollers')
       .then(setPatrollers)
-      .catch(e => { setPatrollers([]); setError(e instanceof Error ? e.message : 'Could not load patrollers') })
+      .catch(e => { setPatrollers([]); setError(e instanceof Error ? e.message : 'Could not load monitors') })
   }, [])
 
   async function send(e: FormEvent) {
@@ -54,7 +54,7 @@ export default function QAPatrollerBriefing() {
         body: body.trim(),
       })
       const who = toAll
-        ? 'every patroller'
+        ? 'every QA monitor'
         : patrollers?.find(p => p.staff_id === target)?.full_name || target
       setSent({ count: res.recipients ?? 0, to: who })
       setSubject(''); setBody('')
@@ -69,7 +69,7 @@ export default function QAPatrollerBriefing() {
 
   return (
     <div style={{ maxWidth: 680 }}>
-      <h2 style={{ marginBottom: 4 }}>Message the patrollers</h2>
+      <h2 style={{ marginBottom: 4 }}>Message the QA monitors</h2>
       <p style={{ color: 'var(--muted)', marginBottom: 20 }}>
         Goes straight to the alerts tab of their phone app, with a badge — the screen they already
         check between rooms. It stays in their inbox until they clear it.
@@ -78,8 +78,8 @@ export default function QAPatrollerBriefing() {
       {sent && (
         <div style={successBox}>
           Sent to {sent.to}
-          {sent.count > 0 && <> — <strong>{sent.count}</strong> {sent.count === 1 ? 'patroller' : 'patrollers'}</>}.
-          {sent.count === 0 && ' No active patroller matched, so nobody received it.'}
+          {sent.count > 0 && <> — <strong>{sent.count}</strong> {sent.count === 1 ? 'monitor' : 'monitors'}</>}.
+          {sent.count === 0 && ' No active monitor matched, so nobody received it.'}
         </div>
       )}
       {error && <div style={errorBox}>{error}</div>}
@@ -89,11 +89,11 @@ export default function QAPatrollerBriefing() {
           <legend style={{ padding: '0 6px', fontSize: 13, color: 'var(--muted)' }}>Who</legend>
           <label style={row}>
             <input type="radio" checked={toAll} onChange={() => setToAll(true)} />
-            <span>Every patroller {patrollers && <span style={{ color: 'var(--muted)' }}>({patrollers.length})</span>}</span>
+            <span>Every QA monitor {patrollers && <span style={{ color: 'var(--muted)' }}>({patrollers.length})</span>}</span>
           </label>
           <label style={row}>
             <input type="radio" checked={!toAll} onChange={() => setToAll(false)} />
-            <span>One patroller</span>
+            <span>One QA monitor</span>
           </label>
           {!toAll && (
             <select value={target} onChange={e => setTarget(e.target.value)} style={{ ...inp, marginTop: 8 }}>
@@ -107,7 +107,7 @@ export default function QAPatrollerBriefing() {
           )}
           {patrollers?.length === 0 && (
             <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 8, marginBottom: 0 }}>
-              No active patroller accounts exist yet. An administrator creates them under Users.
+              No active QA monitor accounts exist yet. An administrator creates them under Users.
             </p>
           )}
         </fieldset>
@@ -131,7 +131,7 @@ export default function QAPatrollerBriefing() {
         </label>
 
         <button type="submit" disabled={!canSend} style={{ ...btn, opacity: canSend ? 1 : 0.5 }}>
-          {busy ? 'Sending…' : toAll ? 'Send to every patroller' : 'Send'}
+          {busy ? 'Sending…' : toAll ? 'Send to every QA monitor' : 'Send'}
         </button>
       </form>
 

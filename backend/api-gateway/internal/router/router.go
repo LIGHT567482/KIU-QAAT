@@ -157,6 +157,17 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		r.Post("/api/v1/auth/change-password", authProxy)
 		r.Post("/api/v1/auth/change-email", authProxy)
 
+		// ── Ending and renewing a session ────────────────────────────────────
+		// auth-service has always implemented both — logout writes the token's jti
+		// to the Redis blacklist that JWTAuth above already checks — but neither was
+		// routed here, and the gateway is the only ingress. Signing out therefore
+		// dropped the token client-side and left it VALID for the rest of its
+		// 24-hour life: a token lifted from a shared lecture-hall handset could not
+		// be revoked by anyone. Routing them makes the revocation that already
+		// exists reachable.
+		r.Post("/api/v1/auth/logout", authProxy)
+		r.Post("/api/v1/auth/refresh", authProxy)
+
 		// ── Daily Manifest ────────────────────────────────────────────────────
 		r.With(middleware.RequireRole(middleware.RoleCoordinator)).
 			Get("/api/v1/manifest/daily", handlers.ManifestDaily(pool, rdb))
@@ -175,6 +186,15 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			Get("/api/v1/patrol/search", handlers.PatrolSearch(pool))
 		r.With(middleware.RequireRole(middleware.RolePatroller)).
 			Post("/api/v1/patrol/sync", handlers.PatrolSync(pool))
+		// The lecture that was taught but never timetabled. The round is generated FROM the
+		// timetable, so until now a monitor standing in front of a real lecture with no slot to
+		// tick could either record nothing or tick whichever slot looked closest — filing a true
+		// observation under the wrong lecture. /reference feeds the form's pick-lists in one call
+		// (a corridor is where signal is worst); /manual files the record.
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Get("/api/v1/patrol/reference", handlers.PatrolReference(pool))
+		r.With(middleware.RequireRole(middleware.RolePatroller)).
+			Post("/api/v1/patrol/manual", handlers.PatrolManualEntry(pool))
 		// The patroller's SECOND FACTOR (migration 071). The handset binding above proves WHICH
 		// phone; the PIN proves WHO is holding it. Set on the first sign-in, entered on every one
 		// after, before the round will open.
@@ -217,7 +237,14 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// route trusts its tenant parameter, which is exactly what an HOD must not be
 		// given. Deans are included because a school without an HOD in post still needs
 		// someone able to staff its units.
-		hodAssign := middleware.RequireRole(middleware.RoleHOD, middleware.RoleDean, middleware.RoleAdmin)
+		//
+		// THE TLC IS THE DEFAULT ASSIGNER. Building a timetable is not only placing an hour in a
+		// room, it is saying who teaches it — and with that split across two desks, the TLC laid
+		// out the week and then had to ask someone else to name the lecturers in it, which is how
+		// a timetable gets published with blank slots. They are bounded to their own department by
+		// resolveOrgScope, exactly like an HOD; the administrator keeps the institution-wide
+		// power so a department with no TLC in post is still staffable.
+		hodAssign := middleware.RequireRole(middleware.RoleHOD, middleware.RoleDean, middleware.RoleAdmin, middleware.RoleTLC)
 		r.With(hodAssign).Get("/api/v1/hod/assignments", handlers.HODListAssignments(pool))
 		r.With(hodAssign).Get("/api/v1/hod/assignable", handlers.HODAssignable(pool))
 		r.With(hodAssign).Post("/api/v1/hod/assignments", handlers.HODCreateAssignment(pool))
@@ -735,17 +762,27 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 
 		// Timetable (ADMIN + QA OFFICER): view the coordinator-filled weekly schedule
 		// of every offering's units, with override power on the PUT.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer,
-			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep,
-			middleware.RoleDQADirector)).
+		// The TLC is on BOTH verbs here. Designing the timetable is the TLC's job — it was on
+		// the slot grid below but not on this one, so the role that owns the schedule could not
+		// use the editor that sets a unit's day and hour. A departmental TLC is confined to
+		// their own department inside the handler (migration 083 / checkTimetableScope); the
+		// role guard only decides who may reach the page at all.
+		// READ is open to every oversight role, VC and DVC included: the timetable is the schedule
+		// that every attendance figure on their dashboards is measured against, and a number whose
+		// baseline you cannot see is a number you cannot check.
+		timetableReaders := middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer,
+			middleware.RoleTLC, middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool,
+			middleware.RoleQADeptRep, middleware.RoleDQADirector, middleware.RoleVC, middleware.RoleDVC)
+		r.With(timetableReaders).
 			Get("/api/v1/dashboard/timetable", handlers.TimetableOverview(pool))
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer)).
+		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleTLC)).
 			Put("/api/v1/dashboard/timetable", handlers.SetTimetableSchedule(pool, rdb))
 		// The tenant's active rooms, for the timetable grid's room picker — read-only and
 		// RLS-scoped, so every dashboard role that shows a room can ask for the list.
 		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleDQADirector,
 			middleware.RoleCoordinator, middleware.RoleHOD, middleware.RoleDean,
-			middleware.RoleQASchool, middleware.RoleQADeptRep)).
+			middleware.RoleQASchool, middleware.RoleQADeptRep, middleware.RoleTLC,
+			middleware.RoleVC, middleware.RoleDVC)).
 			Get("/api/v1/dashboard/rooms", handlers.DashboardRooms(pool))
 
 		// Multi-slot weekly timetable grid (one slot per unit per day, with room).
@@ -757,9 +794,7 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 		// actually is. ADMIN is kept on the guard deliberately: an institution that has not
 		// created a TLC account yet would otherwise have nobody who can edit the schedule,
 		// and the first symptom would be a timetable that cannot be corrected.
-		r.With(middleware.RequireRole(middleware.RoleAdmin, middleware.RoleQAOfficer, middleware.RoleTLC,
-			middleware.RoleHOD, middleware.RoleDean, middleware.RoleQASchool, middleware.RoleQADeptRep,
-			middleware.RoleDQADirector)).
+		r.With(timetableReaders).
 			Get("/api/v1/dashboard/timetable/slots", handlers.GetTimetableSlots(pool))
 		r.With(middleware.RequireRole(middleware.RoleTLC, middleware.RoleAdmin, middleware.RoleQAOfficer)).
 			Put("/api/v1/dashboard/timetable/slots", handlers.UpsertTimetableSlot(pool, rdb))

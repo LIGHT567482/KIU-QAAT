@@ -101,7 +101,7 @@ function AdminPulse({ tenantId }: { tenantId: string }) {
 
   // Ordered by how badly each one silently breaks something, worst first.
   const gapTiles: { label: string; key: string; sub: string; href?: string }[] = [
-    { label: 'Units with no lecturer', key: 'units_unstaffed', sub: 'blank on timetables & patrol', href: `/admin/tenants/${tenantId}/lecturer-assignments` },
+    { label: 'Units with no lecturer', key: 'units_unstaffed', sub: 'blank on timetables & monitor rounds', href: `/admin/tenants/${tenantId}/lecturer-assignments` },
     { label: 'Cohorts with no coordinator', key: 'cohorts_uncoordinated', sub: 'no session can be opened', href: `/admin/tenants/${tenantId}/coordinators` },
     // The org tree breaking away from the academic data. Both directions are silent: the HOD sees
     // a blank dashboard, the dean sees a department that reports nothing, and neither can tell why.
@@ -111,7 +111,7 @@ function AdminPulse({ tenantId }: { tenantId: string }) {
     { label: 'Students with no cohort', key: 'students_no_cohort', sub: 'invisible to their coordinator', href: `/admin/tenants/${tenantId}/students` },
     { label: 'Org roles with no unit', key: 'org_roles_unscoped', sub: 'their dashboards show nothing', href: `/admin/tenants/${tenantId}/users` },
     { label: 'Still on default password', key: 'accounts_default_password', sub: 'never signed in and changed it' },
-    { label: 'Patrollers with no handset', key: 'patrollers_unbound', sub: 'cannot start a round' },
+    { label: 'QA monitors with no handset', key: 'patrollers_unbound', sub: 'cannot start a round' },
     { label: 'Sessions not synced', key: 'sessions_unsynced', sub: 'attendance still on a phone' },
   ]
   const openGaps = gapTiles.filter(t => (g[t.key] ?? 0) > 0)
@@ -125,7 +125,7 @@ function AdminPulse({ tenantId }: { tenantId: string }) {
           <Kpi label="Check-ins today" value={a.checkins_today ?? 0} sub="student attendance marks" />
           <Kpi label="Lecturer gate-ins today" value={a.lecturer_gates_today ?? 0} sub="lecturers who started a class" />
           <Kpi label="Sessions this week" value={a.sessions_week ?? 0} />
-          <Kpi label="Patrols this week" value={a.patrols_week ?? 0} sub="QA spot-checks" />
+          <Kpi label="Monitor visits this week" value={a.patrols_week ?? 0} sub="QA spot-checks" />
         </KpiRow>
       </Section>
 

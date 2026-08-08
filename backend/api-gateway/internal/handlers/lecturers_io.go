@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/qaat/api-gateway/internal/middleware"
 )
 
 // POST /api/v1/admin/tenants/{tenant_id}/lecturers/import  (multipart field "roster")
@@ -244,7 +247,21 @@ func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 // deleteLecturers removes a set of lecturers in one transaction and reports what it did.
 // Shared by the single and bulk endpoints so the two can never drift apart.
+// errNotAUUID is returned for an id the database could never match, so the caller can answer
+// 400 instead of 500. Every id below is interpolated into `::uuid[]`, and one malformed entry
+// used to raise SQLSTATE 22P02 on the FIRST statement — whose error is deliberately ignored
+// (it only counts rows) — leaving the transaction poisoned. The UPDATE and DELETE then failed
+// with "current transaction is aborted", which is what reached the administrator: a 500 whose
+// message named neither the lecturer nor the real problem.
+var errNotAUUID = errors.New("lecturer_id must be a UUID")
+
 func deleteLecturers(ctx context.Context, pool *pgxpool.Pool, tenantID string, ids []string) (map[string]interface{}, error) {
+	for _, id := range ids {
+		if !middleware.ValidTenantID(id) {
+			return nil, errNotAUUID
+		}
+	}
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -300,6 +317,10 @@ func DeleteLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		res, err := deleteLecturers(r.Context(), adminPool, tenantID, []string{id})
+		if errors.Is(err, errNotAUUID) {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", err.Error()))
+			return
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -340,6 +361,10 @@ func BulkDeleteLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		res, err := deleteLecturers(r.Context(), adminPool, tenantID, ids)
+		if errors.Is(err, errNotAUUID) {
+			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", err.Error()))
+			return
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

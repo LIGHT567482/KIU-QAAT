@@ -109,6 +109,11 @@ func insertUser(t *testing.T, pool *pgxpool.Pool, email, tenantID string) {
 	}
 }
 
+// doLogin signs in and guarantees a 200 to its caller. Every caller goes on to
+// read access_token out of the body, and when a login failed instead (a missing
+// KEY_ENCRYPTION_KEY was enough) that read was a type assertion on nil — which
+// panics, takes the whole package down with it, and hides every test that had not
+// run yet behind a stack trace. Failing here reports the real status and body.
 func doLogin(t *testing.T, srv *httptest.Server, email, tenantID string) *http.Response {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{
@@ -117,6 +122,11 @@ func doLogin(t *testing.T, srv *httptest.Server, email, tenantID string) *http.R
 	resp, err := http.Post(srv.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("login request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("login %s expected 200, got %d: %s", email, resp.StatusCode, b)
 	}
 	return resp
 }

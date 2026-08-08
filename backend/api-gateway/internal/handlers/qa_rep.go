@@ -768,7 +768,7 @@ func ingestQAObservations(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 			// The DO UPDATE guard rejected it: a patroller already logged this slot in the field.
 			res.Skipped++
 			res.note(
-				"row %d: %s on %s is already recorded by a QA patroller in the field — the field record stands",
+				"row %d: %s on %s is already recorded by a QA monitor in the field — the field record stands",
 				ln+1, unitID, date.Format("2006-01-02"))
 		case err != nil:
 			res.Skipped++
@@ -959,6 +959,13 @@ func humanRole(role string) string {
 		return "a dean"
 	case middleware.RoleQAOfficer:
 		return "a QA officer"
+	case middleware.RolePatroller:
+		// The role's stored value is still QA_PATROLLER — renaming an enum breaks every token
+		// and every handset in the field — but "monitor" is what the institution calls the job,
+		// so it is what every sentence the user reads says.
+		return "a QA monitor"
+	case middleware.RoleTLC:
+		return "a Teaching & Learning Centre officer"
 	}
 	return strings.ToLower(strings.ReplaceAll(role, "_", " "))
 }

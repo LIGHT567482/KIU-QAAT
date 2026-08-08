@@ -24,9 +24,11 @@ package handlers
 //   DELETE /api/v1/hod/assignments/{id}       — unassign, same check
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
@@ -268,14 +270,28 @@ func HODCreateAssignment(pool *pgxpool.Pool) http.HandlerFunc {
 		err = conn.QueryRow(r.Context(), `
 			INSERT INTO lecturer_assignments
 			    (tenant_id, lecturer_id, unit_id, course_id, academic_year, year, semester, intake_session)
-			VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::intake_session_enum)
+			VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8)
 			RETURNING assignment_id::text`,
 			tenantID, req.LecturerID, req.UnitID, courseID, req.AcademicYear, req.Year, req.Semester, req.Intake).Scan(&id)
 		if err != nil {
-			// The unique key is (lecturer, unit, academic_year, intake) — a repeat is a
-			// duplicate, not a server fault.
-			writeJSON(w, http.StatusConflict, errBody("CONFLICT",
-				"That lecturer is already assigned to this unit for the same year and intake."))
+			// NO ENUM CAST above, and the error is no longer assumed to be a duplicate.
+			//
+			// intake_session is a varchar and this institution's commonest intake is "Day" — a
+			// value the old `::intake_session_enum` cast has never accepted (the type only knows
+			// Morning/Evening/Weekend/Distance). So staffing a Day cohort failed on the cast, and
+			// because every error here was reported as a duplicate, the head of department was
+			// told the lecturer was ALREADY assigned to a unit nobody had ever assigned them to —
+			// and went looking for a row that did not exist.
+			//
+			// A real duplicate is SQLSTATE 23505 and nothing else; anything else is a fault worth
+			// naming rather than disguising.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				writeJSON(w, http.StatusConflict, errBody("CONFLICT",
+					"That lecturer is already assigned to this unit for the same year and intake."))
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
 		auditAdmin(r, pool, tenantID, userID, "LECTURER_ASSIGNED", "lecturer_assignments", id, "")

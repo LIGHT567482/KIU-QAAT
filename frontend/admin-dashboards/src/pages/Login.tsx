@@ -27,6 +27,10 @@ const ROLE_REDIRECT: Partial<Record<Role, string>> = {
 // say plainly which app to open instead.
 const NO_WEB_DASHBOARD: Partial<Record<Role, string>> = {
   COORDINATOR: 'Coordinators run sessions from the KIU QAAT mobile app — there is no web dashboard for this account. Sign in there with the same details, or with your coordinator code.',
+  // A monitor's work is walking into rooms, so their round lives on the phone. Saying so beats
+  // the generic "no dashboard" line, which reads like the account is broken.
+  QA_PATROLLER: 'QA monitors run their round from the KIU QAAT mobile app — there is no web dashboard for this account. Sign in there with your staff ID and the same password.',
+  STUDENT: 'Students use the KIU QAAT mobile app or the student portal — there is no web dashboard for this account.',
 }
 
 /**
@@ -110,10 +114,20 @@ export default function Login() {
     setError(null)
     setLoading(true)
     try {
+      // STAFF ID OR EMAIL. Staff carry a staff ID on a badge and know it; the email address the
+      // institution issued them is the thing they look up. /auth/app-login resolves either — it is
+      // the same identifier lookup the phone app uses — and then goes through the very same
+      // auth-service login, so bcrypt, lockout, MFA and token issuance are unchanged.
+      //
+      // The tenant lookup below is skipped for a staff ID because it is keyed on email and there
+      // is one institution: app-login resolves the tenant itself.
+      const identifier = form.email.trim()
+      const isEmail = identifier.includes('@')
+
       let tid = resolvedTenantId
-      if (!tid) {
+      if (isEmail && !tid) {
         try {
-          tid = await resolveTenant(form.email)
+          tid = await resolveTenant(identifier)
           setResolvedTenantId(tid)
         } catch {
           setError('No account found for that email address.')
@@ -122,10 +136,12 @@ export default function Login() {
         }
       }
 
-      const { status: loginStatus, data } = await fetchJSON(`${API}/api/v1/auth/login`, {
+      const { status: loginStatus, data } = await fetchJSON(`${API}/api/v1/auth/app-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, tenant_id: tid }),
+        body: JSON.stringify({
+          identifier, password: form.password, totp_code: form.totp_code, org: '',
+        }),
       }, setWaking)
       setWaking(null)
       const res = { status: loginStatus, ok: loginStatus >= 200 && loginStatus < 300 }
@@ -153,8 +169,10 @@ export default function Login() {
 
       sessionStorage.setItem('qaat_welcome', (data.full_name as string) || form.email)
       login(data.access_token as string, {
-        userId:    data.user_id as string,
-        tenantId:  tid,
+        userId: data.user_id as string,
+        // app-login answers with the tenant it resolved, which is the authoritative one when the
+        // identifier was a staff ID and the email-keyed lookup above never ran.
+        tenantId:  (data.tenant_id as string) || tid,
         role:      data.role as Role,
         expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in as number),
         // Carried so every dashboard can greet the person by title and name,
@@ -203,7 +221,9 @@ export default function Login() {
         )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <input type="email" placeholder="Email" value={form.email} autoComplete="username"
+          {/* type="text", not "email": a staff ID is a valid credential here and the browser's
+              own email validation would refuse to submit the form before we ever saw it. */}
+          <input type="text" placeholder="Staff ID or Email" value={form.email} autoComplete="username"
             onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setResolvedTenantId('') }}
             required style={inp} />
           <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"

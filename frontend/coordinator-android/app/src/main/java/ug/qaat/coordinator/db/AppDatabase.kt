@@ -144,6 +144,21 @@ data class PatrolLogEntity(
     val foundDate: String = "",
     val venueChanged: Boolean = false,
     val remarks: String = "",
+    /**
+     * A COMPENSATION lecture — one being taught to make good an earlier one that did not happen.
+     *
+     * The monitor is the only person who can establish this: they are standing in a room with a
+     * lecture in it that the timetable says is empty, and the lecturer in front of them can say
+     * what it is making up. Recorded at that moment or not at all — afterwards nobody can tell a
+     * compensation from a lecture taught at the wrong time, and the institution's records read it
+     * as three separate faults (an unexplained lecture, a missed one, and hours that do not add up)
+     * instead of one explained event.
+     *
+     * compensationFor is the date being made good, when the lecturer knows it. Optional on purpose:
+     * "this is a compensation, I'm not sure for which day" is still worth recording.
+     */
+    val isCompensation: Boolean = false,
+    val compensationFor: String = "",
 )
 
 /**
@@ -380,7 +395,7 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
         SessionEntity::class, PresentDisplayEntity::class,
         PatrolSlotEntity::class, PatrolLogEntity::class, TimetableSlotEntity::class,
         PresenceClaimEntity::class],
-    version = 7,
+    version = 8,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -508,5 +523,19 @@ val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
                  PRIMARY KEY(id))"""
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS index_presence_claims_capturedAt ON presence_claims (capturedAt)")
+    }
+}
+
+/**
+ * v8 — the monitor can mark a lecture as a COMPENSATION.
+ *
+ * Two nullable-with-default columns, so a handset mid-round upgrades without losing the ticks it
+ * has not uploaded yet: that queue is the whole point of an offline-first round, and dropping it to
+ * add a column would lose real observations.
+ */
+val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN isCompensation INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE patrol_logs ADD COLUMN compensationFor TEXT NOT NULL DEFAULT ''")
     }
 }

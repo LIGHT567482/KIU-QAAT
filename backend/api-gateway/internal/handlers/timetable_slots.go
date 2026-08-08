@@ -51,6 +51,9 @@ type slotRow struct {
 	RoomCode     string `json:"room_code"` // the managed room this slot resolved to, "" if unmatched
 	LecturerID   string `json:"lecturer_id"`
 	LecturerName string `json:"lecturer_name"`
+	// The department this lecture belongs to, via its unit's course. Carried so the grid can
+	// tell a departmental TLC which rows are theirs to change.
+	Department string `json:"department"`
 }
 
 // GET /api/v1/dashboard/timetable/slots
@@ -89,13 +92,17 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		offRows.Close()
 
+		// The unit's department travels with the slot so the grid can grey out what this viewer
+		// may not edit, instead of offering an editor that answers 403 on save.
 		sRows, err := conn.Query(r.Context(), `
 			SELECT s.slot_id::text, s.offering_id::text, s.unit_id, COALESCE(cu.name, s.unit_id),
 			       s.day_of_week, to_char(s.start_time,'HH24:MI'), s.duration_minutes,
 			       COALESCE(s.room,''), COALESCE(s.venue_id,''),
-			       COALESCE(s.lecturer_id::text,''), COALESCE(l.full_name,'')
+			       COALESCE(s.lecturer_id::text,''), COALESCE(l.full_name,''),
+			       COALESCE(c.department,'')
 			FROM timetable_slots s
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
+			LEFT JOIN courses     c  ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
 			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
 			WHERE s.tenant_id = $1
 			ORDER BY s.day_of_week, s.start_time`, tenantID)
@@ -107,10 +114,19 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 		slots := []slotRow{}
 		for sRows.Next() {
 			var s slotRow
-			sRows.Scan(&s.SlotID, &s.OfferingID, &s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.RoomCode, &s.LecturerID, &s.LecturerName) //nolint:errcheck
+			sRows.Scan(&s.SlotID, &s.OfferingID, &s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Duration, &s.Room, &s.RoomCode, &s.LecturerID, &s.LecturerName, &s.Department) //nolint:errcheck
 			slots = append(slots, s)
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"offerings": offerings, "slots": slots})
+		// The whole institution's timetable stays READABLE for a departmental TLC — rooms are
+		// shared, and you cannot avoid a clash you cannot see. tlc_department is what they may
+		// EDIT; empty means everything, which is what an admin, a QA officer, and an
+		// institution-wide TLC each get.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"offerings": offerings,
+			"slots":     slots,
+			"tlc_department": tlcDepartment(r.Context(), conn, tenantID,
+				middleware.GetUserID(r.Context()), middleware.GetRole(r.Context())),
+		})
 	}
 }
 
@@ -148,6 +164,13 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
 			return
 		}
+		// A departmental TLC designs their OWN department's timetable and no one else's.
+		if err := checkTimetableScope(r.Context(), conn, tenantID,
+			middleware.GetUserID(r.Context()), middleware.GetRole(r.Context()), req.UnitID); err != nil {
+			writeTimetableScopeRefusal(w, err)
+			return
+		}
+
 		var coordinatorID, sessionType string
 		_ = conn.QueryRow(r.Context(), `SELECT COALESCE(coordinator_id,''), COALESCE(session_type,'') FROM course_offerings WHERE offering_id=$1::uuid AND tenant_id=$2`, req.OfferingID, tenantID).Scan(&coordinatorID, &sessionType)
 
@@ -226,6 +249,22 @@ func DeleteTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
 			return
 		}
+		// The slot names its unit, and the unit names its department — so the same rule that
+		// governs creating a lecture governs removing one. Checked BEFORE the delete, because a
+		// deletion that has already happened cannot be refused.
+		var slotUnit string
+		if err := conn.QueryRow(r.Context(),
+			`SELECT unit_id FROM timetable_slots WHERE slot_id=$1::uuid AND tenant_id=$2`,
+			slotID, tenantID).Scan(&slotUnit); err != nil {
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "no such timetable slot"))
+			return
+		}
+		if err := checkTimetableScope(r.Context(), conn, tenantID,
+			middleware.GetUserID(r.Context()), middleware.GetRole(r.Context()), slotUnit); err != nil {
+			writeTimetableScopeRefusal(w, err)
+			return
+		}
+
 		if _, err := conn.Exec(r.Context(), `DELETE FROM timetable_slots WHERE slot_id=$1::uuid AND tenant_id=$2`, slotID, tenantID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

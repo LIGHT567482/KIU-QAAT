@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/qaat/api-gateway/internal/middleware"
 )
 
 // schoolAliases returns every string that identifies the same school as `ref` — its full name and
@@ -38,7 +40,19 @@ func schoolAliases(ctx context.Context, pool *pgxpool.Pool, tenantID, ref string
 	out := []string{ref}
 	seen := map[string]bool{strings.ToLower(ref): true}
 
-	rows, err := pool.Query(ctx, `
+	// Over a TENANT-SCOPED connection: `schools` is RLS-protected, and a pool connection with no
+	// app.current_tenant sees none of it. Read that way the alias lookup silently found nothing,
+	// so a dean whose account says "SOMAC" stopped matching courses filed under the full title —
+	// the exact orphaning this function exists to prevent, failing quietly.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return out
+	}
+	defer conn.Release()
+	if middleware.SetTenantConn(ctx, conn, tenantID) != nil {
+		return out
+	}
+	rows, err := conn.Query(ctx, `
 		SELECT name, COALESCE(abbreviation,'')
 		FROM schools
 		WHERE tenant_id = $1
@@ -90,7 +104,19 @@ func normaliseAliases(in []string) []string {
 // Returns names (not ids) because every scoped query in this codebase matches on
 // courses.school BY NAME; ids would need a different join in a dozen places.
 func userSchools(ctx context.Context, pool *pgxpool.Pool, tenantID, userID string) []string {
-	rows, err := pool.Query(ctx, `
+	// Same reason as schoolAliases above: user_schools and schools are both RLS-protected, so
+	// without the tenant GUC this returned nothing and a QA school handler saw only their legacy
+	// users.school column — every other college assigned to them simply absent, which is the
+	// problem migration 075 added this table to solve.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil
+	}
+	defer conn.Release()
+	if middleware.SetTenantConn(ctx, conn, tenantID) != nil {
+		return nil
+	}
+	rows, err := conn.Query(ctx, `
 		SELECT s.name
 		  FROM user_schools us
 		  JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id

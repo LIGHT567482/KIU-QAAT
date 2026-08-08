@@ -67,7 +67,7 @@ export function QAOrgLecturers() {
     <div>
       <ScopeHeader
         title={bySchool ? 'School — Lecturer Monitoring' : 'Department — Lecturer Monitoring'}
-        subtitle="Taught / observed counts every record this term — the QA patroller's and your own uploads alike."
+        subtitle="Taught / observed counts every record this term — the QA monitor's and your own uploads alike."
         scope={scope.data} message={data?.message}
       />
 

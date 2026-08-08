@@ -26,19 +26,38 @@ import (
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
-// patrolVisit is one room visit by a patroller.
+// patrolVisit is one room visit by a QA monitor.
 type patrolVisit struct {
-	PatrolID    string `json:"patrol_id"`
-	LecturerID  string `json:"lecturer_id"`
-	UnitID      string `json:"unit_id"`
+	PatrolID string `json:"patrol_id"`
+	// lecturer_patrol_logs keys lecturers by STAFF ID — that is what the monitor's cached
+	// timetable carries — so LecturerID is a staff id, and the name is resolved separately.
+	LecturerID   string `json:"lecturer_id"`
+	LecturerName string `json:"lecturer_name"`
+	UnitID       string `json:"unit_id"`
 	UnitName    string `json:"unit_name"`
 	Room        string `json:"room"`
 	SessionDate string `json:"session_date"`
 	Scheduled   string `json:"scheduled_time"`
 	Taught      bool   `json:"taught"`
-	Patroller   string `json:"patroller_name"`
-	PatrollerID string `json:"patroller_staff_id"`
-	TakenAt     string `json:"taken_at"`
+	// patroller_name / patroller_staff_id are also emitted as qa_monitor / qa_monitor_staff_id.
+	// The old names stay so the handsets already in the field keep parsing this; the new ones are
+	// what every screen and download now reads, because "monitor" is what the institution calls
+	// the person doing this work.
+	Patroller        string `json:"patroller_name"`
+	PatrollerID      string `json:"patroller_staff_id"`
+	QAMonitor        string `json:"qa_monitor"`
+	QAMonitorStaffID string `json:"qa_monitor_staff_id"`
+	TakenAt          string `json:"taken_at"`
+	ClassGroup       string `json:"class_group"`
+	StudentsAttended int    `json:"students_attended"`
+	IsCompensation   bool   `json:"is_compensation"`
+	CompensationFor  string `json:"compensation_for"`
+	// Where the observation came from: PATROL (a tick against a timetabled slot), MANUAL (a
+	// lecture with no slot, described by the monitor from scratch), QA_REP_UPLOAD (a workbook).
+	// Kept on the row because they are not the same kind of evidence and a reader has to be able
+	// to tell — a headcount taken by eye and a check-in register both say "42".
+	EntryMethod string `json:"entry_method"`
+	School      string `json:"school"`
 }
 
 // patrolLecturer aggregates one lecturer's visits.
@@ -80,11 +99,31 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 
 	// Visits, newest first — the detail rows behind each lecturer.
 	vRows, err := conn.Query(r.Context(), `
-		SELECT p.patrol_id::text, COALESCE(p.lecturer_id,''), p.unit_id, COALESCE(p.unit_name,''),
+		SELECT p.patrol_id::text, COALESCE(p.lecturer_id,''),
+		       COALESCE(l.full_name, NULLIF(p.lecturer_name,''), p.lecturer_id, ''),
+		       p.unit_id, COALESCE(p.unit_name,''),
 		       COALESCE(p.room,''), p.session_date::text, COALESCE(p.scheduled_time,''),
 		       p.taught, COALESCE(p.patroller_name,''), COALESCE(p.patroller_staff_id,''),
-		       p.taken_at
+		       p.taken_at,
+		       p.is_compensation, COALESCE(p.compensation_for::text,''),
+		       -- Which cohort was in the room, as YEAR:SEMESTER. The monitor's record carries the
+		       -- offering, so the same unit visited for two different intakes on one day is two
+		       -- distinguishable rows rather than an apparent duplicate. A MANUAL entry has no
+		       -- offering, so it carries the cohort the monitor typed instead.
+		       COALESCE(o.study_year,0), COALESCE(o.semester,0), COALESCE(p.class_group,''),
+		       -- How many students. For a timetabled lecture that is the roll the coordinator's
+		       -- session took; for a manual one there IS no session, so it is the monitor's own
+		       -- headcount. Which of the two this is comes from entry_method, and the two are
+		       -- never added together — a register and an estimate are different claims.
+		       COALESCE(p.students_counted,
+		                (SELECT COUNT(*) FROM attendance_logs al
+		                  JOIN sessions ss ON ss.session_id = al.session_id
+		                 WHERE ss.tenant_id = p.tenant_id AND ss.unit_id = p.unit_id
+		                   AND ss.session_date = p.session_date), 0),
+		       COALESCE(p.entry_method,'PATROL'), COALESCE(p.school,'')
 		FROM lecturer_patrol_logs p
+		LEFT JOIN course_offerings o ON o.offering_id = p.offering_id AND o.tenant_id = p.tenant_id
+		LEFT JOIN lecturers l ON l.staff_id = p.lecturer_id AND l.tenant_id = p.tenant_id
 		WHERE p.tenant_id = $1`+where+`
 		ORDER BY p.session_date DESC, p.scheduled_time DESC`, args...)
 	if err != nil {
@@ -94,9 +133,19 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 	for vRows.Next() {
 		var v patrolVisit
 		var takenAt time.Time
-		if vRows.Scan(&v.PatrolID, &v.LecturerID, &v.UnitID, &v.UnitName, &v.Room,
-			&v.SessionDate, &v.Scheduled, &v.Taught, &v.Patroller, &v.PatrollerID, &takenAt) == nil {
+		var yr, sm int
+		var typedClassGroup string
+		if vRows.Scan(&v.PatrolID, &v.LecturerID, &v.LecturerName, &v.UnitID, &v.UnitName, &v.Room,
+			&v.SessionDate, &v.Scheduled, &v.Taught, &v.Patroller, &v.PatrollerID, &takenAt,
+			&v.IsCompensation, &v.CompensationFor, &yr, &sm, &typedClassGroup,
+			&v.StudentsAttended, &v.EntryMethod, &v.School) == nil {
 			v.TakenAt = takenAt.Format(time.RFC3339)
+			// The offering is the better answer where there is one; what the monitor typed is the
+			// only answer where there is not.
+			if v.ClassGroup = classGroup(yr, sm); v.ClassGroup == "" {
+				v.ClassGroup = typedClassGroup
+			}
+			v.QAMonitor, v.QAMonitorStaffID = v.Patroller, v.PatrollerID
 			visits = append(visits, v)
 		}
 	}
@@ -153,23 +202,49 @@ func LecturerPatrolAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// patrolAttendanceTable flattens the patrol summary for download.
+// patrolAttendanceTable flattens the monitor's record for download.
+//
+// It downloads the VISITS, not the per-lecturer rollup it used to. The rollup answers "how is this
+// lecturer doing", which the screen already shows; the download is asked for when someone needs the
+// underlying observations — and an observation with no observer on it is not evidence of anything.
+// So every row now names the QA monitor who took it, alongside the cohort that was in the room, the
+// roll the coordinator recorded, and whether the monitor logged it as a compensation.
 func patrolAttendanceTable(r *http.Request, pool *pgxpool.Pool) (reportTable, error) {
-	summary, _, err := queryPatrolAttendance(r, pool)
+	_, visits, err := queryPatrolAttendance(r, pool)
 	if err != nil {
 		return reportTable{}, err
 	}
 	t := reportTable{
-		Title:    "Lecturer Attendance — QA patrol record",
-		Subtitle: itoa(len(summary)) + " lecturer(s) patrolled",
-		Headers:  []string{"Lecturer", "Staff ID", "Department", "School", "Patrolled", "Teaching", "Missed", "Rate %", "Last patrol"},
-		Weights:  []float64{3, 1.8, 2.4, 2.4, 1.2, 1.1, 1, 1, 1.5},
+		Title:    "Lecturer Attendance — QA monitor record",
+		Subtitle: itoa(len(visits)) + " monitor visit(s)",
+		Headers: []string{"Date", "Time", "Lecturer", "Staff ID", "Unit", "Class/Group", "School",
+			"Room", "Taught", "Compensation", "For", "Students", "Source",
+			"QA Monitor", "Monitor ID", "Taken at"},
+		Weights: []float64{1.4, 1, 2.6, 1.4, 2.4, 1.2, 2, 1.3, 1, 1.3, 1.2, 1, 1.4, 2.4, 1.4, 1.7},
 	}
-	for _, s := range summary {
+	for _, v := range visits {
+		taught := "No"
+		if v.Taught {
+			taught = "Yes"
+		}
+		comp := ""
+		if v.IsCompensation {
+			comp = "Yes"
+		}
+		// Named for the reader, not for the database. "Timetabled" and "Manual" say what the
+		// difference actually is — this row was a tick against a scheduled lecture, or a lecture
+		// the monitor found and wrote down — where PATROL and MANUAL say nothing to anyone who
+		// has not read the schema.
+		source := map[string]string{
+			"PATROL": "Timetabled", "MANUAL": "Manual entry", "QA_REP_UPLOAD": "QA rep workbook",
+		}[v.EntryMethod]
+		if source == "" {
+			source = v.EntryMethod
+		}
 		t.Rows = append(t.Rows, []string{
-			s.LecturerName, s.LecturerID, s.Department, s.School,
-			itoa(s.Patrolled), itoa(s.Taught), itoa(s.Missed),
-			formatFloat1(s.Rate), s.LastPatrol,
+			v.SessionDate, v.Scheduled, v.LecturerName, v.LecturerID, v.UnitName, v.ClassGroup,
+			v.School, v.Room, taught, comp, v.CompensationFor, itoaOrBlank(v.StudentsAttended),
+			source, v.QAMonitor, v.QAMonitorStaffID, v.TakenAt,
 		})
 	}
 	return t, nil

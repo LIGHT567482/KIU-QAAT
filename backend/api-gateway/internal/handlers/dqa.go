@@ -120,14 +120,15 @@ func DQACourseHealth(pool *pgxpool.Pool) http.HandlerFunc {
 			  COUNT(DISTINCT sas.student_id) AS enrolled_count,
 			  ROUND(COALESCE(AVG(sas.attendance_percentage), 0), 1) AS avg_attendance_pct,
 			  COUNT(*) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */) AS below_threshold_count,
-			  75 /* fixed: internal/policy.AttendanceThresholdPercent */
+			  75 /* fixed: internal/policy.AttendanceThresholdPercent */ AS threshold
 			FROM course_units cu
 			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = $1
 			LEFT JOIN student_attendance_summary sas
 			  ON sas.unit_id = cu.unit_id AND sas.tenant_id = $1
-			JOIN tenants t ON t.tenant_id = $1
 			WHERE cu.tenant_id = $1
-			GROUP BY cu.unit_id, cu.name, c.course_id, c.name, c.department, 75 /* fixed: internal/policy.AttendanceThresholdPercent */
+			-- The threshold is a constant, so it is deliberately NOT grouped by: a bare
+			-- integer in GROUP BY is read as an ordinal position ("GROUP BY position 75").
+			GROUP BY cu.unit_id, cu.name, c.course_id, c.name, c.department
 			ORDER BY avg_attendance_pct ASC`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))

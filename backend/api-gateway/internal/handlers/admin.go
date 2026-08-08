@@ -273,7 +273,8 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 			            ELSE title || ' ' || full_name END AS full_name,
 			       COALESCE(title,''),
 			       is_active, last_login_at, created_at,
-			       COALESCE(coordinator_code, ''), COALESCE(department, ''), COALESCE(school, '')
+			       COALESCE(coordinator_code, ''), COALESCE(department, ''), COALESCE(school, ''),
+			       COALESCE(staff_id, '')
 			FROM users WHERE tenant_id = $1 ORDER BY role, email`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -293,13 +294,17 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 			CoordinatorCode string  `json:"coordinator_code"`
 			Department      string  `json:"department"`
 			School          string  `json:"school"`
+			// The staff ID is the credential every member of staff already carries on a badge,
+			// and app-login accepts it in place of an email — so it belongs on this list rather
+			// than only on the lecturers page.
+			StaffID string `json:"staff_id"`
 		}
 		var users []user
 		for rows.Next() {
 			var u user
 			var lastLogin *time.Time
 			var createdAt time.Time
-			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.Title, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode, &u.Department, &u.School) //nolint:errcheck
+			rows.Scan(&u.UserID, &u.Email, &u.Role, &u.FullName, &u.Title, &u.IsActive, &lastLogin, &createdAt, &u.CoordinatorCode, &u.Department, &u.School, &u.StaffID) //nolint:errcheck
 			u.CreatedAt = createdAt.Format(time.RFC3339)
 			if lastLogin != nil {
 				s := lastLogin.Format(time.RFC3339)
@@ -331,12 +336,14 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			Gender             string `json:"gender"`
 			Department         string `json:"department"`
 			School             string `json:"school"`
+			StaffID            string `json:"staff_id"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
 			return
 		}
 		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+		req.StaffID = strings.TrimSpace(req.StaffID)
 		req.Department = strings.TrimSpace(req.Department)
 		req.School = strings.TrimSpace(req.School)
 		// A role that has a seeded first-login password does not need one typed here. The
@@ -429,8 +436,8 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			err2 = pool.QueryRow(r.Context(), `
 				INSERT INTO users (tenant_id, email, password_hash, role, full_name, is_active, coordinator_code,
 				                   phone, whatsapp, registration_number, title, gender, department, school,
-				                   force_password_change)
-				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), NULLIF($13,''), $14)
+				                   force_password_change, staff_id)
+				VALUES ($1,$2,$3,$4,$5,true,$6, NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), NULLIF($11,''), NULLIF($12,''), NULLIF($13,''), $14, NULLIF($15,''))
 				RETURNING user_id::text`,
 				tenantID, req.Email, string(hash), req.Role, req.FullName, coordCode,
 				req.Phone, req.Whatsapp, req.RegistrationNumber, req.Title, req.Gender, req.Department, req.School,
@@ -438,6 +445,7 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 				// app demand a private password at first sign-in and, once set, stop tolerating
 				// the default's casing at all.
 				onSeededDefault,
+				req.StaffID,
 			).Scan(&userID)
 			if err2 != nil && coordCode != nil && strings.Contains(err2.Error(), "coordinator_code") {
 				c := genCoordinatorCode() // code clash — regenerate and retry
@@ -482,6 +490,12 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			RegistrationNumber *string `json:"registration_number"`
 			Title              *string `json:"title"`
 			Gender             *string `json:"gender"`
+			StaffID            *string `json:"staff_id"`
+			// A departmental TLC's scope lives on their account, so an administrator has to be
+			// able to set and move it here — otherwise the only way to reassign one is a
+			// database edit.
+			Department *string `json:"department"`
+			School     *string `json:"school"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
@@ -508,6 +522,9 @@ func UpdateUser(pool *pgxpool.Pool) http.HandlerFunc {
 		add("registration_number", req.RegistrationNumber, true)
 		add("title", req.Title, true)
 		add("gender", req.Gender, true)
+		add("staff_id", req.StaffID, true)
+		add("department", req.Department, true)
+		add("school", req.School, true)
 		if len(sets) == 0 {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "no fields to update"))
 			return

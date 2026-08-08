@@ -82,6 +82,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturer Workload',   path: '/vc/lecturer-workload' },
     { label: 'Lecturer Attendance', path: '/vc/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/vc/student-attendance' },
+    { label: 'Timetable',           path: '/vc/timetable' },
     { label: 'Alerts',              path: '/vc/alerts' },
     { label: 'Employee Attendance', path: '/vc/employee-attendance' },
   ],
@@ -92,8 +93,9 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Trends',              path: '/dqa/trends' },
     { label: 'Punctuality',         path: '/dqa/punctuality' },
     { label: 'Lecturer Attendance', path: '/dqa/lecturer-attendance' },
+    { label: 'Timetable',           path: '/dqa/timetable' },
     { label: 'Presence Disputes',   path: '/dqa/presence-claims' },
-    { label: 'Message Patrollers',  path: '/dqa/patroller-messages' },
+    { label: 'Message QA Monitors', path: '/dqa/patroller-messages' },
     { label: 'Student Attendance',  path: '/dqa/student-attendance' },
     { label: 'QA Reports',          path: '/dqa/qa-reports' },
     { label: 'Messages',            path: '/dqa/messages' },
@@ -107,7 +109,7 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Manual Correction',   path: '/qa/correction' },
     { label: 'Coordinator Health',  path: '/qa/coordinator-health' },
     { label: 'Presence Disputes',   path: '/qa/presence-claims' },
-    { label: 'Message Patrollers',  path: '/qa/patroller-messages' },
+    { label: 'Message QA Monitors', path: '/qa/patroller-messages' },
     { label: 'Device Resets',       path: '/qa/device-reset' },
     { label: 'Messages',            path: '/qa/messages' },
   ],
@@ -151,6 +153,10 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Timetable',       path: '/tlc' },
     { label: 'Rooms',           path: '/tlc/rooms' },
   ],
+  // These two work from the phone, not here. Empty rather than absent so the map covers the
+  // whole Role union and a new role cannot be forgotten silently.
+  QA_PATROLLER: [],
+  STUDENT: [],
   QA_SCHOOL_HANDLER: [
     { label: 'Overview',        path: '/qa-school' },
     { label: 'Departments & HODs', path: '/qa-school/departments' },

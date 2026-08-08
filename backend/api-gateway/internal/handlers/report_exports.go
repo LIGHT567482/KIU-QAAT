@@ -380,8 +380,8 @@ func teachingReportTable(w http.ResponseWriter, r *http.Request, pool *pgxpool.P
 		return fmt.Sprintf("%.0f%%", float64(a)/float64(b)*100)
 	}
 	t := reportTable{
-		Title: "Lecturer Teaching (patrol rollup)",
-		Subtitle: fmt.Sprintf("%d lecturer(s) · %d of %d patrols found teaching (%s)",
+		Title: "Lecturer Teaching (QA monitor rollup)",
+		Subtitle: fmt.Sprintf("%d lecturer(s) · %d of %d monitor visits found teaching (%s)",
 			len(rep.Rows), rep.TotalTaught, rep.TotalPatrolled, pct(rep.TotalTaught, rep.TotalPatrolled)),
 		Headers: []string{"Lecturer", "Staff ID", "Department", "School", "Taught", "Patrolled", "Rate"},
 		Weights: []float64{3, 2, 2.6, 2.6, 1, 1.2, 1},

@@ -46,14 +46,46 @@ type scope struct {
 
 func resolveOrgScope(r *http.Request, pool *pgxpool.Pool, tenantID, userID, role string) (scope, bool) {
 	var s scope
-	_ = pool.QueryRow(r.Context(),
-		`SELECT COALESCE(department,''), COALESCE(school,'') FROM users WHERE user_id = $1::uuid AND tenant_id = $2`,
-		userID, tenantID).Scan(&s.Department, &s.School)
+	// THE SCOPE IS READ OVER A TENANT-SCOPED CONNECTION, and it has to be.
+	//
+	// This used to query the pool directly. A connection taken straight from the RLS pool carries
+	// no app.current_tenant, so the row-level policy on `users` hides EVERY row — including the
+	// caller's own — and the department came back empty with the error discarded. What that meant
+	// depended on the role, and both readings were wrong: a head of department was told "no
+	// department is set on your account" and shown an empty page, while any role whose empty case
+	// falls through to unbounded would have been handed the whole institution.
+	//
+	// It is the same trap SetTenantConn exists to close, and the reason every other handler in
+	// this package acquires a connection before it reads anything tenant-scoped.
+	if conn, err := pool.Acquire(r.Context()); err == nil {
+		defer conn.Release()
+		if middleware.SetTenantConn(r.Context(), conn, tenantID) == nil {
+			_ = conn.QueryRow(r.Context(),
+				`SELECT COALESCE(department,''), COALESCE(school,'') FROM users WHERE user_id = $1::uuid AND tenant_id = $2`,
+				userID, tenantID).Scan(&s.Department, &s.School)
+		}
+	}
 
 	switch role {
 	case middleware.RoleHOD, middleware.RoleQADeptRep:
 		s.Col, s.Val = "c.department", s.Department
 		s.Aliases = []string{s.Department}
+	case middleware.RoleTLC:
+		// A TLC designs one department's timetable (migration 083) and, with it, staffs that
+		// department's lectures — so they are bounded exactly like a head of department.
+		//
+		// The fall-through matters: a TLC with NO department drops to the unbounded default
+		// below, which is what every TLC account created before 083 is and what a small
+		// institution wants. Putting them in this case unconditionally would have scoped them to
+		// the empty string, and whereScope renders that as "match nothing" — the timetable's
+		// owner would have opened their page to a blank week with no error to explain it.
+		if strings.TrimSpace(s.Department) != "" {
+			s.Col, s.Val = "c.department", s.Department
+			s.Aliases = []string{s.Department}
+			break
+		}
+		s.Unbounded = true
+		return s, true
 	case middleware.RoleDean, middleware.RoleQASchool:
 		s.Col, s.Val = "c.school", s.School
 		// A dean whose account says "SOMAC" must still match courses filed under the full title,

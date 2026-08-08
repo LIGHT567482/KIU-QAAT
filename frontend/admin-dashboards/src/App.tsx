@@ -67,6 +67,10 @@ export default function App() {
             <Route path="/vc/lecturer-workload"   element={<VCLecturerWorkload />} />
             <Route path="/vc/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/vc/student-attendance"  element={<QAStudentAttendance />} />
+            {/* Read-only: the VC does not build the schedule, but every figure on the pages
+                above is measured against it, and having to ask someone for it is friction on
+                exactly the question the dashboard exists to answer. */}
+            <Route path="/vc/timetable"           element={<Timetable readOnly />} />
             <Route path="/vc/alerts"              element={<Alerts />} />
             <Route path="/vc/employee-attendance" element={<EmployeeAttendance />} />
           </Route>

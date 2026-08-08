@@ -3,13 +3,14 @@ import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
 import RecordTabs from '../../components/RecordTabs'
+import CompensationTag from '../../components/CompensationTag'
 import PatrolLecturerAttendance from './PatrolLecturerAttendance'
 
 // Lecturer attendance for the oversight dashboards (QA / VC / DQA).
 //
 // Two independent records of the same lectures, on two pages of one feature:
-//   • Coordinator record — what the lecturer started and ended in the session (contact hours).
-//   • QA patrol record  — what a patroller saw on walking into the room.
+//   • Coordinator record  — what the lecturer started and ended in the session (contact hours).
+//   • QA monitor record   — what a monitor saw on walking into the room.
 // They are never merged: where they disagree is the finding.
 
 interface SummaryRow {
@@ -19,13 +20,19 @@ interface SummaryRow {
 interface LogRow {
   log_id: string; lecturer_id: string; unit_id: string; unit_name: string
   session_date: string; gate_open_time: string; gate_close_time: string; contact_hours: number; session_status: string
+  // "The lecturer was present" and "nobody came" are different facts about a lecture, and the log
+  // used to carry only the first. class_group ("2:1") says WHICH cohort sat in the room, because one
+  // unit is commonly taught to several in a week. qa_monitor names the independent witness.
+  students_attended: number; class_group: string
+  qa_monitor: string; qa_monitor_staff_id: string
+  is_compensation: boolean; compensation_for: string
 }
 
 export default function DashLecturerAttendance() {
   return (
     <RecordTabs title="Lecturer Attendance" tabs={[
       { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
-      { id: 'patrol',      label: 'QA patrol record',   render: () => <PatrolLecturerAttendance /> },
+      { id: 'patrol',      label: 'QA monitor record',  render: () => <PatrolLecturerAttendance /> },
     ]} />
   )
 }
@@ -76,19 +83,29 @@ function CoordinatorRecord() {
               {open.has(s.lecturer_id) && (
                 <tr key={`${s.lecturer_id}-l`}><td colSpan={6} style={{ padding: '0 12px 14px', background: 'var(--surface,#f8fafc)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr>{['Date', 'Unit', 'Open', 'Close', 'Contact Hrs', 'Status'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)' }}>{h}</th>)}</tr></thead>
+                    <thead><tr>{['Date', 'Unit', 'Class/Group', 'Students', 'Open', 'Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)' }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {logsFor(s.lecturer_id).map(l => (
                         <tr key={l.log_id} style={{ borderTop: '1px solid var(--border,#e8eef4)' }}>
                           <td style={{ padding: '6px 10px', fontWeight: 600 }}>{fmtDate(l.session_date)}</td>
-                          <td style={{ padding: '6px 10px' }}>{l.unit_name} <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span></td>
+                          <td style={{ padding: '6px 10px' }}>
+                            {l.unit_name} <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}>{l.unit_id}</span>
+                            {l.is_compensation && <CompensationTag forDate={l.compensation_for} />}
+                          </td>
+                          <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{l.class_group || '—'}</td>
+                          <td style={{ padding: '6px 10px' }}>{l.students_attended}</td>
                           <td style={{ padding: '6px 10px' }}>{fmt(l.gate_open_time)}</td>
                           <td style={{ padding: '6px 10px' }}>{l.gate_close_time ? fmt(l.gate_close_time) : 'In progress'}</td>
                           <td style={{ padding: '6px 10px' }}>{l.contact_hours > 0 ? `${Number(l.contact_hours).toFixed(2)} h` : '—'}</td>
+                          <td style={{ padding: '6px 10px' }}>
+                            {l.qa_monitor
+                              ? <>{l.qa_monitor}{l.qa_monitor_staff_id && <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 11 }}> {l.qa_monitor_staff_id}</span>}</>
+                              : <span style={{ color: 'var(--muted)' }}>Not visited</span>}
+                          </td>
                           <td style={{ padding: '6px 10px' }}>{l.session_status.replace('_', ' ')}</td>
                         </tr>
                       ))}
-                      {logsFor(s.lecturer_id).length === 0 && <tr><td colSpan={6} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>}
+                      {logsFor(s.lecturer_id).length === 0 && <tr><td colSpan={9} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>}
                     </tbody>
                   </table>
                 </td></tr>

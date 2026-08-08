@@ -270,7 +270,7 @@ func ReleasePatrolBinding(pool *pgxpool.Pool) http.HandlerFunc {
 		if tag.RowsAffected() > 0 {
 			auditAdmin(r, pool, tenantID, middleware.GetUserID(r.Context()),
 				"PATROL_DEVICE_RELEASED", "user", userID,
-				`{"note":"handset binding cleared; the patroller may claim a new phone on next sign-in"}`)
+				`{"note":"handset binding cleared; the QA monitor may claim a new phone on next sign-in"}`)
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "RELEASED", "released": tag.RowsAffected(),
@@ -408,6 +408,15 @@ type patrolLogIn struct {
 	FoundDate      string `json:"found_date"`       // YYYY-MM-DD
 	VenueChanged   bool   `json:"venue_changed"`
 	Remarks        string `json:"remarks"`
+
+	// A COMPENSATION lecture — one being taught to make good an earlier one that did not happen.
+	// The monitor is the only witness who can establish this: they are standing in a room with a
+	// lecture in it that the timetable says is empty, and the lecturer in front of them can say
+	// what it is making up. Recorded here rather than inferred later, because after the round
+	// nobody can tell a compensation from a lecture taught at the wrong time. CompensationFor is
+	// the date being made good, and is optional — see migration 083.
+	IsCompensation  bool   `json:"is_compensation"`
+	CompensationFor string `json:"compensation_for"` // YYYY-MM-DD, "" if not known
 }
 
 // PatrolSync ingests a batch of patrol logs, stamping the patroller's identity from the token.
@@ -458,7 +467,8 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				  (tenant_id, unit_id, unit_name, course_code, lecturer_id, lecturer_name, room,
 				   session_date, scheduled_time, taught, patroller_id, patroller_name, patroller_staff_id,
 				   taken_at, patroller_device_hash,
-				   offering_id, found_venue, found_start_time, found_date, venue_changed, remarks)
+				   offering_id, found_venue, found_start_time, found_date, venue_changed, remarks,
+				   is_compensation, compensation_for)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,
 				        LEAST(COALESCE(NULLIF($8,'')::date, CURRENT_DATE), CURRENT_DATE),
 				        $9, $10, $11::uuid, $12, $13,
@@ -469,7 +479,8 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				        -- happened — where no report window would ever surface it.
 				        LEAST(COALESCE(NULLIF($14,'')::timestamptz, now()), now()), $15,
 				        NULLIF($16,'')::uuid, NULLIF($17,''), NULLIF($18,''),
-				        NULLIF($19,'')::date, $20, NULLIF($21,''))
+				        NULLIF($19,'')::date, $20, NULLIF($21,''),
+				        $22, NULLIF($23,'')::date)
 				ON CONFLICT (tenant_id, unit_id, session_date, scheduled_time,
 				             COALESCE(offering_id, '00000000-0000-0000-0000-000000000000'::uuid))
 				DO UPDATE SET taught = EXCLUDED.taught,
@@ -482,11 +493,18 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 				              found_start_time = EXCLUDED.found_start_time,
 				              found_date = EXCLUDED.found_date,
 				              venue_changed = EXCLUDED.venue_changed,
-				              remarks = EXCLUDED.remarks`,
+				              remarks = EXCLUDED.remarks,
+				              -- A re-tick of the same slot may CORRECT a compensation in either
+				              -- direction (the monitor learns what the lecture was, or that it was
+				              -- not a compensation after all), so this takes the new value rather
+				              -- than OR-ing it in and making the flag impossible to withdraw.
+				              is_compensation = EXCLUDED.is_compensation,
+				              compensation_for = EXCLUDED.compensation_for`,
 				tenantID, l.UnitID, l.UnitName, l.CourseCode, l.LecturerID, l.LecturerName, l.Room,
 				l.SessionDate, l.ScheduledTime, l.Taught, userID, patrollerName, patrollerStaffID,
 				l.TakenAt, deviceHash,
-				l.OfferingID, l.FoundVenue, l.FoundStartTime, l.FoundDate, l.VenueChanged, l.Remarks)
+				l.OfferingID, l.FoundVenue, l.FoundStartTime, l.FoundDate, l.VenueChanged, l.Remarks,
+				l.IsCompensation, l.CompensationFor)
 			if execErr == nil {
 				written++
 				// Persistent lecturer alert (stays in their inbox until they delete it): the patroller

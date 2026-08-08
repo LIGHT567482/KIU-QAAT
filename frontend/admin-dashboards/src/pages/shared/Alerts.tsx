@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../lib/api'
+import { roleLabelLower } from '../../lib/roleLabel'
 import { useQuery } from '../../lib/useApi'
 
 /**
@@ -86,7 +87,7 @@ export default function Alerts() {
                   {n.subject}
                 </span>
                 <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  From {n.sender_name} ({n.sender_role.replace(/_/g, ' ').toLowerCase()})
+                  From {n.sender_name} ({roleLabelLower(n.sender_role)})
                   {n.unit_id ? ` · ${n.unit_id}` : ''} · {new Date(n.created_at).toLocaleString()}
                 </span>
               </button>

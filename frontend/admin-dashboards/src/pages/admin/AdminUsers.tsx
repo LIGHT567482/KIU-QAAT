@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
+import { roleLabel, roleLabelLower } from '../../lib/roleLabel'
 import PasswordInput from '../../components/PasswordInput'
 import { OrgPicker, useOrg } from '../../components/OrgPicker'
 import { useQuery } from '../../lib/useApi'
@@ -17,7 +18,11 @@ const MANAGED_ROLES = new Set<string>(ROLES)
 
 // The department/school on the account IS the scope of these roles' dashboards, so it is not
 // optional for them — the backend rejects the account without it, and the form says so up front.
-const NEEDS_DEPARTMENT = new Set(['QA_OFFICER', 'HOD', 'QA_DEPT_REP'])
+// TLC is here too: migration 083 puts a Teaching & Learning Centre in EACH department rather than
+// one for the whole institution, and the department on the account is what confines them to their
+// own department's timetable. Left blank the account is institution-wide, which is what every TLC
+// created before 083 is — so this is required on the form for new ones, not enforced retroactively.
+const NEEDS_DEPARTMENT = new Set(['QA_OFFICER', 'HOD', 'QA_DEPT_REP', 'TLC'])
 const NEEDS_SCHOOL = new Set(['DEAN', 'QA_SCHOOL_HANDLER'])
 
 const SCOPE_HINT: Record<string, string> = {
@@ -26,7 +31,7 @@ const SCOPE_HINT: Record<string, string> = {
   QA_DEPT_REP:       'A QA department rep files reports for one department — required.',
   DEAN:              'A dean oversees exactly one college/school — required.',
   QA_SCHOOL_HANDLER: 'A QA school handler files reports for one college/school — required.',
-  TLC:               'The Teaching & Learning Centre maintains the timetable institution-wide — no department or college needed.',
+  TLC:               'A Teaching & Learning Centre officer designs the timetable for ONE department — required. They can read the whole institution\u2019s timetable (rooms are shared) but may only change their own department\u2019s.',
 }
 
 interface User {
@@ -34,6 +39,8 @@ interface User {
   full_name: string; is_active: boolean; last_login_at: string | null; created_at: string
   coordinator_code?: string
   department?: string; school?: string
+  /** The badge number. Staff sign in with this or their email — see Login.tsx. */
+  staff_id?: string
 }
 
 export default function AdminUsers() {
@@ -64,7 +71,7 @@ function UsersInner() {
 
   const [creating, setCreating] = useState(false)
   const [changingPasscode, setChangingPasscode] = useState(false)
-  const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
+  const [form, setForm] = useState({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '', staff_id: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [issuedCode, setIssuedCode] = useState<string | null>(null)
@@ -79,19 +86,20 @@ function UsersInner() {
     try {
       if (!form.local.trim()) throw new Error('Email username is required.')
       if (NEEDS_DEPARTMENT.has(form.role) && !form.department.trim()) {
-        throw new Error(`A department is required for ${form.role.replace(/_/g, ' ').toLowerCase()} — it is the scope of everything they see.`)
+        throw new Error(`A department is required for ${roleLabelLower(form.role)} — it is the scope of everything they see.`)
       }
       if (NEEDS_SCHOOL.has(form.role) && !form.school.trim()) {
-        throw new Error(`A college/school is required for ${form.role.replace(/_/g, ' ').toLowerCase()} — it is the scope of everything they see.`)
+        throw new Error(`A college/school is required for ${roleLabelLower(form.role)} — it is the scope of everything they see.`)
       }
       const email = `${form.local.trim().toLowerCase()}@${domain}`
       const res = await api.post(`/api/v1/admin/tenants/${tenantId}/users`, {
         email, password: form.password, role: form.role, full_name: form.full_name,
         phone: form.phone, whatsapp: form.whatsapp, registration_number: form.registration_number,
         title: form.title, gender: form.gender, department: form.department, school: form.school,
+        staff_id: form.staff_id,
       }) as { coordinator_code?: string }
       setCreating(false)
-      setForm({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '' })
+      setForm({ local: '', password: '', role: '', full_name: '', phone: '', whatsapp: '', registration_number: '', title: '', gender: '', department: '', school: '', staff_id: '' })
       setIssuedCode(res?.coordinator_code ?? null)
       refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
@@ -177,7 +185,7 @@ function UsersInner() {
               <div style={labelStyle}>Role</div>
               <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={{ ...selectStyle, color: form.role ? '#1e293b' : 'var(--muted)' }}>
                 <option value="">— Select role —</option>
-                {ROLES.map(r => <option key={r} value={r} style={{ color: '#1e293b' }}>{r.replace(/_/g, ' ')}</option>)}
+                {ROLES.map(r => <option key={r} value={r} style={{ color: '#1e293b' }}>{roleLabel(r)}</option>)}
               </select>
             </label>
             <label>
@@ -205,6 +213,9 @@ function UsersInner() {
               requireSchool={NEEDS_SCHOOL.has(form.role)}
               hint={SCOPE_HINT[form.role]}
             />
+            {/* The badge number, and a working credential: sign-in accepts a staff ID in place of
+                an email, which is what staff actually carry and remember. */}
+            <Field label="Staff ID" value={form.staff_id} onChange={v => setForm(f => ({ ...f, staff_id: v }))} />
             <Field label="Phone (optional)"        value={form.phone}    onChange={v => setForm(f => ({ ...f, phone: v }))} />
             <Field label="WhatsApp (optional)"      value={form.whatsapp} onChange={v => setForm(f => ({ ...f, whatsapp: v }))} />
             <Field label="Registration No. (optional)" value={form.registration_number} onChange={v => setForm(f => ({ ...f, registration_number: v }))} />
@@ -230,7 +241,7 @@ function UsersInner() {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>
           <tr style={{ background: '#f8fafc' }}>
-            {['Name', 'Email', 'Role', 'Dept / School', 'Last Login', 'Status', ''].map(h => (
+            {['Name', 'Staff ID', 'Email', 'Role', 'Dept / School', 'Last Login', 'Status', ''].map(h => (
               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>{h}</th>
             ))}
           </tr>
@@ -244,10 +255,13 @@ function UsersInner() {
                   <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, fontWeight: 600, color: '#0369a1' }}>{u.coordinator_code}</div>
                 )}
               </td>
+              <td style={{ padding: '10px 12px', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                {u.staff_id || <span style={{ color: 'var(--muted)' }}>—</span>}
+              </td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{u.email}</td>
               <td style={{ padding: '10px 12px' }}>
                 <span style={{ background: roleColor(u.role).bg, color: roleColor(u.role).text, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600 }}>
-                  {u.role.replace(/_/g, ' ')}
+                  {roleLabel(u.role)}
                 </span>
               </td>
               <td style={{ padding: '10px 12px', color: 'var(--muted)', fontSize: 12 }}>

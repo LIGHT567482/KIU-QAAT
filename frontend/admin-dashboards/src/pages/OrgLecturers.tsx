@@ -30,7 +30,7 @@ export default function OrgLecturers({ level }: { level: 'hod' | 'dean' }) {
     <div>
       <h2 style={{ margin: '0 0 4px' }}>{level === 'hod' ? 'Department' : 'School'} — Lecturer Oversight</h2>
       <p style={{ color: 'var(--muted)', margin: '0 0 16px', fontSize: 13 }}>
-        Scope: <b>{scopeLabel}</b>. Progress = patrolled sessions the lecturer was found teaching, this term.
+        Scope: <b>{scopeLabel}</b>. Progress = monitored sessions the lecturer was found teaching, this term.
       </p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -62,7 +62,7 @@ export default function OrgLecturers({ level }: { level: 'hod' | 'dean' }) {
             <tr style={{ textAlign: 'left', color: 'var(--muted)', fontSize: 12 }}>
               <th style={th}>Lecturer</th><th style={th}>Staff ID</th>
               {level === 'dean' && <th style={th}>Department</th>}
-              <th style={th}>Units</th><th style={th}>Taught / Patrolled</th><th style={th}></th>
+              <th style={th}>Units</th><th style={th}>Taught / Monitored</th><th style={th}></th>
             </tr>
           </thead>
           <tbody>
