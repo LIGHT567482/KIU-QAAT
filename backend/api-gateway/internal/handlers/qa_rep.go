@@ -89,7 +89,7 @@ func resolveQAScope(ctx context.Context, conn qaRowQuerier, userID, role string)
 		if rows, qerr := conn.Query(ctx, `
 			SELECT s.name
 			  FROM user_schools us
-			  JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id
+			  JOIN schools s ON s.school_id = us.school_id
 			 WHERE us.user_id = $1::uuid
 			 ORDER BY s.name`, userID); qerr == nil {
 			for rows.Next() {
@@ -232,8 +232,8 @@ func QARepDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 				       COUNT(p.patrol_id)                                   AS patrolled,
 				       COUNT(p.patrol_id) FILTER (WHERE p.taught)           AS taught
 				FROM courses c
-				JOIN course_units cu ON cu.course_id = c.course_id AND cu.tenant_id = c.tenant_id
-				LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
+				JOIN course_units cu ON cu.course_id = c.course_id
+				LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
 				LEFT JOIN lecturer_patrol_logs p  ON p.unit_id  = cu.unit_id AND p.tenant_id  = cu.tenant_id
 				WHERE c.tenant_id = $1`+clause+`
 				GROUP BY dept
@@ -453,16 +453,15 @@ func QARepTemplate(pool *pgxpool.Pool) http.HandlerFunc {
 				       COALESCE(NULLIF(ts.room,''), COALESCE(v.venue_id,'')),
 				       ts.day_of_week, to_char(ts.start_time,'HH24:MI')
 				FROM timetable_slots ts
-				JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
-				JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+				JOIN course_units cu ON cu.unit_id = ts.unit_id
+				JOIN courses c ON c.course_id = cu.course_id
 				LEFT JOIN venues v ON v.venue_id = ts.venue_id
 				LEFT JOIN LATERAL (
 				    SELECT l.staff_id, l.full_name FROM lecturers l
-				    WHERE l.tenant_id = ts.tenant_id
-				      AND ( l.lecturer_id = ts.lecturer_id
+				    WHERE ( l.lecturer_id = ts.lecturer_id
 				         OR ( ts.lecturer_id IS NULL AND l.lecturer_id = (
 				               SELECT la.lecturer_id FROM lecturer_assignments la
-				               WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+				               WHERE la.unit_id = ts.unit_id
 				               ORDER BY la.academic_year DESC LIMIT 1) ) )
 				    LIMIT 1
 				) lec ON true
@@ -792,12 +791,12 @@ func loadQAUnits(ctx context.Context, conn *pgxpool.Conn, tenantID string) map[s
 		       COALESCE(c.department,''), COALESCE(c.school,''),
 		       COALESCE(lec.staff_id,''), COALESCE(lec.full_name,'')
 		FROM course_units cu
-		JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+		JOIN courses c ON c.course_id = cu.course_id
 		LEFT JOIN LATERAL (
 		    SELECT l.staff_id, l.full_name
 		    FROM lecturer_assignments la
-		    JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-		    WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
+		    JOIN lecturers l ON l.lecturer_id = la.lecturer_id
+		    WHERE la.unit_id = cu.unit_id
 		    ORDER BY la.academic_year DESC LIMIT 1
 		) lec ON true
 		WHERE cu.tenant_id = $1`, tenantID)

@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
 
   # ─── Data layer ──────────────────────────────────────────────────────────
@@ -10,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-qaat}
       POSTGRES_USER: ${DB_USER:-qaat}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme_db}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../db/migrations:/docker-entrypoint-initdb.d:ro
@@ -26,13 +24,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme_redis} --appendonly yes
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)} --appendonly yes
     volumes:
       - redisdata:/data
     ports:
       - "6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme_redis}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -45,8 +43,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:-changeme_db}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_redis}@redis:6379/0
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@redis:6379/0
       RSA_PRIVATE_KEY_PATH: /run/secrets/auth_private.pem
       RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
       JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
@@ -54,13 +52,13 @@ services:
       JWT_TTL_SECONDS: ${AUTH_JWT_TTL_SECONDS:-86400}
       # Required since update.md H2/§3: master key for encrypting the coordinator
       # device-binding key at rest. Without it, coordinator login fails.
-      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
       # Standalone deployment: bypass TOTP so VC / DQA Director can sign in with
       # just a password (set DISABLE_MFA=false + enrol TOTP to harden later).
       DISABLE_MFA: ${DISABLE_MFA:-true}
       # Shared secret the API gateway presents to mint a STUDENT token after it has
       # verified a scanned QR (passwordless portal login).
-      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:-changeme_internal_svc_key}
+      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:?INTERNAL_SVC_KEY unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       ENVIRONMENT: ${ENVIRONMENT:-development}
     volumes:
@@ -88,16 +86,16 @@ services:
       # Tenant data plane connects as the NON-superuser qaat_app role so RLS is
       # enforced (update.md C1 / migration 009). ADMIN_DB_URL is the privileged
       # connection used ONLY by the ADMIN-gated, cross-tenant platform handlers.
-      DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:-changeme_app}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:-changeme_db}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_redis}@redis:6379/0
+      DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:?APP_DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@redis:6379/0
       CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3001,http://localhost:3002,http://localhost:3003}
       # Dedicated student/captive-portal origin, kept independent from the
       # coordinator/admin console. Used to build the lecturer-gate captive URL.
       STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-}
       # Must match auth-service: lets the gateway mint a STUDENT token after it has
       # verified a scanned QR (passwordless portal login).
-      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:-changeme_internal_svc_key}
+      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:?INTERNAL_SVC_KEY unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       # Civil time. internal/clock reads INSTITUTION_TZ; TZ pins the container (and
@@ -134,13 +132,13 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8083"
-      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:-changeme_db}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_redis}@redis:6379/0
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@redis:6379/0
       RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
       JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
       JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
-      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY}
-      SYNC_SIGN_KEY: ${SYNC_SIGN_KEY}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?KEY_ENCRYPTION_KEY unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
+      SYNC_SIGN_KEY: ${SYNC_SIGN_KEY:?SYNC_SIGN_KEY unset — pass --env-file .env (local) or --env-file infra/field.env (field)}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
@@ -159,8 +157,8 @@ services:
     restart: unless-stopped
     environment:
       PORT: "8082"
-      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:-changeme_db}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme_redis}@redis:6379/0
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?DB_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD unset — pass --env-file .env (local) or --env-file infra/field.env (field)}@redis:6379/0
       RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
       JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
       JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}

@@ -18,7 +18,7 @@ import (
 // GET /api/v1/admin/tenants/{tenant_id}/courses
 func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT c.course_id, c.name, COALESCE(c.department,''), COALESCE(c.school,''),
@@ -69,7 +69,7 @@ func ListCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 // POST /api/v1/admin/tenants/{tenant_id}/courses
 func CreateCourse(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		// A course is just a course (id, name, department, school). Years of study are
 		// a property of the LEVEL (Degree 3y, Masters 2y…), set in the level list —
@@ -430,12 +430,12 @@ func GetCourseRoadmap(adminPool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN LATERAL (
 			    SELECT string_agg(DISTINCT l.full_name, ', ') AS names
 			    FROM lecturer_assignments la
-			    JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-			    WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
+			    JOIN lecturers l ON l.lecturer_id = la.lecturer_id
+			    WHERE la.unit_id = cu.unit_id
 			) lec ON true
 			LEFT JOIN LATERAL (
 			    SELECT COUNT(*) AS n FROM timetable_slots ts
-			    WHERE ts.unit_id = cu.unit_id AND ts.tenant_id = cu.tenant_id
+			    WHERE ts.unit_id = cu.unit_id
 			) slots ON true
 			WHERE cu.course_id = $1
 			ORDER BY cu.year, cu.semester, cu.name`, courseID)
@@ -494,7 +494,7 @@ func GetCourseRoadmap(adminPool *pgxpool.Pool) http.HandlerFunc {
 // The daily manifest uses this to filter course units to the active semester.
 func UpdateTenantAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		// The academic YEAR is the institution-wide setting (all intakes share it, and
 		// it can be the same across intakes). The SEMESTER is NOT a single global value —
@@ -559,7 +559,7 @@ func UpdateTenantAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 // click updates the system so the admin never re-creates cohorts each semester.
 func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		// This is a heavy, irreversible change → re-authenticate the admin's own
 		// password before proceeding. An optional `intakes` list scopes the advance to
@@ -625,9 +625,9 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 		var graduated, advanced int
 		_ = tx.QueryRow(r.Context(), `
 			SELECT
-			  COUNT(*) FILTER (WHERE se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)),
+			  COUNT(*) FILTER (WHERE se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)),
 			  COUNT(*)
-			FROM students_extended se JOIN tenants t ON t.tenant_id = se.tenant_id
+			FROM students_extended se CROSS JOIN tenants t
 			WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'`,
 			tenantID).Scan(&graduated, &advanced) //nolint:errcheck
 
@@ -636,14 +636,14 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 			UPDATE students_extended se SET
 			  semester = CASE WHEN se.semester = 2 THEN 1 ELSE 2 END,
 			  current_year = CASE WHEN se.semester = 2
-			      THEN LEAST(se.current_year + 1, COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99))
+			      THEN LEAST(se.current_year + 1, COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99))
 			      ELSE se.current_year END,
 			  academic_year = CASE
 			      WHEN se.semester = 2 AND se.academic_year ~ '^[0-9]{4}/[0-9]{4}$'
 			      THEN ((left(se.academic_year,4))::int + 1)::text || '/' || ((right(se.academic_year,4))::int + 1)::text
 			      ELSE se.academic_year END,
 			  enrollment_status = CASE
-			      WHEN se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)
+			      WHEN se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)
 			      THEN 'GRADUATED' ELSE se.enrollment_status END,
 			  updated_at = now()
 			FROM tenants t
@@ -659,7 +659,7 @@ func AdvanceAcademicPeriod(adminPool *pgxpool.Pool) http.HandlerFunc {
 			WITH del AS (
 			  DELETE FROM course_offerings o USING tenants t
 			  WHERE o.tenant_id = $1 AND t.tenant_id = $1 AND o.semester = 2
-			    AND o.study_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(o.level,''))::int FROM courses c WHERE c.course_id = o.course_id AND c.tenant_id = o.tenant_id), (t.level_years ->> NULLIF(o.level,''))::int, 99)
+			    AND o.study_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(o.level,''))::int FROM courses c WHERE c.course_id = o.course_id), (t.level_years ->> NULLIF(o.level,''))::int, 99)
 			  RETURNING 1)
 			SELECT COUNT(*) FROM del`, tenantID).Scan(&cohortsCompleted) //nolint:errcheck
 
@@ -714,9 +714,9 @@ func advanceIntakeStudents(w http.ResponseWriter, r *http.Request, adminPool *pg
 	var graduated, advanced int
 	_ = tx.QueryRow(r.Context(), `
 		SELECT
-		  COUNT(*) FILTER (WHERE se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)),
+		  COUNT(*) FILTER (WHERE se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)),
 		  COUNT(*)
-		FROM students_extended se JOIN tenants t ON t.tenant_id = se.tenant_id
+		FROM students_extended se CROSS JOIN tenants t
 		WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE' AND se.intake_session = ANY($2)`,
 		tenantID, intakes).Scan(&graduated, &advanced) //nolint:errcheck
 
@@ -725,14 +725,14 @@ func advanceIntakeStudents(w http.ResponseWriter, r *http.Request, adminPool *pg
 		UPDATE students_extended se SET
 		  semester = CASE WHEN se.semester = 2 THEN 1 ELSE 2 END,
 		  current_year = CASE WHEN se.semester = 2
-		      THEN LEAST(se.current_year + 1, COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99))
+		      THEN LEAST(se.current_year + 1, COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99))
 		      ELSE se.current_year END,
 		  academic_year = CASE
 		      WHEN se.semester = 2 AND se.academic_year ~ '^[0-9]{4}/[0-9]{4}$'
 		      THEN ((left(se.academic_year,4))::int + 1)::text || '/' || ((right(se.academic_year,4))::int + 1)::text
 		      ELSE se.academic_year END,
 		  enrollment_status = CASE
-		      WHEN se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id AND c.tenant_id = se.tenant_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)
+		      WHEN se.semester = 2 AND se.current_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(se.level,''))::int FROM courses c WHERE c.course_id = se.course_id), (t.level_years ->> NULLIF(se.level,''))::int, 99)
 		      THEN 'GRADUATED' ELSE se.enrollment_status END,
 		  updated_at = now()
 		FROM tenants t
@@ -748,7 +748,7 @@ func advanceIntakeStudents(w http.ResponseWriter, r *http.Request, adminPool *pg
 		WITH del AS (
 		  DELETE FROM course_offerings o USING tenants t
 		  WHERE o.tenant_id = $1 AND t.tenant_id = $1 AND o.intake = ANY($2) AND o.semester = 2
-		    AND o.study_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(o.level,''))::int FROM courses c WHERE c.course_id = o.course_id AND c.tenant_id = o.tenant_id), (t.level_years ->> NULLIF(o.level,''))::int, 99)
+		    AND o.study_year + 1 > COALESCE((SELECT (c.level_years ->> NULLIF(o.level,''))::int FROM courses c WHERE c.course_id = o.course_id), (t.level_years ->> NULLIF(o.level,''))::int, 99)
 		  RETURNING 1)
 		SELECT COUNT(*) FROM del`, tenantID, intakes).Scan(&cohortsCompleted) //nolint:errcheck
 
@@ -848,7 +848,7 @@ func joinComma(ss []string) string {
 // GET /api/v1/admin/tenants/{tenant_id}/lecturers
 func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		// Two different things, both true at once.
 		//
@@ -867,10 +867,10 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(ARRAY_AGG(DISTINCT c.department) FILTER (WHERE COALESCE(c.department,'') <> ''), '{}') AS departments,
 			       COALESCE(ARRAY_AGG(DISTINCT c.school)     FILTER (WHERE COALESCE(c.school,'')     <> ''), '{}') AS schools
 			FROM lecturers l
-			LEFT JOIN schools hs ON hs.school_id = l.school_id AND hs.tenant_id = l.tenant_id
-			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
-			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN schools hs ON hs.school_id = l.school_id
+			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id
+			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE l.tenant_id = $1
 			GROUP BY l.lecturer_id, l.title, l.full_name, l.gender, l.email, l.phone, l.staff_id,
 			         l.school_id, hs.name, hs.abbreviation
@@ -919,7 +919,7 @@ func ListLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 // POST /api/v1/admin/tenants/{tenant_id}/lecturers
 func CreateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		// school_id is the lecturer's HOME college — stored, because the institution
 		// requires every lecturer to sit under one even before they are given a unit.
@@ -1066,7 +1066,7 @@ func UpdateLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 // GET /api/v1/admin/tenants/{tenant_id}/lecturer-assignments
 func ListLecturerAssignments(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT la.assignment_id::text, la.lecturer_id::text, l.full_name,
@@ -1116,7 +1116,7 @@ func ListLecturerAssignments(adminPool *pgxpool.Pool) http.HandlerFunc {
 // POST /api/v1/admin/tenants/{tenant_id}/lecturer-assignments
 func CreateLecturerAssignment(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		var req struct {
 			LecturerID    string `json:"lecturer_id"`
@@ -1195,7 +1195,7 @@ func DeleteLecturerAssignment(adminPool *pgxpool.Pool) http.HandlerFunc {
 // GET /api/v1/admin/tenants/{tenant_id}/students
 func ListStudents(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT se.student_id, se.full_name, se.email,
@@ -1245,7 +1245,7 @@ func ListStudents(adminPool *pgxpool.Pool) http.HandlerFunc {
 // Creates both a users record (for portal login) and a students_extended record (for attendance tracking).
 func CreateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		var req struct {
 			StudentID       string `json:"student_id"` // registration number e.g. "NUT/CS/2024/001"
@@ -1417,7 +1417,7 @@ func synthEmail(studentID, domain string) string {
 // names, unit names, and session status. Ordered newest-first.
 func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT
@@ -1435,9 +1435,9 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 			    COALESCE(s.session_status::text, 'UNKNOWN'),`+lecturerLogColumns+`
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers  l  ON l.lecturer_id::text = lal.lecturer_id
-			                       AND l.tenant_id = lal.tenant_id
+			                      
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
-			LEFT JOIN courses      c  ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
+			LEFT JOIN courses      c  ON c.course_id = cu.course_id
 			LEFT JOIN sessions     s  ON s.session_id = lal.session_id`+lecturerLogMonitorJoin+`
 			WHERE lal.tenant_id = $1
 			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
@@ -1492,7 +1492,7 @@ func GetLecturerAttendanceLogs(adminPool *pgxpool.Pool) http.HandlerFunc {
 // average contact hours per session, and last session date.
 func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT
@@ -1509,9 +1509,9 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			    MAX(lal.session_date)                      AS last_session_date
 			FROM lecturer_attendance_logs lal
 			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id
-			                     AND l.tenant_id = lal.tenant_id
-			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id AND cu.tenant_id = lal.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
+			                    
+			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE lal.tenant_id = $1
 			GROUP BY lal.lecturer_id, l.full_name, l.email
 			ORDER BY total_sessions DESC`, tenantID)

@@ -86,8 +86,8 @@ func (l waLecturer) WebAuthnCredentials() []webauthn.Credential { return l.creds
 func loadLecturerCreds(ctx context.Context, pool *pgxpool.Pool, tenantID, lecturerID string) ([]webauthn.Credential, error) {
 	rows, err := pool.Query(ctx,
 		`SELECT credential FROM lecturer_webauthn_credentials
-		 WHERE tenant_id = $1 AND lecturer_id = $2 AND credential IS NOT NULL`,
-		tenantID, lecturerID)
+		 WHERE lecturer_id = $1 AND credential IS NOT NULL`,
+		lecturerID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,11 +111,11 @@ func saveLecturerCred(ctx context.Context, pool *pgxpool.Pool, tenantID, lecture
 	credID := base64.RawURLEncoding.EncodeToString(c.ID)
 	_, err := pool.Exec(ctx, `
 		INSERT INTO lecturer_webauthn_credentials
-		    (credential_id, tenant_id, lecturer_id, public_key, attestation_type, aaguid, sign_count, credential)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		    (credential_id, lecturer_id, public_key, attestation_type, aaguid, sign_count, credential)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (credential_id) DO UPDATE
 		    SET sign_count = EXCLUDED.sign_count, credential = EXCLUDED.credential, last_used_at = now()`,
-		credID, tenantID, lecturerID, c.PublicKey, c.AttestationType, c.Authenticator.AAGUID,
+		credID, lecturerID, c.PublicKey, c.AttestationType, c.Authenticator.AAGUID,
 		int64(c.Authenticator.SignCount), raw)
 	return err
 }
@@ -309,7 +309,7 @@ func LecturerAssertFinish(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFun
 
 func AdminLecturerEnrollLink(adminPool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		lecturerID := chi.URLParam(r, "lecturer_id")
 		var exists bool
 		if err := adminPool.QueryRow(r.Context(),

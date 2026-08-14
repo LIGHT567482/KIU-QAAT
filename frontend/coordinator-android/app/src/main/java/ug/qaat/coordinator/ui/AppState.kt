@@ -89,6 +89,30 @@ object AppState {
     var secondsLeft by mutableStateOf(10)
     var hotspotSsid by mutableStateOf<String?>(null)   // the ACTIVE name students must join
     var hotspotPass by mutableStateOf<String?>(null)   // the ACTIVE password
+
+    // How full the class Wi-Fi is, mirrored from the hub's SlotWarden so the coordinator can SEE
+    // the queue rather than infer it from students complaining. Only ~10 phones fit at once, and
+    // before this the number holding a slot was invisible from the front of the room.
+    var slotOccupancy by mutableStateOf(0)
+    var slotSettled by mutableStateOf(0)
+    // True only when slots are full, somebody is ignoring an eviction, AND nothing has completed
+    // for half a minute — the three-part test in SlotWarden.jammed(). Reveals the force-drop
+    // button, which is hidden the rest of the time because it disconnects the whole room.
+    var slotsJammed by mutableStateOf(false)
+    /**
+     * THE PROVISION ROOM for the session being opened, when the timetabled one could not be used.
+     *
+     * Held on AppState rather than passed down because the choice is made on the open-session
+     * screen and consumed when the session is actually created — the two are separated by the
+     * hotspot coming up, which can take a while and can fail. Cleared when the session closes.
+     */
+    var provisionVenueId by mutableStateOf("")
+    var provisionNote by mutableStateOf("")
+
+    /** The unit being started is not on today's timetable (migration 086). Students check in
+     *  through the identical flow; this only marks the record. */
+    var sessionUnscheduled by mutableStateOf(false)
+
     // True once the foreground service has built the in-room server AND it is actually listening
     // on :8080. The "Start taking attendance" button waits on this.
     var serverReady by mutableStateOf(false)

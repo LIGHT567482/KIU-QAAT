@@ -18,16 +18,17 @@ import (
 // GET /api/v1/admin/tenants/{tenant_id}/offerings
 func ListOfferings(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT o.offering_id::text, o.course_id, c.name, o.session_type,
 			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''),
 			       COALESCE(o.coordinator_id,''), COALESCE(u.full_name,''),
 			       COALESCE(u.coordinator_code,''),
-			       (SELECT COUNT(*) FROM students_extended se WHERE se.offering_id = o.offering_id)
+			       (SELECT COUNT(*) FROM students_extended se WHERE se.offering_id = o.offering_id),
+			       COALESCE(o.delivery_mode,'IN_PERSON')
 			FROM course_offerings o
-			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
-			LEFT JOIN users u ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			JOIN courses c ON c.course_id = o.course_id
+			LEFT JOIN users u ON u.user_id::text = o.coordinator_id
 			WHERE o.tenant_id = $1
 			ORDER BY c.name, o.session_type, o.study_year, o.semester, o.level, o.intake`, tenantID)
 		if err != nil {
@@ -49,13 +50,19 @@ func ListOfferings(adminPool *pgxpool.Pool) http.HandlerFunc {
 			CoordinatorName string `json:"coordinator_name"`
 			CoordinatorCode string `json:"coordinator_code"`
 			StudentCount    int    `json:"student_count"`
+			// IN_PERSON or ONLINE (migration 087). ONLINE marks a distance / e-learning cohort:
+			// it has no room, it is left off the QA monitors' walking round, and it is the ONLY
+			// kind of cohort a lecturer may start a remote class for. That last point is why this
+			// is an admin setting and not something the lecturer can assert for themselves.
+			DeliveryMode string `json:"delivery_mode"`
 		}
 		out := []offering{}
 		for rows.Next() {
 			var o offering
 			rows.Scan(&o.OfferingID, &o.CourseID, &o.CourseName, &o.SessionType, //nolint:errcheck
 				&o.StudyYear, &o.Semester, &o.Level, &o.Intake,
-				&o.CoordinatorID, &o.CoordinatorName, &o.CoordinatorCode, &o.StudentCount)
+				&o.CoordinatorID, &o.CoordinatorName, &o.CoordinatorCode, &o.StudentCount,
+				&o.DeliveryMode)
 			out = append(out, o)
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -65,7 +72,7 @@ func ListOfferings(adminPool *pgxpool.Pool) http.HandlerFunc {
 // POST /api/v1/admin/tenants/{tenant_id}/offerings
 func CreateOffering(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req struct {
 			CourseID      string `json:"course_id"`
 			SessionType   string `json:"session_type"`
@@ -125,6 +132,7 @@ func UpdateOffering(adminPool *pgxpool.Pool) http.HandlerFunc {
 			Level         *string `json:"level"`
 			Intake        *string `json:"intake"`
 			CoordinatorID *string `json:"coordinator_id"` // "" → unassign
+			DeliveryMode  *string `json:"delivery_mode"`  // IN_PERSON | ONLINE
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
@@ -166,6 +174,20 @@ func UpdateOffering(adminPool *pgxpool.Pool) http.HandlerFunc {
 			}
 			set = append(set, fmt.Sprintf("coordinator_id = $%d", n))
 			args = append(args, val)
+			n++
+		}
+		if req.DeliveryMode != nil {
+			mode := strings.ToUpper(strings.TrimSpace(*req.DeliveryMode))
+			// Rejected rather than coerced. A typo silently becoming IN_PERSON would leave a
+			// distance cohort's lectures unstartable with nothing on screen to say why; a typo
+			// silently becoming ONLINE would take a real cohort off the monitors' round.
+			if mode != "IN_PERSON" && mode != "ONLINE" {
+				writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST",
+					"delivery_mode must be IN_PERSON or ONLINE"))
+				return
+			}
+			set = append(set, fmt.Sprintf("delivery_mode = $%d", n))
+			args = append(args, mode)
 			n++
 		}
 		if len(set) == 0 {

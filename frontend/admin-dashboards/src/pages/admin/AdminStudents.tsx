@@ -42,17 +42,17 @@ function cohortLabel(o: Offering): string {
 export default function AdminStudents() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const { status, data: students, refetch } = useQuery<Student[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/students`),
+    () => api.get(`/api/v1/admin/students`),
     [tenantId],
   )
   const { data: courses } = useQuery<Course[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/courses`),
+    () => api.get(`/api/v1/admin/courses`),
     [tenantId],
   )
   // Students register into an OFFERING (program + session); that binds their
   // course (for units) and their coordinator.
   const { data: offerings } = useQuery<Offering[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/offerings`),
+    () => api.get(`/api/v1/admin/offerings`),
     [tenantId],
   )
   // Students reach their own progress view from inside the app, so no share-link is
@@ -93,7 +93,7 @@ export default function AdminStudents() {
   async function handleDelete(s: Student) {
     if (!confirm(`Delete student "${s.full_name}" (${s.student_id})? This also removes their login. This cannot be undone.`)) return
     try {
-      await api.delete(`/api/v1/admin/tenants/${tenantId}/students?student_id=${encodeURIComponent(s.student_id)}`)
+      await api.delete(`/api/v1/admin/students?student_id=${encodeURIComponent(s.student_id)}`)
       refetch()
     } catch (e) { alert(e instanceof Error ? e.message : 'Delete failed') }
   }
@@ -196,7 +196,7 @@ export default function AdminStudents() {
       // hidden identity for the check-in path. Email is OPTIONAL and used solely to
       // email the student their QR; reg-no-only students need none.
       const res = await api.post<{ sign_in_id?: string; default_password?: string }>(
-        `/api/v1/admin/tenants/${tenantId}/students`, {
+        `/api/v1/admin/students`, {
         student_id: form.student_id, full_name: form.full_name, email: form.email,
         offering_id: form.offering_id, level: form.level,
         current_year: form.current_year, semester: form.semester,
@@ -239,7 +239,7 @@ export default function AdminStudents() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <button onClick={() => download('students_template.csv', CSV_COLS.join(',') + '\n')} style={btnGhost} title="Download a blank CSV with the required columns">Template</button>
           <button onClick={() => download(`students_${Date.now()}.csv`, toCSV(list as unknown as Record<string, unknown>[], CSV_COLS))} disabled={list.length === 0} style={btnGhost}>Export CSV</button>
-          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/students/export.xlsx${exportQS()}`, 'students.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnGhost} title="Exports the currently-filtered students">Export Excel</button>
+          <button onClick={() => api.download(`/api/v1/admin/students/export.xlsx${exportQS()}`, 'students.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnGhost} title="Exports the currently-filtered students">Export Excel</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
           <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost} title="Imports into the currently-filtered course/year/semester (rows may omit those columns)">{importing ? 'Importing…' : 'Import (CSV/Excel)'}</button>
           <button onClick={openIntakeEditor} style={btnGhost} title="Define the intakes offered at registration">Manage intakes</button>
@@ -514,7 +514,6 @@ export default function AdminStudents() {
 
       {editStudent && (
         <EditStudentModal
-          tenantId={tenantId!}
           student={editStudent}
           offerings={offerings ?? []}
           intakeOptions={intakeOptions}
@@ -528,8 +527,7 @@ export default function AdminStudents() {
 
 // Edit an existing student. Sends the full editable field set to PATCH
 // /students (keyed by student_id in the body, since reg numbers may contain '/').
-function EditStudentModal({ tenantId, student, offerings, intakeOptions, onClose, onSaved }: {
-  tenantId: string
+function EditStudentModal({ student, offerings, intakeOptions, onClose, onSaved }: {
   student: Student
   offerings: Offering[]
   intakeOptions: string[]
@@ -550,7 +548,7 @@ function EditStudentModal({ tenantId, student, offerings, intakeOptions, onClose
   async function save() {
     setSaving(true); setErr(null)
     try {
-      await api.patch(`/api/v1/admin/tenants/${tenantId}/students`, { student_id: student.student_id, ...f })
+      await api.patch(`/api/v1/admin/students`, { student_id: student.student_id, ...f })
       onSaved()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Update failed') }
     finally { setSaving(false) }

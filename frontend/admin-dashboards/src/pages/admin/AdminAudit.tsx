@@ -8,7 +8,7 @@ import { useQuery } from '../../lib/useApi'
  *
  * `admin_audit_log` has existed since the very first migration and, until now, NOTHING WROTE TO IT
  * and nothing read it. The table was there, the row-level security policy was there, and every
- * sensitive action — releasing a patroller's handset binding, clearing their PIN, resetting a
+ * sensitive action — releasing a monitor's handset binding, clearing their PIN, resetting a
  * student's device, deleting an account — happened with no record at all. A trail nobody writes to
  * is worse than none, because from the outside it looks like there is one.
  *

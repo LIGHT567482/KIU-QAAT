@@ -29,7 +29,7 @@ export default function AdminLecturerAssignments() {
   const { tenantId } = useParams<{ tenantId: string }>()
 
   const { status, data, refetch } = useQuery<Assignment[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturer-assignments`)
+    () => api.get(`/api/v1/admin/lecturer-assignments`)
   )
 
   // Study sessions (Day/Evening/…) are tenant-configurable — use the SAME list
@@ -54,9 +54,9 @@ export default function AdminLecturerAssignments() {
 
   // Load lecturers + courses up front (needed for the grouped view + add-unit).
   useEffect(() => {
-    api.get<Lecturer[]>(`/api/v1/admin/tenants/${tenantId}/lecturers`)
+    api.get<Lecturer[]>(`/api/v1/admin/lecturers`)
       .then(setLecturers).catch(() => {})
-    api.get<Course[]>(`/api/v1/admin/tenants/${tenantId}/courses`)
+    api.get<Course[]>(`/api/v1/admin/courses`)
       .then(setCourses).catch(() => {})
   }, [tenantId])
 
@@ -77,7 +77,7 @@ export default function AdminLecturerAssignments() {
   async function handleCreate() {
     setSaving(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/lecturer-assignments`, form)
+      await api.post(`/api/v1/admin/lecturer-assignments`, form)
       setCreating(false)
       setForm({ lecturer_id: '', course_id: '', unit_id: '', academic_year: '', year: 1, semester: 1, intake_session: '' })
       refetch()
@@ -105,7 +105,7 @@ export default function AdminLecturerAssignments() {
           <h2 style={{ margin: '0' }}>Lecturer Assignments</h2>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <a href={`/admin/tenants/${tenantId}/lecturers`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>
+          <a href={`/admin/lecturers`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>
             Manage Lecturers
           </a>
           <button onClick={() => setCreating(c => !c)} style={btnPrimary}>

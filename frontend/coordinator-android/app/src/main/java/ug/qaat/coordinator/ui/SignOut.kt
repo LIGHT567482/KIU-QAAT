@@ -67,7 +67,7 @@ fun performSignOut() {
     //    death in the next instant could resurrect the session on next launch.
     SessionStore.clearNow()
 
-    // 4. Cached cohort data — roster, check-ins, session history, patrol round.
+    // 4. Cached cohort data — roster, check-ins, session history, monitor round.
     runCatching { Graph.db.dao().clearAllForSignOut() }
 
     // 5. In-memory state. Identity, then the whole hub, so no field of the previous session can

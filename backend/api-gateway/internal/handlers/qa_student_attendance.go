@@ -91,10 +91,10 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 		       COUNT(DISTINCT s.session_id) AS held,
 		       COUNT(DISTINCT al.session_id) AS attended
 		FROM students_extended se
-		JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
+		JOIN courses c ON c.course_id = se.course_id
 		LEFT JOIN course_offerings o ON o.offering_id = se.offering_id
-		LEFT JOIN course_units cu ON cu.course_id = se.course_id AND cu.tenant_id = se.tenant_id` + unitArg + `
-		LEFT JOIN sessions s ON s.unit_id = cu.unit_id AND s.tenant_id = se.tenant_id
+		LEFT JOIN course_units cu ON cu.course_id = se.course_id` + unitArg + `
+		LEFT JOIN sessions s ON s.unit_id = cu.unit_id
 		     -- COHORT ISOLATION: only count the sessions of the student's OWN study
 		     -- session (Day / Evening / Weekend…). Sharing a course is not enough — a
 		     -- Weekend student must never be measured against Day sessions. Sessions

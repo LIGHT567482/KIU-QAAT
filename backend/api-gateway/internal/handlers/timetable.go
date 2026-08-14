@@ -71,17 +71,17 @@ func TimetableOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(ous.session_duration_minutes, 0),
 			       COALESCE(ous.schedule_locked, false)
 			FROM course_offerings o
-			JOIN courses c       ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
+			JOIN courses c       ON c.course_id = o.course_id
 			-- LEFT JOIN so every cohort shows even when its curriculum has no units yet,
 			-- and a tolerant level match so empty/legacy level values don't drop units.
-			LEFT JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+			LEFT JOIN course_units cu ON cu.course_id = o.course_id
 			       AND cu.year = o.study_year AND cu.semester = o.semester
 			       AND (cu.level = o.level
 			            OR COALESCE(NULLIF(cu.level,''),'') = ''
 			            OR COALESCE(NULLIF(o.level,''),'')  = '')
-			LEFT JOIN users u ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			LEFT JOIN users u ON u.user_id::text = o.coordinator_id
 			LEFT JOIN offering_unit_schedules ous
-			       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id AND ous.tenant_id = o.tenant_id
+			       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id
 			WHERE o.tenant_id = $1
 			ORDER BY c.name, o.session_type, o.study_year, o.semester, o.level, o.intake, cu.name NULLS FIRST`, tenantID)
 		if err != nil {

@@ -36,7 +36,13 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         val p = hhmm.split(":"); val h = p.getOrNull(0)?.toIntOrNull(); val m = p.getOrNull(1)?.toIntOrNull()
         return if (h != null && m != null) h * 60 + m else null
     }
-    val units = allUnits.filter { u ->
+    // OFF-TIMETABLE LECTURES: a make-up class, a unit added after the schedule was locked, a
+    // visiting lecturer covering a week. These used to be unstartable, and the cost fell on the
+    // STUDENTS — no session means no room code, no check-in, and no attendance for a lecture they
+    // sat through, in a system where attendance decides exam eligibility. They can be started now,
+    // but only after a deliberate second step, so today's timetable stays the default answer.
+    var offTimetable by remember { mutableStateOf(false) }
+    val scheduledUnits = allUnits.filter { u ->
         val start = u.startTime.takeIf { it.isNotBlank() }?.let(::startMinutes)
         // The "slot is due" gate is COMMENTED OUT: a unit used to appear only from 10 minutes
         // before its timetabled start (`&& nowMin >= start - 10`). A coordinator may now open
@@ -44,7 +50,27 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
         // `nowMin` line above — to bring the 10-minute rule back.
         u.dayOfWeek == todayDow && start != null
     }
+    val units = if (offTimetable) allUnits else scheduledUnits
+    // Kept on AppState so it travels with the session that is actually created, the same way the
+    // provision room does — the choice and the creation are separated by the hotspot coming up.
+    LaunchedEffect(offTimetable) { AppState.sessionUnscheduled = offTimetable }
     var selectedUnit by remember(units.size) { mutableStateOf(units.firstOrNull()?.unitId) }
+    // THE ROOM, when the timetabled one cannot be used. Held here so it travels with the session
+    // being opened rather than being a note somebody makes afterwards.
+    var roomPicker by remember { mutableStateOf(false) }
+    var provisionRoom by remember { mutableStateOf<ug.qaat.coordinator.net.FreeRoom?>(null) }
+    var provisionReason by remember { mutableStateOf("") }
+
+    if (roomPicker) {
+        FreeRoomPicker(
+            onDismiss = { roomPicker = false },
+            onChosen = { r, why ->
+                provisionRoom = r; provisionReason = why
+                AppState.provisionVenueId = r.venueId
+                AppState.provisionNote = why
+            },
+        )
+    }
     var manualStaffId by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
@@ -66,14 +92,70 @@ fun OpenSessionScreen(onOpened: () -> Unit) {
             }
             return
         }
-        if (units.isEmpty()) {
-            Text("No unit is timetabled for today. Units that aren't timetabled for today can't " +
-                "start attendance here.",
+        if (units.isEmpty() && !offTimetable) {
+            Text("No unit is timetabled for today.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            // The lecture is still happening, and refusing to start it does not stop it — it only
+            // stops the STUDENTS being recorded, in a system where attendance decides who sits the
+            // exam. So it can be started, deliberately, and it is marked as off-timetable.
+            Text(
+                "If a lecture is happening anyway — a make-up class, a unit added after the " +
+                    "schedule was set — you can still take attendance for it. Students check in " +
+                    "exactly as they always do; the record simply notes it was off-timetable.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { offTimetable = true }) {
+                Text("Take attendance for an off-timetable lecture")
+            }
             return
+        }
+        if (offTimetable) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text("Off-timetable lecture", fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("Every unit of your cohort is listed. Students check in normally; the " +
+                        "attendance record will say this lecture was not on the timetable.",
+                        style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = { offTimetable = false }) { Text("Back to today's timetable") }
+                }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
+        // Offered BEFORE the hotspot step, because deciding where the class is happening comes
+        // before setting anything up in it.
+        provisionRoom?.let { r ->
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text("Running in ${r.name} (provision)", fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        (if (provisionReason.isNotBlank()) "$provisionReason · " else "") +
+                            "QA monitors have been told where to find this lecture.",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    TextButton(onClick = {
+                        provisionRoom = null; provisionReason = ""
+                        AppState.provisionVenueId = ""; AppState.provisionNote = ""
+                    }) { Text("Use the timetabled room instead") }
+                }
+            }
+        }
+        if (provisionRoom == null) {
+            TextButton(onClick = { roomPicker = true }, modifier = Modifier.padding(bottom = 4.dp)) {
+                Text("Timetabled room unavailable? Find a free one")
+            }
+        }
+
         Text("1. Start the room Wi-Fi + server", style = MaterialTheme.typography.titleSmall)
 
         // Two ways to bring up the room's Wi-Fi. Automatic (app-owned) needs no setup but gets an

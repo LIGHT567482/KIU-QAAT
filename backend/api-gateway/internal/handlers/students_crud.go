@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,7 +29,7 @@ type updateStudentRequest struct {
 // PATCH /api/v1/admin/tenants/{tenant_id}/students
 func UpdateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req updateStudentRequest
 		if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.StudentID) == "" || req.FullName == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "student_id and full_name are required"))
@@ -111,7 +110,7 @@ func UpdateStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 // DELETE /api/v1/admin/tenants/{tenant_id}/students?student_id=...
 func DeleteStudent(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		studentID := strings.TrimSpace(r.URL.Query().Get("student_id"))
 		if studentID == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "student_id query parameter is required"))

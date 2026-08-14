@@ -119,9 +119,9 @@ func userSchools(ctx context.Context, pool *pgxpool.Pool, tenantID, userID strin
 	rows, err := conn.Query(ctx, `
 		SELECT s.name
 		  FROM user_schools us
-		  JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id
-		 WHERE us.user_id = $1::uuid AND us.tenant_id = $2
-		 ORDER BY s.name`, userID, tenantID)
+		  JOIN schools s ON s.school_id = us.school_id
+		 WHERE us.user_id = $1::uuid
+		 ORDER BY s.name`, userID)
 	if err != nil {
 		return nil
 	}

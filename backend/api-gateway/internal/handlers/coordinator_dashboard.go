@@ -43,7 +43,7 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''), o.session_type,
 			       COALESCE(c.school,''), COALESCE(c.department,'')
 			FROM course_offerings o
-			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
+			JOIN courses c ON c.course_id = o.course_id
 			WHERE o.coordinator_id = $1 AND o.tenant_id = $2
 			ORDER BY o.created_at DESC LIMIT 1`,
 			coordID, tenantID).Scan(&offeringID, &courseID, &courseName, &studyYear, &semester, &level, &intake, &sessionType, &school, &department)
@@ -74,7 +74,7 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(ts.duration_minutes, ous.session_duration_minutes, 0),
 			       COALESCE(string_agg(DISTINCT l.full_name || CASE WHEN COALESCE(l.phone,'')<>'' THEN ' ('||l.phone||')' ELSE '' END, ', '), '')
 			FROM course_offerings o
-			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+			JOIN course_units cu ON cu.course_id = o.course_id
 			       AND cu.year = o.study_year AND cu.semester = o.semester
 			       AND (cu.level = o.level
 			            OR COALESCE(NULLIF(cu.level, ''), '') = ''
@@ -82,17 +82,16 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN LATERAL (
 			    SELECT t.day_of_week, t.start_time, t.duration_minutes, t.lecturer_id
 			    FROM timetable_slots t
-			    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id AND t.tenant_id = o.tenant_id
+			    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id
 			    ORDER BY t.day_of_week, t.start_time
 			    LIMIT 1
 			) ts ON true
 			LEFT JOIN offering_unit_schedules ous
-			       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id AND ous.tenant_id = o.tenant_id
+			       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id
 			-- The slot's own lecturer counts as an assignment for display purposes, so a
 			-- unit whose lecturer is only recorded on the timetable is not shown as unstaffed.
-			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-			LEFT JOIN lecturers l ON l.tenant_id = o.tenant_id
-			       AND (l.lecturer_id = la.lecturer_id OR l.lecturer_id = ts.lecturer_id)
+			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
+			LEFT JOIN lecturers l ON (l.lecturer_id = la.lecturer_id OR l.lecturer_id = ts.lecturer_id)
 			WHERE o.offering_id = $1::uuid
 			GROUP BY cu.unit_id, cu.name, cu.year, cu.semester,
 			         ts.day_of_week, ts.start_time, ts.duration_minutes,
@@ -142,15 +141,15 @@ func CoordinatorOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(NULLIF(l.full_name,''), la_l.full_name, ''),
 			       COALESCE(NULLIF(l.phone,''),     la_l.phone,     '')
 			FROM timetable_slots s
-			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id
 			-- tenant_id on the join: without it a slot could resolve a lecturer row
 			-- belonging to another institution.
-			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id AND l.tenant_id = s.tenant_id
+			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
 			-- fall back to the unit's assignment when the slot has no lecturer set
 			LEFT JOIN LATERAL (
 			    SELECT l2.full_name, l2.phone FROM lecturer_assignments la
 			    JOIN lecturers l2 ON l2.lecturer_id = la.lecturer_id AND l2.tenant_id = la.tenant_id
-			    WHERE la.unit_id = s.unit_id AND la.tenant_id = s.tenant_id ORDER BY la.academic_year DESC LIMIT 1
+			    WHERE la.unit_id = s.unit_id ORDER BY la.academic_year DESC LIMIT 1
 			) la_l ON true
 			WHERE s.offering_id = $1::uuid
 			ORDER BY s.day_of_week, s.start_time`, offeringID)
@@ -260,8 +259,8 @@ func CoordinatorAttendance(pool *pgxpool.Pool) http.HandlerFunc {
 			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
 			       COALESCE(75 /* fixed: internal/policy.AttendanceThresholdPercent */, 75)
 			FROM students_extended se
-			JOIN student_attendance_summary s ON s.student_id = se.student_id AND s.tenant_id = se.tenant_id
-			JOIN tenants t ON t.tenant_id = se.tenant_id
+			JOIN student_attendance_summary s ON s.student_id = se.student_id
+			CROSS JOIN tenants t
 			WHERE se.tenant_id = $2
 			  AND se.offering_id = (
 			        SELECT offering_id FROM course_offerings

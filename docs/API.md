@@ -39,8 +39,8 @@ Authenticated by a signed artefact inside the handler and protected by a per-IP 
 | GET | `/api/v1/lecturer/session-info` | Display fields for the lecturer captive page | session_id |
 | POST | `/api/v1/lecturer/webauthn/{enroll,assert}/{begin,finish}` | Phone-passkey biometric enrol/verify | WebAuthn ceremony |
 | GET | `/api/v1/branding/public` | Display-safe tenant branding for captive portals | tenant_id (display fields only) |
-| POST | `/api/v1/auth/login` | Login (admins: email + institution_id; → auth-service) | credentials |
-| GET | `/api/v1/auth/tenant-lookup` | Resolve tenant_id from a student email | — |
+| POST | `/api/v1/auth/login` | Login — `{email, password}`; `tenant_id` optional, resolved to the one institution when omitted (→ auth-service) | credentials |
+| GET | `/api/v1/auth/tenant-lookup` | Resolve tenant_id from an email. **Legacy** — kept only for Android builds already in the field; no new caller needs it | — |
 | GET | `/api/v1/student/progress` | **Passwordless reg-no progress portal** (read-only %; needs `?reg=` + `?org=`) | reg-no resolved only within its institution |
 | POST | `/api/v1/lecturer/qr-login` | Passwordless lecturer dashboard from their career QR | HMAC-signed lecturer QR |
 | POST | `/api/v1/auth/lecturer-login` | Lecturer staff-ID + password login (no email) | staff ID |

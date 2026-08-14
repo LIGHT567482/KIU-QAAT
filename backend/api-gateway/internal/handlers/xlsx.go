@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -273,7 +272,7 @@ func buildXLSX(rows [][]string) ([]byte, error) {
 // GET /api/v1/admin/tenants/{tenant_id}/students/export.xlsx
 func ExportStudentsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		// Optional filters (any combination): the admin can export e.g. only
 		// Computer Science, or only Year-3 Sem-1 of a level, or one course unit.
 		where := "se.tenant_id = $1"
@@ -307,7 +306,7 @@ func ExportStudentsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(se.current_year,0), COALESCE(se.semester,0),
 			       COALESCE(se.intake_session,''), se.enrollment_status::text
 			FROM students_extended se
-			LEFT JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
+			LEFT JOIN courses c ON c.course_id = se.course_id
 			WHERE `+where+`
 			ORDER BY se.full_name`, args...)
 		if err != nil {

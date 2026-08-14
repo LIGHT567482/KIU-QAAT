@@ -190,7 +190,7 @@ func ListQAMessages(pool *pgxpool.Pool) http.HandlerFunc {
 			       (rd.read_at IS NOT NULL) AS is_read
 			FROM qa_messages m
 			LEFT JOIN qa_message_reads rd ON rd.message_id = m.message_id AND rd.user_id = $2
-			LEFT JOIN users su ON su.user_id = m.sender_id AND su.tenant_id = m.tenant_id
+			LEFT JOIN users su ON su.user_id = m.sender_id
 			WHERE m.tenant_id = $1 AND rd.dismissed_at IS NULL `
 
 		var cond string

@@ -8,7 +8,7 @@ import { api } from '../../lib/api'
 // downloadable zip archives created when a semester's data is cleared.
 export default function AdminReports() {
   const { user } = useAuth()
-  const t = `/admin/tenants/${user?.tenantId ?? ''}`
+  const t = `/admin`
 
   const cards = [
     { to: `${t}/student-attendance`, title: 'Student Attendance', desc: 'Per-student attendance and exam eligibility across units, with filters and export.' },
@@ -60,7 +60,7 @@ function SemesterArchives({ tenantId }: { tenantId: string }) {
 
   function load() {
     if (!tenantId) return
-    api.get<Archive[]>(`/api/v1/admin/tenants/${tenantId}/semester-archives`)
+    api.get<Archive[]>(`/api/v1/admin/semester-archives`)
       .then(d => setRows(d ?? []))
       .catch(() => setRows([]))
       .finally(() => setLoaded(true))
@@ -71,7 +71,7 @@ function SemesterArchives({ tenantId }: { tenantId: string }) {
     if (!confirm(`Delete the archive "${a.label}"? This removes the stored zip permanently.`)) return
     setBusy(a.archive_id)
     try {
-      await api.delete(`/api/v1/admin/tenants/${tenantId}/semester-archives/${a.archive_id}`)
+      await api.delete(`/api/v1/admin/semester-archives/${a.archive_id}`)
       setRows(rs => rs.filter(x => x.archive_id !== a.archive_id))
     } catch (e) { alert(e instanceof Error ? e.message : 'Delete failed') }
     finally { setBusy(null) }
@@ -112,7 +112,7 @@ function SemesterArchives({ tenantId }: { tenantId: string }) {
                   <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{a.created_at.slice(0, 16).replace('T', ' ')}</td>
                   <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/semester-archives/${a.archive_id}/download`, a.filename).catch(e => alert(e instanceof Error ? e.message : 'Download failed'))}
+                      <button onClick={() => api.download(`/api/v1/admin/semester-archives/${a.archive_id}/download`, a.filename).catch(e => alert(e instanceof Error ? e.message : 'Download failed'))}
                         style={{ padding: '4px 10px', border: '1px solid var(--brand)', color: 'var(--brand)', background: 'transparent', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Download zip</button>
                       <button onClick={() => remove(a)} disabled={busy === a.archive_id}
                         style={{ padding: '4px 10px', border: '1px solid #fecaca', color: '#b91c1c', background: '#fef2f2', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>{busy === a.archive_id ? '…' : 'Delete'}</button>

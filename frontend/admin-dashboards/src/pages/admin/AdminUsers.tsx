@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { roleLabel, roleLabelLower } from '../../lib/roleLabel'
@@ -53,7 +53,7 @@ export default function AdminUsers() {
 function UsersInner() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const { status, data, refetch } = useQuery<User[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/users`),
+    () => api.get(`/api/v1/admin/users`),
     [tenantId],
   )
   // Every user email must use the institution's domain; fetch it for the suffix.
@@ -66,7 +66,7 @@ function UsersInner() {
 
   const SEEDED_DEFAULTS: Record<string, string> = {
     LECTURER: 'lecturer',
-    QA_PATROLLER: 'patroller',
+    QA_PATROLLER: 'monitor',
   }
 
   const [creating, setCreating] = useState(false)
@@ -75,6 +75,56 @@ function UsersInner() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [issuedCode, setIssuedCode] = useState<string | null>(null)
+
+  // ── Bulk import / export ───────────────────────────────────────────────────
+  // Standing an institution up means entering every dean, head of department and QA officer, and
+  // one-at-a-time through the form above is the slowest path in the whole dashboard. The columns
+  // are the SAME ones the export writes, so a sheet can be pulled down, corrected in Excel and
+  // pushed back without reconciling two different layouts.
+  const IMPORT_COLS = ['email', 'title', 'full_name', 'role', 'department', 'school', 'staff_id', 'phone']
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  // One notice for import and export, carrying its own kind — a message whose colour has to be
+  // inferred by pattern-matching its text is a message that eventually lies about which feature broke.
+  const [ioNotice, setIoNotice] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
+
+  function downloadTemplate() {
+    const csv = IMPORT_COLS.join(',') + '\n'
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a')
+    a.href = url; a.download = 'users_template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true); setIoNotice(null)
+    try {
+      const fd = new FormData(); fd.append('roster', file)
+      const res = await api.upload<{
+        inserted: number; updated: number; skipped: number; errors: string[]
+        password_notice?: string
+      }>(`/api/v1/admin/users/import`, fd)
+      // The password notice leads when accounts were created: it is the one thing the
+      // administrator has to act on, and burying it behind the counts is how people end up
+      // unable to tell a new dean how to sign in.
+      const counts = `${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped`
+      const errs = res.errors?.length
+        ? ` · ${res.errors.length} error(s): ${res.errors.slice(0, 3).join('; ')}`
+        : ''
+      setIoNotice({
+        kind: res.skipped > 0 ? 'error' : 'ok',
+        text: (res.password_notice ? res.password_notice + ' — ' : '') + `Imported: ${counts}${errs}`,
+      })
+      refetch()
+    } catch (e) {
+      setIoNotice({ kind: 'error', text: e instanceof Error ? `Import failed: ${e.message}` : 'Import failed' })
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   // The seeded first-login password for the selected role, or '' when there isn't one. Mirrors
   // the server's DefaultPasswordFor (backend/api-gateway/internal/handlers/default_passwords.go);
@@ -92,7 +142,7 @@ function UsersInner() {
         throw new Error(`A college/school is required for ${roleLabelLower(form.role)} — it is the scope of everything they see.`)
       }
       const email = `${form.local.trim().toLowerCase()}@${domain}`
-      const res = await api.post(`/api/v1/admin/tenants/${tenantId}/users`, {
+      const res = await api.post(`/api/v1/admin/users`, {
         email, password: form.password, role: form.role, full_name: form.full_name,
         phone: form.phone, whatsapp: form.whatsapp, registration_number: form.registration_number,
         title: form.title, gender: form.gender, department: form.department, school: form.school,
@@ -131,11 +181,32 @@ function UsersInner() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
+          <a href="/admin" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Administration</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Staff accounts &amp; the institution's academic period.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button onClick={downloadTemplate} style={btnGhost} title="Download a blank CSV with the user columns">
+            Template
+          </button>
+          <button
+            onClick={() => api.download(`/api/v1/admin/users/export.xlsx`, 'users.xlsx')
+              .catch(e => setIoNotice({ kind: 'error', text: e instanceof Error ? `Export failed: ${e.message}` : 'Export failed' }))}
+            style={btnGhost}
+            title="Exports every staff account this page manages"
+          >
+            Export Excel
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={handleImport}
+            style={{ display: 'none' }}
+          />
+          <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost}>
+            {importing ? 'Importing…' : 'Import (CSV/Excel)'}
+          </button>
           <button onClick={() => setChangingPasscode(c => !c)} style={btnGhost}>
             {changingPasscode ? 'Cancel' : '🔑 Change access password'}
           </button>
@@ -145,9 +216,23 @@ function UsersInner() {
         </div>
       </div>
 
+      {ioNotice && (
+        <div style={{
+          background: ioNotice.kind === 'ok' ? '#ecfdf5' : '#fef2f2',
+          border: `1px solid ${ioNotice.kind === 'ok' ? '#a7f3d0' : '#fecaca'}`,
+          color: ioNotice.kind === 'ok' ? '#065f46' : '#991b1b',
+          borderRadius: 8, padding: '10px 12px', marginBottom: 16, fontSize: 13,
+          display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start',
+        }}>
+          <span>{ioNotice.text}</span>
+          <button onClick={() => setIoNotice(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}>×</button>
+        </div>
+      )}
+
       {changingPasscode && <ChangePasscodeCard onDone={() => setChangingPasscode(false)} />}
 
-      <AcademicPeriodCard tenantId={tenantId!} />
+      <AcademicPeriodCard />
 
 
       {creating && (
@@ -319,7 +404,7 @@ function IntakeChips({ all, selected, onToggle }: { all: string[]; selected: str
 // for the whole institution at once, both are scoped by intake: the admin advances /
 // clears the August intake while the May intake continues. Every clear first stores a
 // downloadable zip archive of the data under Reports before deleting anything.
-function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
+function AcademicPeriodCard() {
   const { status, data, refetch } = useQuery<{ active_academic_year: string; active_semester: number }>(() => api.get('/api/v1/branding'))
   const info = status === 'ok' ? data : undefined
 
@@ -343,7 +428,7 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
     if (!/^\d{4}\/\d{4}$/.test(ayInput.trim())) { setSetErrP('Enter the academic year as YYYY/YYYY, e.g. 2025/2026.'); return }
     setSetBusyP(true); setSetErrP(null)
     try {
-      await api.patch(`/api/v1/admin/tenants/${tenantId}/academic-period`, { active_academic_year: ayInput.trim() })
+      await api.patch(`/api/v1/admin/academic-period`, { active_academic_year: ayInput.trim() })
       setSetOpenP(false); refetch()
     } catch (e) { setSetErrP(e instanceof Error ? e.message : 'Failed') }
     finally { setSetBusyP(false) }
@@ -373,7 +458,7 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
     setClrBusy(true); setClrErr(null)
     try {
       const res = await api.post<{ status: string; attendance_logs_deleted: number; sessions_deleted: number; lecturer_logs_deleted: number; archive_filename?: string }>(
-        `/api/v1/admin/tenants/${tenantId}/clear-semester-data`, { password: clrPw, intakes: clrIntakes, academic_year: clrAY })
+        `/api/v1/admin/clear-semester-data`, { password: clrPw, intakes: clrIntakes, academic_year: clrAY })
       if (res.status === 'NO_MATCHING_STUDENTS') {
         setClrDone(`No students found for intake(s) ${clrIntakes.join(', ')}${clrAY ? ` · ${clrAY}` : ''} — nothing was cleared.`)
       } else {
@@ -393,7 +478,7 @@ function AcademicPeriodCard({ tenantId }: { tenantId: string }) {
     setBusy(true); setErr(null)
     try {
       const res = await api.post<{ status: string; scope?: string; active_academic_year?: string; active_semester?: number; students_advanced: number; students_graduated: number; cohorts_advanced: number; cohorts_completed: number }>(
-        `/api/v1/admin/tenants/${tenantId}/academic-period/advance`, { password: pw, intakes: advScope === 'INTAKE' ? advIntakes : [] })
+        `/api/v1/admin/academic-period/advance`, { password: pw, intakes: advScope === 'INTAKE' ? advIntakes : [] })
       if (res.scope === 'INTAKE') {
         setDone(`Advanced intake(s) ${advIntakes.join(', ')}: ${res.students_advanced} student(s) advanced, ${res.students_graduated} graduated; ${res.cohorts_advanced} cohort(s) advanced, ${res.cohorts_completed} completed. Other intakes and the institution's academic year were left unchanged.`)
       } else {

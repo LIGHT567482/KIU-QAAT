@@ -125,7 +125,7 @@ private fun rememberDataUrlBitmap(url: String): androidx.compose.ui.graphics.Ima
  * The app bar's identity: the institution logo, then "KIU QAAT", then the institution name.
  *
  * ONE header for every role, because there were four. The coordinator and student bars showed the
- * logo with the tenant name; the lecturer and patroller bars showed the logo with "KIU QAAT"; and
+ * logo with the tenant name; the lecturer and monitor bars showed the logo with "KIU QAAT"; and
  * the student portal showed the words "Student portal" with no logo at all. Four bars meant the
  * product was recognisable on some screens and anonymous on others, and the one screen a student
  * is sent to from outside the app was the anonymous one.

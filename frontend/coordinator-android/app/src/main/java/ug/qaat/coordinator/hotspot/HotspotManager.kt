@@ -71,6 +71,28 @@ class HotspotManager(private val context: Context) {
 
     fun stop() { reservation?.close(); reservation = null }
 
+    /**
+     * Drop every client by tearing the hotspot down and bringing it straight back up.
+     *
+     * THE ONLY FORCIBLE EVICTION THAT EXISTS for an unprivileged app. Everything else in this
+     * system asks the student's app to let go, which works only while that app is alive and
+     * listening; a phone whose app was force-stopped mid-check-in, or one on the hotspot not
+     * running our app at all, cannot be reached that way and will hold its slot until the session
+     * ends. Closing the reservation drops all of them at once, because the network they were
+     * associated to no longer exists.
+     *
+     * IT IS A BLUNT INSTRUMENT AND THE CALLER MUST TREAT IT AS ONE. Every phone in the room is
+     * disconnected, including the ones halfway through a check-in, and `LocalOnlyHotspot` mints a
+     * NEW random SSID and passphrase each time it starts — so the credentials on the projected
+     * screen change and every student has to rejoin with the new ones. That is why this is wired to
+     * a confirm dialog behind [ug.qaat.engine.SlotWarden.jammed], and never fires automatically.
+     */
+    fun restart(onReady: (Info) -> Unit, onError: (String) -> Unit) {
+        runCatching { reservation?.close() }
+        reservation = null
+        start(onReady, onError)
+    }
+
     @Suppress("DEPRECATION")
     private fun readConfig(res: WifiManager.LocalOnlyHotspotReservation): Pair<String, String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

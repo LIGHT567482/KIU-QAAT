@@ -4,7 +4,8 @@ import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
 import RecordTabs from '../../components/RecordTabs'
 import CompensationTag from '../../components/CompensationTag'
-import PatrolLecturerAttendance from './PatrolLecturerAttendance'
+import ProvisionTag from '../../components/ProvisionTag'
+import MonitorLecturerAttendance from './MonitorLecturerAttendance'
 
 // Lecturer attendance for the oversight dashboards (QA / VC / DQA).
 //
@@ -26,13 +27,15 @@ interface LogRow {
   students_attended: number; class_group: string
   qa_monitor: string; qa_monitor_staff_id: string
   is_compensation: boolean; compensation_for: string
+  // Where it was actually taught, and whether that was the timetabled room.
+  room: string; room_is_provision: boolean; provision_note: string
 }
 
 export default function DashLecturerAttendance() {
   return (
     <RecordTabs title="Lecturer Attendance" tabs={[
       { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
-      { id: 'patrol',      label: 'QA monitor record',  render: () => <PatrolLecturerAttendance /> },
+      { id: 'monitor',      label: 'QA monitor record',  render: () => <MonitorLecturerAttendance /> },
     ]} />
   )
 }
@@ -83,7 +86,7 @@ function CoordinatorRecord() {
               {open.has(s.lecturer_id) && (
                 <tr key={`${s.lecturer_id}-l`}><td colSpan={6} style={{ padding: '0 12px 14px', background: 'var(--surface,#f8fafc)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                    <thead><tr>{['Date', 'Unit', 'Class/Group', 'Students', 'Open', 'Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)' }}>{h}</th>)}</tr></thead>
+                    <thead><tr>{['Date', 'Unit', 'Class/Group', 'Room', 'Students', 'Open', 'Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)' }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {logsFor(s.lecturer_id).map(l => (
                         <tr key={l.log_id} style={{ borderTop: '1px solid var(--border,#e8eef4)' }}>
@@ -93,6 +96,10 @@ function CoordinatorRecord() {
                             {l.is_compensation && <CompensationTag forDate={l.compensation_for} />}
                           </td>
                           <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{l.class_group || '—'}</td>
+                          <td style={{ padding: '6px 10px' }}>
+                            {l.room || '—'}
+                            {l.room_is_provision && <ProvisionTag note={l.provision_note} />}
+                          </td>
                           <td style={{ padding: '6px 10px' }}>{l.students_attended}</td>
                           <td style={{ padding: '6px 10px' }}>{fmt(l.gate_open_time)}</td>
                           <td style={{ padding: '6px 10px' }}>{l.gate_close_time ? fmt(l.gate_close_time) : 'In progress'}</td>
@@ -105,7 +112,7 @@ function CoordinatorRecord() {
                           <td style={{ padding: '6px 10px' }}>{l.session_status.replace('_', ' ')}</td>
                         </tr>
                       ))}
-                      {logsFor(s.lecturer_id).length === 0 && <tr><td colSpan={9} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>}
+                      {logsFor(s.lecturer_id).length === 0 && <tr><td colSpan={10} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>}
                     </tbody>
                   </table>
                 </td></tr>

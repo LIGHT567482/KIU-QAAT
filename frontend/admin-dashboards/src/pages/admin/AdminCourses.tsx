@@ -31,6 +31,10 @@ interface Offering {
   coordinator_name: string
   coordinator_code: string
   student_count:    number
+  // IN_PERSON or ONLINE. ONLINE is a distance / e-learning cohort: it has no room, its lectures
+  // are left off the QA monitors' walking round, and it is the only kind of cohort a lecturer may
+  // start a remote class for.
+  delivery_mode:    string
 }
 
 interface User { user_id: string; full_name: string; email: string; role: string }
@@ -38,15 +42,15 @@ interface User { user_id: string; full_name: string; email: string; role: string
 export default function AdminCourses() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const { status, data: courses, refetch } = useQuery<Course[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/courses`), [tenantId])
+    () => api.get(`/api/v1/admin/courses`), [tenantId])
   const offeringsQ = useQuery<Offering[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/offerings`), [tenantId])
+    () => api.get(`/api/v1/admin/offerings`), [tenantId])
   const usersQ = useQuery<User[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/users`), [tenantId])
+    () => api.get(`/api/v1/admin/users`), [tenantId])
   const users = usersQ.data
   // Managed org lists so a course inherits its school → department (cascading selects below).
-  const schoolsQ = useQuery<{ school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
-  const deptsQ = useQuery<{ department_id: string; school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/departments`), [tenantId])
+  const schoolsQ = useQuery<{ school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/schools`), [tenantId])
+  const deptsQ = useQuery<{ department_id: string; school_id: string; name: string }[]>(() => api.get(`/api/v1/admin/departments`), [tenantId])
   const orgSchools = schoolsQ.data ?? []
   const orgDepts = deptsQ.data ?? []
   const brandQ = useQuery<{ domain: string }>(() => api.get('/api/v1/branding'))
@@ -95,7 +99,7 @@ export default function AdminCourses() {
   async function handleCreate() {
     setSaving(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/courses`, form)
+      await api.post(`/api/v1/admin/courses`, form)
       setCreating(false)
       setForm({ course_id: '', name: '', department: '', school: '', school_id: '', department_id: '' })
       refetch()
@@ -113,7 +117,7 @@ export default function AdminCourses() {
     setCohortBusy(true); setCohortMsg(null)
     try {
       const res = await api.post<{ created: number; skipped: number; total_courses: number }>(
-        `/api/v1/admin/tenants/${tenantId}/cohorts/apply-all`, {
+        `/api/v1/admin/cohorts/apply-all`, {
           session_type: cohortForm.session_type, study_year: Number(cohortForm.study_year),
           semester: Number(cohortForm.semester), level: cohortForm.level, intake: cohortForm.intake,
         })
@@ -203,7 +207,7 @@ export default function AdminCourses() {
       )}
 
       {/* Bulk curriculum import — load an existing catalogue instead of typing it all. */}
-      <CurriculumImport tenantId={tenantId!} onDone={refetchAll} />
+      <CurriculumImport onDone={refetchAll} />
 
       {status === 'loading' && <p style={{ color: 'var(--muted)' }}>Loading…</p>}
 
@@ -260,7 +264,7 @@ export default function AdminCourses() {
                 <tr key={`${c.course_id}-off`}><td colSpan={5} style={{ padding: '0 12px 16px', background: '#f8fafc' }}>
                   <OfferingsPanel course={c} offerings={offerings.filter(o => o.course_id === c.course_id)}
                     sessions={sessions} levels={levels} levelYears={levelYears} intakes={intakes} coordinators={coordinators}
-                    domain={domain} titles={titles} onCoordinatorsChanged={() => usersQ.refetch()} tenantId={tenantId!} onChange={refetchAll} />
+                    domain={domain} titles={titles} onCoordinatorsChanged={() => usersQ.refetch()} onChange={refetchAll} />
                 </td></tr>
               )}
             </>
@@ -274,8 +278,8 @@ export default function AdminCourses() {
   )
 }
 
-function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intakes, coordinators, domain, titles, onCoordinatorsChanged, tenantId, onChange }: {
-  course: Course; offerings: Offering[]; sessions: string[]; levels: string[]; levelYears: Record<string, number>; intakes: string[]; coordinators: User[]; domain: string; titles: string[]; onCoordinatorsChanged: () => void; tenantId: string; onChange: () => void
+function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intakes, coordinators, domain, titles, onCoordinatorsChanged, onChange }: {
+  course: Course; offerings: Offering[]; sessions: string[]; levels: string[]; levelYears: Record<string, number>; intakes: string[]; coordinators: User[]; domain: string; titles: string[]; onCoordinatorsChanged: () => void; onChange: () => void
 }) {
   const yearsFor = (lvl: string) => Array.from({ length: course.level_years?.[lvl] || levelYears[lvl] || 3 }, (_, i) => String(i + 1))
   const [form, setForm] = useState({ session_type: '', study_year: '', semester: '', level: '', intake: '', coordinator_id: '' })
@@ -286,7 +290,7 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
   async function add() {
     setBusy(true); setErr(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/offerings`, {
+      await api.post(`/api/v1/admin/offerings`, {
         course_id: course.course_id, session_type: form.session_type,
         study_year: Number(form.study_year), semester: Number(form.semester),
         level: form.level, intake: form.intake, coordinator_id: form.coordinator_id,
@@ -302,10 +306,10 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
   }
 
   const [edit, setEdit] = useState<Offering | null>(null)
-  const [editForm, setEditForm] = useState({ session_type: '', study_year: '1', semester: '1', level: '', intake: '', coordinator_id: '' })
+  const [editForm, setEditForm] = useState({ session_type: '', study_year: '1', semester: '1', level: '', intake: '', coordinator_id: '', delivery_mode: 'IN_PERSON' })
   function startEdit(o: Offering) {
     setEdit(o)
-    setEditForm({ session_type: o.session_type, study_year: String(o.study_year), semester: String(o.semester), level: o.level, intake: o.intake, coordinator_id: o.coordinator_id })
+    setEditForm({ session_type: o.session_type, study_year: String(o.study_year), semester: String(o.semester), level: o.level, intake: o.intake, coordinator_id: o.coordinator_id, delivery_mode: o.delivery_mode || 'IN_PERSON' })
   }
   async function saveEdit() {
     if (!edit) return
@@ -314,6 +318,7 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
       await api.patch(`/api/v1/admin/offerings/${edit.offering_id}`, {
         session_type: editForm.session_type, study_year: Number(editForm.study_year), semester: Number(editForm.semester),
         level: editForm.level, intake: editForm.intake, coordinator_id: editForm.coordinator_id,
+        delivery_mode: editForm.delivery_mode,
       })
       setEdit(null); onChange()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed') }
@@ -329,6 +334,9 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
         <div key={o.offering_id}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid #eef2f7' }}>
             <span style={pill('#f0fdf4', '#166534')}>{[o.session_type, `Y${o.study_year}`, `S${o.semester}`, o.level, o.intake].filter(Boolean).join(' · ')}</span>
+            {o.delivery_mode === 'ONLINE' && (
+              <span style={pill('#eff6ff', '#1d4ed8')} title="Distance / e-learning: no room, off the QA monitors' round, and the lecturer starts the class themselves.">ONLINE</span>
+            )}
             <span style={{ fontSize: 13 }}>{o.coordinator_name || <span style={{ color: '#f59e0b' }}>⚠ no coordinator</span>}{o.coordinator_code && <span style={{ color: '#0369a1', fontFamily: 'monospace', fontSize: 11, marginLeft: 6 }}>{o.coordinator_code}</span>}</span>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>· {o.student_count} students</span>
             <button onClick={() => edit?.offering_id === o.offering_id ? setEdit(null) : startEdit(o)} style={{ ...btnSmall, marginLeft: 'auto' }}>{edit?.offering_id === o.offering_id ? 'Cancel' : 'Edit'}</button>
@@ -343,7 +351,13 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
                 <Select label="Level" value={editForm.level} onChange={v => setEditForm(f => ({ ...f, level: v }))} options={levels} />
                 <Select label="Intake" value={editForm.intake} onChange={v => setEditForm(f => ({ ...f, intake: v }))} options={intakes.length ? intakes : ['—']} />
                 <CoordinatorPicker value={editForm.coordinator_id} onChange={v => setEditForm(f => ({ ...f, coordinator_id: v }))}
-                  coordinators={coordinators} domain={domain} titles={titles} tenantId={tenantId} onCreated={onCoordinatorsChanged} />
+                  coordinators={coordinators} domain={domain} titles={titles} onCreated={onCoordinatorsChanged} />
+                <Select label="Delivery" value={editForm.delivery_mode} onChange={v => setEditForm(f => ({ ...f, delivery_mode: v }))} options={['IN_PERSON', 'ONLINE']} />
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>
+                {editForm.delivery_mode === 'ONLINE'
+                  ? 'Distance / e-learning. There is no room: these lectures are left off the QA monitors’ round, the lecturer starts each class from their own dashboard, and students check in with a code that changes every ten seconds instead of by being on the room’s Wi-Fi.'
+                  : 'Taught in a room. Students must be on the coordinator’s hotspot to check in.'}
               </div>
               <button onClick={saveEdit} disabled={busy} style={{ ...btnPrimary, marginTop: 10, background: '#92400e' }}>{busy ? 'Saving…' : 'Save cohort'}</button>
             </div>
@@ -358,7 +372,7 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
         <Select label="Level" value={form.level} onChange={v => setF('level', v)} options={levels} />
         <Select label="Intake" value={form.intake} onChange={v => setF('intake', v)} options={intakes.length ? intakes : ['—']} />
         <CoordinatorPicker value={form.coordinator_id} onChange={v => setF('coordinator_id', v)}
-          coordinators={coordinators} domain={domain} titles={titles} tenantId={tenantId} onCreated={onCoordinatorsChanged} />
+          coordinators={coordinators} domain={domain} titles={titles} onCreated={onCoordinatorsChanged} />
       </div>
       <button onClick={add} disabled={busy || !form.session_type || !form.study_year || !form.semester} style={{ ...btnPrimary, marginTop: 10, opacity: (!form.session_type || !form.study_year || !form.semester) ? 0.5 : 1 }}>{busy ? 'Adding…' : '+ Add cohort'}</button>
     </div>
@@ -367,8 +381,8 @@ function OfferingsPanel({ course, offerings, sessions, levels, levelYears, intak
 
 // Coordinator chooser for a cohort: pick an existing coordinator OR create a brand
 // new one inline (account + auto-generated coordinator code) without leaving the form.
-function CoordinatorPicker({ value, onChange, coordinators, domain, titles, tenantId, onCreated }: {
-  value: string; onChange: (v: string) => void; coordinators: User[]; domain: string; titles: string[]; tenantId: string; onCreated: () => void
+function CoordinatorPicker({ value, onChange, coordinators, domain, titles, onCreated }: {
+  value: string; onChange: (v: string) => void; coordinators: User[]; domain: string; titles: string[]; onCreated: () => void
 }) {
   const GENDERS = ['', 'Male', 'Female', 'Other']
   const [adding, setAdding] = useState(false)
@@ -384,7 +398,7 @@ function CoordinatorPicker({ value, onChange, coordinators, domain, titles, tena
     try {
       if (!nf.full_name.trim() || !nf.local.trim() || !nf.password.trim()) throw new Error('Name, email and password are required.')
       const email = `${nf.local.trim().toLowerCase()}@${domain}`
-      const res = await api.post(`/api/v1/admin/tenants/${tenantId}/users`, {
+      const res = await api.post(`/api/v1/admin/users`, {
         email, password: nf.password, role: 'COORDINATOR', full_name: nf.full_name.trim(),
         title: nf.title, gender: nf.gender, registration_number: nf.registration_number.trim(),
         phone: nf.phone.trim(), whatsapp: nf.whatsapp.trim(),
@@ -485,7 +499,7 @@ const CURRICULUM_KINDS = [
   { key: 'lecturer-assignments', label: '3. Lecturer mapping', cols: 'unit_id, lecturer_staff_id, lecturer_name, academic_year, intake_session, year, semester' },
 ] as const
 
-function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () => void }) {
+function CurriculumImport({ onDone }: { onDone: () => void }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<Record<string, string>>({})
@@ -498,7 +512,7 @@ function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () =
     try {
       const fd = new FormData(); fd.append('roster', file)
       const r = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/${kind}/import`, fd)
+        `/api/v1/admin/${kind}/import`, fd)
       setMsg(m => ({ ...m, [kind]: `✓ ${r.inserted} new, ${r.updated} updated, ${r.skipped} skipped${r.errors?.length ? ` · ${r.errors.slice(0, 3).join('; ')}` : ''}` }))
       onDone()
     } catch (err) { setMsg(m => ({ ...m, [kind]: `✗ ${err instanceof Error ? err.message : 'Import failed'}` })) }
@@ -522,7 +536,7 @@ function CurriculumImport({ tenantId, onDone }: { tenantId: string; onDone: () =
             <div key={k.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid #eef2f7', flexWrap: 'wrap' }}>
               <div style={{ minWidth: 160, fontWeight: 600, fontSize: 13 }}>{k.label}</div>
               <code style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 240px' }}>{k.cols}</code>
-              <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/${k.key}/export.xlsx`, `${k.key}.xlsx`).catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall}>Template / Export</button>
+              <button onClick={() => api.download(`/api/v1/admin/${k.key}/export.xlsx`, `${k.key}.xlsx`).catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall}>Template / Export</button>
               <input ref={el => { refs.current[k.key] = el }} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => doImport(k.key, e)} style={{ display: 'none' }} />
               <button onClick={() => refs.current[k.key]?.click()} disabled={busy === k.key} style={btnPrimary}>{busy === k.key ? 'Importing…' : 'Import'}</button>
               {msg[k.key] && <div style={{ flexBasis: '100%', fontSize: 12, color: msg[k.key].startsWith('✗') ? '#b91c1c' : '#166534' }}>{msg[k.key]}</div>}

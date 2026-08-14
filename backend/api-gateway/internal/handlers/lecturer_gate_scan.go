@@ -41,9 +41,9 @@ func LecturerSessionInfo(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       s.session_status::text
 			FROM sessions s
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id
-			LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
-			LEFT JOIN lecturers l ON l.lecturer_id::text = s.lecturer_id AND l.tenant_id = s.tenant_id
-			LEFT JOIN venues v ON v.venue_id = s.venue_id AND v.tenant_id = s.tenant_id
+			LEFT JOIN users u ON u.user_id::text = s.coordinator_id
+			LEFT JOIN lecturers l ON l.lecturer_id::text = s.lecturer_id
+			LEFT JOIN venues v ON v.venue_id = s.venue_id
 			WHERE s.session_id = $1`,
 			sessionID).Scan(&tenantID, &unitName, &coordName, &lecturerName, &venueName,
 			&sessionDate, &plannedStart, &plannedMinutes, &status)
@@ -93,17 +93,17 @@ func LecturerGateScan(adminPool *pgxpool.Pool, rdb *redis.Client) http.HandlerFu
 			       lal.lecturer_scanned_at, lal.lecturer_ended_at,
 			       (SELECT COUNT(*) FROM attendance_logs al WHERE al.session_id = s.session_id),
 			       (SELECT COUNT(*) FROM students_extended se
-			          WHERE se.tenant_id = s.tenant_id AND se.enrollment_status = 'ACTIVE'
+			          WHERE se.enrollment_status = 'ACTIVE'
 			            AND ( (s.offering_id IS NOT NULL AND se.offering_id = s.offering_id)
 			                  OR (s.offering_id IS NULL AND se.course_id = (SELECT course_id FROM course_units cu WHERE cu.unit_id = s.unit_id)) )),
 			       COALESCE(t.lecturer_attendance_ratio, 0.5),
 			       (SELECT COUNT(*) FROM lecturer_webauthn_credentials wc
-			          WHERE wc.tenant_id = s.tenant_id AND wc.lecturer_id::text = s.lecturer_id),
+			          WHERE wc.lecturer_id::text = s.lecturer_id),
 			       s.coordinator_ip
 			FROM sessions s
 			JOIN lecturers l ON l.lecturer_id::text = s.lecturer_id
-			JOIN tenants t ON t.tenant_id = s.tenant_id
-			LEFT JOIN lecturer_attendance_logs lal ON lal.session_id = s.session_id AND lal.tenant_id = s.tenant_id
+			CROSS JOIN tenants t
+			LEFT JOIN lecturer_attendance_logs lal ON lal.session_id = s.session_id
 			WHERE s.session_id = $1`,
 			req.SessionID).Scan(&tenantID, &lecturerID, &registeredStaffID, &secret, &sessionStatus,
 			&scannedAt, &endedAt, &attended, &enrolled, &ratio, &bioCredCount, &coordinatorIP)

@@ -19,6 +19,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import ug.qaat.coordinator.net.LecturerClient
+import ug.qaat.coordinator.net.LecturerRecipientsClient
+import ug.qaat.coordinator.net.LecturerTimetableClient
 import ug.qaat.coordinator.net.NotificationClient
 import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.student.CheckinClient
@@ -85,7 +87,7 @@ fun LecturerApp() {
                     indicatorColor = onNav.copy(alpha = .18f),
                 ) else NavigationBarItemDefaults.colors()
                 NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Session, "Session") }, label = { Text("Session") }, colors = itemColors)
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Calendar, "Calendar") }, label = { Text("Calendar") }, colors = itemColors)
+                NavigationBarItem(tab == 1, { tab = 1 }, icon = { TabGlyph(NavIcons.Calendar, "Timetable") }, label = { Text("Timetable") }, colors = itemColors)
                 NavigationBarItem(tab == 2, { tab = 2 }, icon = { TabGlyph(NavIcons.Roster, "Roster") }, label = { Text("Roster") }, colors = itemColors)
                 NavigationBarItem(tab == 3, { tab = 3 }, colors = itemColors, label = { Text("Alerts") },
                     icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph(NavIcons.Alerts, "Alerts") } else TabGlyph(NavIcons.Alerts, "Alerts") })
@@ -97,7 +99,7 @@ fun LecturerApp() {
             Box(Modifier.weight(1f)) {
                 when (tab) {
                     0 -> LecturerSessionTab()
-                    1 -> LecturerCalendarTab()
+                    1 -> LecturerScheduleTab()
                     2 -> LecturerRosterTab()
                     3 -> LecturerAlertsTab()
                     else -> LecturerProfileTab(onChangePw = { showChangePw = true })
@@ -129,13 +131,36 @@ private fun LecturerSessionTab() {
     var searching by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
+    // The three digits to read across the room, handed over by the coordinator's hub on a successful
+    // START. Null on an ordinary lecture — most lectures are not shared, and a code shown when
+    // nobody needs one is a number waiting to be read out to a room that has no use for it.
+    var combinedCode by remember { mutableStateOf<String?>(null) }
+    // The lecturer's week, used only to know which of their cohorts are e-learning ones. Failing to
+    // load it costs the online panel, never the hotspot gate below — a lecturer standing in a room
+    // with no signal must still be able to start their physical class.
+    var slots by remember { mutableStateOf<List<LecturerTimetableClient.Slot>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        slots = runCatching { LecturerTimetableClient().week() }.getOrNull().orEmpty()
+    }
 
     suspend fun refresh(showSpinner: Boolean = true) {
         if (showSpinner) { searching = true; msg = null }
         val url = Discovery(ctx).find(); baseUrl = url
-        session = url?.let { CheckinClient(it).session() }
+        session = url?.let { CheckinClient(it, ctx).session() }
         searching = false
-        if (url == null) msg = "Couldn't find the coordinator's hotspot. Connect to their class Wi-Fi (mobile data OFF)."
+        // A code belongs to the lecture it was issued for. The tab re-arms itself for the next
+        // session every few seconds, so drop the digits the moment the session behind them is gone
+        // — otherwise a lecturer reads yesterday's leftover number into their next class.
+        if (session?.active != true) combinedCode = null
+        // TWO DIFFERENT PROBLEMS, two different sentences. "Not connected to any Wi-Fi" and
+        // "connected, but nothing is serving" send the holder of the phone to opposite actions, and
+        // one message covering both sent them to the wrong one about half the time.
+        if (url == null) {
+            msg = if (!ug.qaat.coordinator.student.LanNetwork.onWifi(ctx))
+                "You are not on any Wi-Fi. Open Wi-Fi settings and join the coordinator's class network, then come back."
+            else
+                "You are on Wi-Fi, but nothing is serving the class on it. Check you joined the COORDINATOR's network and that they have opened the session."
+        }
     }
     LaunchedEffect(Unit) { refresh() }
     // Poll every ~4s so the tab clears itself when the coordinator's hotspot drops and re-arms for
@@ -151,7 +176,7 @@ private fun LecturerSessionTab() {
         val url = baseUrl ?: return
         busy = true; msg = null
         scope.launch {
-            val gc = GateClient(url)
+            val gc = GateClient(url, ctx)
             val st = gc.status()
             if (st == null || st.roomCode.isBlank()) { msg = "No live session code — ask the coordinator to project the gate, then retry."; busy = false; return@launch }
             runCatching { gc.gate(AppState.staffId ?: "", st.roomCode, Fingerprint.get(ctx)) }
@@ -161,14 +186,29 @@ private fun LecturerSessionTab() {
                         "ENDED" -> "✓ Session ended — your attendance + end time are sealed."
                         else -> "Not accepted: ${(r.reason ?: "try again").replace('_', ' ').lowercase()}. Retry."
                     }
-                    session = CheckinClient(url).session(); busy = false
+                    when (r.status) {
+                        "STARTED" -> combinedCode = r.combinedClassCode.takeIf { it.isNotBlank() }
+                        "ENDED" -> combinedCode = null   // the register is closed; the number is spent
+                    }
+                    session = CheckinClient(url, ctx).session(); busy = false
                 }
                 .onFailure { msg = "Couldn't reach the class server — make sure mobile data is OFF and you're on the coordinator's Wi-Fi."; busy = false }
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.weight(1f))
+    // Scrollable, because the online-class panel plus a running session can exceed a short screen.
+    // NO Modifier.weight() below: a scrolling Column has unbounded height, so a weighted child has
+    // no share to take and silently collapses to nothing. Fixed spacing instead.
+    Column(
+        Modifier.fillMaxSize().padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // A DISTANCE CLASS HAS NO HOTSPOT TO FIND, so its control sits ABOVE the search for one.
+        // Below it, the lecturer of an e-learning cohort would watch a spinner hunt for a room that
+        // does not exist and conclude the app was broken.
+        OnlineClassPanel(slots)
+        Spacer(Modifier.height(24.dp))
         val started = session?.lecturerStarted == true
         when {
             searching -> { CircularProgressIndicator(); Text("Finding the class…", Modifier.padding(top = 12.dp)) }
@@ -181,11 +221,38 @@ private fun LecturerSessionTab() {
                     Text(if (busy) "Please wait…" else if (started) "END SESSION" else "START SESSION",
                         style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
+                // THE OTHER HALF OF THIS ROOM. You joined one coordinator's hotspot and started
+                // here; the other cohorts sitting in front of you have their own coordinators on
+                // their own hotspots, and their registers are still shut. Reading these three digits
+                // out is the whole handshake — nothing is sent between the phones. The coordinator's
+                // hub worked them out and handed them over when you started; the matching card on
+                // the coordinator's screen is deliberately identical, so both sides of the room are
+                // looking at the same thing.
+                combinedCode?.let { code ->
+                    Spacer(Modifier.height(20.dp))
+                    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("READ THIS OUT TO THE OTHER COORDINATORS IN THIS ROOM",
+                                style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(8.dp))
+                            Text(code, fontSize = 52.sp, fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace, letterSpacing = 8.sp,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Spacer(Modifier.height(8.dp))
+                            Text("They type it in to open their own cohort's register. It works only " +
+                                "today, and only for this lecture.",
+                                style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        }
+                    }
+                }
             }
             else -> Text(msg ?: "No active session on the coordinator yet.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
         }
         msg?.takeIf { session?.active == true }?.let { Text(it, Modifier.padding(top = 12.dp), textAlign = TextAlign.Center) }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = { scope.launch { refresh() } }, enabled = !searching, modifier = Modifier.fillMaxWidth()) { Text("Refresh") }
     }
 }
@@ -370,6 +437,9 @@ private fun LecturerAlertsTab() {
     val scope = rememberCoroutineScope()
     var inbox by remember { mutableStateOf<List<NotificationClient.Notif>?>(null) }
     var composing by remember { mutableStateOf(false) }
+    // Held across opens of the composer so a lecturer who closes and reopens it does not pay for
+    // the fetch twice on a connection that may barely have managed it once.
+    var recipients by remember { mutableStateOf<LecturerRecipientsClient.Recipients?>(null) }
     fun load() { scope.launch { inbox = NotificationClient().inbox() } }
     LaunchedEffect(Unit) { load() }
 
@@ -378,9 +448,18 @@ private fun LecturerAlertsTab() {
             Text("Notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Button(onClick = { composing = !composing }) { Text(if (composing) "Close" else "✎ New") }
         }
+        LaunchedEffect(composing) {
+            if (composing && recipients == null) {
+                recipients = runCatching { LecturerRecipientsClient().load() }.getOrNull()
+            }
+        }
         if (composing) NotificationComposer(
-            audiences = listOf("STUDENTS" to "My students", "COORDINATOR" to "Coordinator"),
+            audiences = listOf("STUDENTS" to "My students", "COORDINATOR" to "Coordinators"),
             onSent = { composing = false; load() },
+            // The named people behind those two audiences. Fetched when the composer opens rather
+            // than on tab load: a lecturer opens this tab to READ their alerts far more often than
+            // to write one, and their whole roster is not a small list.
+            recipients = recipients,
         )
         Spacer(Modifier.height(8.dp))
         // ABOVE the inbox, deliberately. A lecturer opens this tab because they were told they

@@ -18,7 +18,7 @@ import (
 
 func ListSchools(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT s.school_id::text, s.name, COALESCE(s.abbreviation,''),
 			       (SELECT COUNT(*) FROM departments d WHERE d.school_id = s.school_id) AS dept_count
@@ -49,7 +49,7 @@ func ListSchools(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func CreateSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req struct {
 			Name string `json:"name"`
 			// The short form. Separate from the name on purpose: "School of Mathematics and
@@ -99,7 +99,7 @@ func CreateSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 // dashboard row still written against the short form keeps resolving to this school.
 func UpdateSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		id := chi.URLParam(r, "school_id")
 		var req struct {
 			Name         string `json:"name"`
@@ -135,7 +135,7 @@ func UpdateSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func DeleteSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		id := chi.URLParam(r, "school_id")
 		_, err := adminPool.Exec(r.Context(),
 			`DELETE FROM schools WHERE school_id = $1::uuid AND tenant_id = $2`, id, tenantID)
@@ -149,7 +149,7 @@ func DeleteSchool(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func ListDepartments(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		schoolID := r.URL.Query().Get("school_id")
 		// school_id is NULL for a standalone SUPPORT department (Finance, ICT, Library…),
 		// which belongs to no school — COALESCE so it scans, and reaches the UI as "".
@@ -186,7 +186,7 @@ func ListDepartments(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func CreateDepartment(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req struct {
 			SchoolID string `json:"school_id"`
 			Name     string `json:"name"`
@@ -224,7 +224,7 @@ func CreateDepartment(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func DeleteDepartment(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		id := chi.URLParam(r, "department_id")
 		_, err := adminPool.Exec(r.Context(),
 			`DELETE FROM departments WHERE department_id = $1::uuid AND tenant_id = $2`, id, tenantID)

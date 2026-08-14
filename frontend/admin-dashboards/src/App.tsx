@@ -8,14 +8,14 @@ import WelcomeToast from './components/WelcomeToast'
 import VCOverview from './pages/vc/VCOverview'
 import VCLecturerWorkload from './pages/vc/VCLecturerWorkload'
 import DQAHome from './pages/dqa/DQAHome'
-import DQAThresholds from './pages/dqa/DQAThresholds'
 import DQAEligibility from './pages/dqa/DQAEligibility'
 import DQACourseHealth from './pages/dqa/DQACourseHealth'
-import DQATrends from './pages/dqa/DQATrends'
 import DQAPunctuality from './pages/dqa/DQAPunctuality'
+import DQAPatrolCoverage from './pages/dqa/DQAPatrolCoverage'
+import DQAUnitAttendance from './pages/dqa/DQAUnitAttendance'
+import DQAReportsHub from './pages/dqa/DQAReportsHub'
 import QADeviceReset from './pages/qa/QADeviceReset'
 import QAPresenceClaims from './pages/qa/QAPresenceClaims'
-import QAPatrollerBriefing from './pages/qa/QAPatrollerBriefing'
 import QAManualCorrection from './pages/qa/QAManualCorrection'
 import QACoordinatorHealth from './pages/qa/QACoordinatorHealth'
 import AdminHome from './pages/admin/AdminTenants'
@@ -28,7 +28,6 @@ import AdminRooms from './pages/admin/AdminRooms'
 import AdminSchools from './pages/admin/AdminSchools'
 import OrgLecturers from './pages/OrgLecturers'
 import AdminLecturers from './pages/admin/AdminLecturers'
-import LecturerDashboard from './pages/lecturer/LecturerDashboard'
 import AdminLecturerAssignments from './pages/admin/AdminLecturerAssignments'
 import AdminLecturerAttendance from './pages/admin/AdminLecturerAttendance'
 import AdminCoordinators from './pages/admin/AdminCoordinators'
@@ -40,15 +39,15 @@ import QAStudentAttendance from './pages/qa/QAStudentAttendance'
 import QAReports from './pages/qa/QAReports'
 import { QAOrgLecturers, QAOrgDepartments, QAOrgReports } from './pages/qa/QAOrgDashboard'
 import Timetable from './pages/shared/Timetable'
+import FreeRooms from './pages/shared/FreeRooms'
 import LecturerAssignments from './pages/shared/LecturerAssignments'
 import EmployeeAttendance from './pages/shared/EmployeeAttendance'
-import Messages from './pages/shared/Messages'
 import LecturerPortal from './pages/LecturerPortal'
 import OrgOverview from './pages/shared/OrgOverview'
 import AtRisk from './pages/shared/AtRisk'
 import AdminAudit from './pages/admin/AdminAudit'
-import Alerts from './pages/shared/Alerts'
 import OrgDepartments from './pages/shared/OrgDepartments'
+import Inbox from './pages/shared/Inbox'
 
 export default function App() {
   return (
@@ -71,17 +70,19 @@ export default function App() {
                 above is measured against it, and having to ask someone for it is friction on
                 exactly the question the dashboard exists to answer. */}
             <Route path="/vc/timetable"           element={<Timetable readOnly />} />
-            <Route path="/vc/alerts"              element={<Alerts />} />
+            <Route path="/vc/free-rooms" element={<FreeRooms />} />
+            <Route path="/vc/messages"            element={<Inbox />} />
+            <Route path="/vc/alerts"              element={<Navigate to="/vc/messages" replace />} />
             <Route path="/vc/employee-attendance" element={<EmployeeAttendance />} />
           </Route>
 
           {/* ── DQA Director ───────────────────────────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['DQA_DIRECTOR']} />}>
             <Route path="/dqa"              element={<DQAHome />} />
-            <Route path="/dqa/thresholds"   element={<DQAThresholds />} />
+            <Route path="/dqa/thresholds"   element={<Navigate to="/dqa" replace />} />
             <Route path="/dqa/eligibility"  element={<DQAEligibility />} />
             <Route path="/dqa/course-health" element={<DQACourseHealth />} />
-            <Route path="/dqa/trends"       element={<DQATrends />} />
+            <Route path="/dqa/trends"       element={<Navigate to="/dqa" replace />} />
             <Route path="/dqa/punctuality"  element={<DQAPunctuality />} />
             <Route path="/dqa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/dqa/student-attendance"  element={<QAStudentAttendance />} />
@@ -89,11 +90,36 @@ export default function App() {
             {/* The gateway already authorises these roles to read the timetable; there
                 simply was no page, so oversight could not see the week it was judging. */}
             <Route path="/dqa/timetable"           element={<Timetable readOnly />} />
-            <Route path="/dqa/alerts"              element={<Alerts />} />
+            <Route path="/dqa/free-rooms" element={<FreeRooms />} />
+            <Route path="/dqa/alerts"              element={<Navigate to="/dqa/messages" replace />} />
             <Route path="/dqa/employee-attendance" element={<EmployeeAttendance />} />
-            <Route path="/dqa/messages"            element={<Messages />} />
+            <Route path="/dqa/messages"            element={<Inbox />} />
             <Route path="/dqa/presence-claims"     element={<QAPresenceClaims />} />
-            <Route path="/dqa/patroller-messages"  element={<QAPatrollerBriefing />} />
+            <Route path="/dqa/monitor-messages"  element={<Navigate to="/dqa/messages" replace />} />
+            {/* The at-risk watchlist, institution-wide. Every other oversight role already had
+                this — HOD, dean, both QA reps and the admin — and the DQA director, who SETS the
+                threshold those students are measured against, was the one role that could not see
+                who was failing it. */}
+            <Route path="/dqa/at-risk"             element={<AtRisk />} />
+            {/* One row per department, across every college, so the directorate can compare units
+                against each other instead of reading a separate report per school.
+
+                OrgDepartments and NOT OrgOverview, deliberately. The overview is a single-org-unit
+                landing page — it says "your department" / "your college" and is bounded by the
+                caller's own — whereas this directorate is bounded by nothing, and the institution
+                rollup it would show is already the top of DQAHome. The departments handler already
+                has an unbounded path and DQA_DIRECTOR is already in orgDashRoles, so this needs no
+                backend change: the director simply gets every department rather than one school's. */}
+            <Route path="/dqa/org"                 element={<OrgDepartments />} />
+            {/* How much of the timetable the QA round actually reached. Was /dqa/patrol-coverage
+                until the feature was renamed to QA Monitor Coverage; the old path still resolves so
+                a bookmark or a link in an old email does not dead-end at the login page. */}
+            <Route path="/dqa/monitor-coverage"    element={<DQAPatrolCoverage />} />
+            <Route path="/dqa/patrol-coverage"     element={<Navigate to="/dqa/monitor-coverage" replace />} />
+            {/* The two attendance records for the same unit, in one row each. */}
+            <Route path="/dqa/unit-attendance"     element={<DQAUnitAttendance />} />
+            {/* The map of everything above — reports named by the question they answer. */}
+            <Route path="/dqa/reports"             element={<DQAReportsHub />} />
           </Route>
 
           {/* ── QA Officer ─────────────────────────────────────────────── */}
@@ -103,43 +129,48 @@ export default function App() {
             <Route path="/qa/correction"        element={<QAManualCorrection />} />
             <Route path="/qa/coordinator-health" element={<QACoordinatorHealth />} />
             <Route path="/qa/presence-claims"    element={<QAPresenceClaims />} />
-            <Route path="/qa/patroller-messages" element={<QAPatrollerBriefing />} />
+            <Route path="/qa/monitor-messages" element={<Navigate to="/qa/messages" replace />} />
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />
+            <Route path="/qa/free-rooms" element={<FreeRooms />} />
             <Route path="/qa/employee-attendance" element={<EmployeeAttendance />} />
-            <Route path="/qa/messages"            element={<Messages />} />
+            <Route path="/qa/messages"            element={<Inbox />} />
           </Route>
 
           {/* ── Tenant Admin (own institution only) ────────────────────── */}
           <Route element={<RoleLayout allowedRoles={['ADMIN']} />}>
             <Route path="/admin"                                      element={<AdminHome />} />
             <Route path="/admin/settings"                             element={<AdminSettings />} />
-            <Route path="/admin/tenants/:tenantId/users"              element={<AdminUsers />} />
-            <Route path="/admin/tenants/:tenantId/schools"            element={<AdminSchools />} />
-            <Route path="/admin/tenants/:tenantId/courses"            element={<AdminCourses />} />
-            <Route path="/admin/tenants/:tenantId/students"           element={<AdminStudents />} />
+            <Route path="/admin/users"              element={<AdminUsers />} />
+            <Route path="/admin/schools"            element={<AdminSchools />} />
+            <Route path="/admin/courses"            element={<AdminCourses />} />
+            <Route path="/admin/students"           element={<AdminStudents />} />
             <Route path="/admin/timetable"                            element={<Timetable />} />
-            <Route path="/admin/tenants/:tenantId/rooms"              element={<AdminRooms />} />
+            <Route path="/admin/free-rooms" element={<FreeRooms />} />
+            <Route path="/admin/rooms"              element={<AdminRooms />} />
             {/* /venues is the old path for the same page — kept so existing links resolve. */}
-            <Route path="/admin/tenants/:tenantId/venues"             element={<AdminRooms />} />
+            <Route path="/admin/venues"             element={<AdminRooms />} />
             <Route path="/admin/courses/:courseId/units"              element={<AdminCourseUnits />} />
-            <Route path="/admin/tenants/:tenantId/coordinators"          element={<AdminCoordinators />} />
-            <Route path="/admin/tenants/:tenantId/lecturers"              element={<AdminLecturers />} />
-            <Route path="/admin/tenants/:tenantId/lecturer-assignments"  element={<AdminLecturerAssignments />} />
-            <Route path="/admin/tenants/:tenantId/lecturer-attendance"   element={<AdminLecturerAttendance />} />
-            <Route path="/admin/tenants/:tenantId/employees"             element={<AdminEmployees />} />
-            <Route path="/admin/tenants/:tenantId/employee-attendance"   element={<AdminEmployeeAttendance />} />
-            <Route path="/admin/tenants/:tenantId/student-attendance"    element={<QAStudentAttendance />} />
+            <Route path="/admin/coordinators"          element={<AdminCoordinators />} />
+            <Route path="/admin/lecturers"              element={<AdminLecturers />} />
+            <Route path="/admin/lecturer-assignments"  element={<AdminLecturerAssignments />} />
+            <Route path="/admin/lecturer-attendance"   element={<AdminLecturerAttendance />} />
+            <Route path="/admin/employees"             element={<AdminEmployees />} />
+            <Route path="/admin/employee-attendance"   element={<AdminEmployeeAttendance />} />
+            <Route path="/admin/student-attendance"    element={<QAStudentAttendance />} />
             <Route path="/admin/reports"                                 element={<AdminReports />} />
             <Route path="/admin/at-risk"                                 element={<AtRisk />} />
             <Route path="/admin/audit"                                   element={<AdminAudit />} />
+            <Route path="/admin/messages"                                element={<Inbox />} />
           </Route>
 
-          {/* ── Lecturer (own assigned units) ──────────────────────────── */}
-          <Route element={<RoleLayout allowedRoles={['LECTURER']} />}>
-            <Route path="/lecturer" element={<LecturerDashboard />} />
-          </Route>
+          {/* A LECTURER HAS NO WEB CONSOLE. Their whole job — starting a lecture at the
+              coordinator's gate, answering a monitor's finding, running a distance class, writing
+              to a coordinator — happens on the phone, in the room, often with no signal. The
+              read-only /lecturer-portal above still exists for looking attendance up from a
+              browser. Login sends a lecturer to the app by name rather than to a route that would
+              404 and read as a failed sign-in. */}
 
           {/* ── HOD (own department) / Dean (own school) ─────────────────
               Both landed on a bare lecturer list with no sense of whether their unit was
@@ -156,7 +187,7 @@ export default function App() {
                 their own department rather than trusting anything this page sends. */}
             <Route path="/hod/assignments" element={<LecturerAssignments />} />
             <Route path="/hod/timetable" element={<Timetable readOnly />} />
-            <Route path="/hod/messages"  element={<Alerts />} />
+            <Route path="/hod/messages"  element={<Inbox />} />
           </Route>
           <Route element={<RoleLayout allowedRoles={['DEAN']} />}>
             <Route path="/dean"            element={<OrgOverview level="dean" />} />
@@ -166,7 +197,7 @@ export default function App() {
             <Route path="/dean/at-risk"   element={<AtRisk />} />
             <Route path="/dean/attendance" element={<QAStudentAttendance />} />
             <Route path="/dean/timetable" element={<Timetable readOnly />} />
-            <Route path="/dean/messages"  element={<Alerts />} />
+            <Route path="/dean/messages"  element={<Inbox />} />
           </Route>
 
           {/* ── TLC: Teaching & Learning Centre ─────────────────────────
@@ -177,6 +208,7 @@ export default function App() {
           <Route element={<RoleLayout allowedRoles={['TLC']} />}>
             <Route path="/tlc"       element={<Timetable />} />
             <Route path="/tlc/rooms" element={<AdminRooms />} />
+            <Route path="/tlc/free-rooms" element={<FreeRooms />} />
           </Route>
 
           {/* ── QA reps: department rep / school handler ────────────────── */}
@@ -185,8 +217,12 @@ export default function App() {
             <Route path="/qa-dept/lecturers" element={<QAOrgLecturers />} />
             <Route path="/qa-dept/at-risk"  element={<AtRisk />} />
             <Route path="/qa-dept/report"   element={<QAOrgReports />} />
+            {/* The two attendance records, both bounded to this rep's own department by the
+                gateway (lecturerLogScope / qaFiltersScoped) rather than by anything on screen. */}
+            <Route path="/qa-dept/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/qa-dept/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa-dept/timetable" element={<Timetable readOnly />} />
-            <Route path="/qa-dept/messages" element={<Messages />} />
+            <Route path="/qa-dept/messages" element={<Inbox />} />
           </Route>
           <Route element={<RoleLayout allowedRoles={['QA_SCHOOL_HANDLER']} />}>
             <Route path="/qa-school"           element={<OrgOverview level="qa-school" />} />
@@ -195,8 +231,12 @@ export default function App() {
             <Route path="/qa-school/lecturers" element={<QAOrgLecturers />} />
             <Route path="/qa-school/at-risk"   element={<AtRisk />} />
             <Route path="/qa-school/reports"   element={<QAOrgReports />} />
+            {/* Same two records, bounded to this handler's own college — including the extra
+                colleges carried in user_schools, which the scope resolver already folds in. */}
+            <Route path="/qa-school/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/qa-school/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa-school/timetable" element={<Timetable readOnly />} />
-            <Route path="/qa-school/messages"  element={<Messages />} />
+            <Route path="/qa-school/messages"  element={<Inbox />} />
             <Route path="/qa-school/presence-claims" element={<QAPresenceClaims />} />
           </Route>
 

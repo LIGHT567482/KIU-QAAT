@@ -46,14 +46,21 @@ internal data class TtEntry(
  * [sessionType] picks the columns — a weekend cohort gets Sat/Sun instead of Mon–Fri. Entries
  * falling outside the chosen columns are still shown, under "Not on this week's days", so a slot
  * can never silently vanish because its cohort was mis-tagged.
+ *
+ * [days] overrides that choice outright, for the one caller whose week is not a cohort's week: a
+ * LECTURER teaches across cohorts, so their grid must run Monday to Sunday. Deriving that from a
+ * session type would mean inventing a fake one, and the next reader would have to work out what
+ * "weekend" meant on a screen showing five weekdays.
  */
 @Composable
 internal fun TimetableGrid(
     entries: List<TtEntry>,
     sessionType: String,
     unscheduledNames: List<String> = emptyList(),
+    days: List<Int>? = null,
 ) {
-    val days = if (sessionType.lowercase().contains("weekend")) listOf(6, 7) else listOf(1, 2, 3, 4, 5)
+    @Suppress("NAME_SHADOWING")
+    val days = days ?: if (sessionType.lowercase().contains("weekend")) listOf(6, 7) else listOf(1, 2, 3, 4, 5)
     val scheduled = entries.filter { it.dayOfWeek in days && it.start.isNotBlank() }
     val offDays = entries.filter { it.dayOfWeek !in days && it.start.isNotBlank() }
     val today = LocalDate.now().dayOfWeek.value

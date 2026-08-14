@@ -1,6 +1,8 @@
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import { Kpi, KpiRow, Section } from '../../components/Kpi'
+import OverviewAnalytics from '../../components/OverviewAnalytics'
+import DQATrends from './DQATrends'
 
 /**
  * The DQA director's home.
@@ -37,12 +39,17 @@ export default function DQAHome() {
   const { data: ov, status } = useQuery<Overview>(() => api.get('/api/v1/org/overview'))
 
   const links: { label: string; href: string; desc: string }[] = [
+    { label: 'Reports',            href: '/dqa/reports',             desc: 'Every report the directorate can generate' },
     { label: 'Eligibility',        href: '/dqa/eligibility',         desc: 'Who may sit exams, and who is short' },
+    { label: 'Unit Attendance',    href: '/dqa/unit-attendance',     desc: 'Teaching and turnout for the same unit' },
+    { label: 'At-risk Students',   href: '/dqa/at-risk',             desc: 'Who is falling below the bar you set' },
     { label: 'Course Health',      href: '/dqa/course-health',       desc: 'Attendance by course and unit' },
-    { label: 'Trends',             href: '/dqa/trends',              desc: 'How attendance is moving week to week' },
+    { label: 'By College',         href: '/dqa/org',                 desc: 'Roll-up per college, then per department' },
     { label: 'Punctuality',        href: '/dqa/punctuality',         desc: 'Late starts and short lectures' },
-    { label: 'Lecturer Attendance',href: '/dqa/lecturer-attendance', desc: 'Coordinator record and QA patrol record' },
+    { label: 'Lecturer Attendance',href: '/dqa/lecturer-attendance', desc: 'Coordinator record and QA monitor record' },
+    { label: 'QA Monitor Coverage', href: '/dqa/monitor-coverage',   desc: 'How much of the week the QA round reached' },
     { label: 'Student Attendance', href: '/dqa/student-attendance',  desc: 'Per-student detail and corrections' },
+    { label: 'Employee Attendance',href: '/dqa/employee-attendance', desc: 'Support-staff terminal records' },
     { label: 'QA Reports',         href: '/dqa/qa-reports',          desc: 'Submissions filed by QA staff' },
     { label: 'Timetable',          href: '/dqa/timetable',           desc: 'The published week, read-only' },
   ]
@@ -68,6 +75,10 @@ export default function DQAHome() {
         </KpiRow>
       </Section>
 
+      {/* Direction and location, beneath the four scalars that say only "what". The directorate's
+          scope is the institution, so these cover every college. */}
+      <OverviewAnalytics />
+
       <h3 style={{ margin: '26px 0 10px', fontSize: 16 }}>Reports</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
         {links.map(l => (
@@ -81,6 +92,14 @@ export default function DQAHome() {
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{l.desc}</div>
           </a>
         ))}
+      </div>
+
+      {/* Trends used to be its own sidebar entry, which put the question "how is attendance
+          moving" one click away from the four scalars that answer "where is it now" — and the
+          two are only meaningful read together. A single figure with no direction is a number
+          the director has to remember last week's value to interpret. */}
+      <div style={{ marginTop: 30 }}>
+        <DQATrends />
       </div>
     </div>
   )

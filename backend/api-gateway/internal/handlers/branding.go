@@ -157,7 +157,7 @@ func GetPublicBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 // identity/branding. Runs on the privileged adminPool (cross-tenant platform op).
 func UpdateTenantBranding(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/branding")
+		tenantID := tenantOf(r)
 		if !middleware.ValidTenantID(tenantID) {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_TENANT", "valid tenant_id required"))
 			return

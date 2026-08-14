@@ -62,10 +62,10 @@ func auditAdmin(r *http.Request, pool *pgxpool.Pool, tenantID, actorID, action, 
 	}
 	if _, err := conn.Exec(r.Context(), `
 		INSERT INTO admin_audit_log
-		  (tenant_id, actor_id, actor_role, action, target_type, target_id, payload, ip_address)
-		VALUES ($1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), $7::jsonb,
-		        CASE WHEN $8 = '' THEN NULL ELSE $8::inet END)`,
-		tenantID, actorID, role, action, targetType, targetID, payloadJSON, ip,
+		  (actor_id, actor_role, action, target_type, target_id, payload, ip_address)
+		VALUES ($1, $2, $3, NULLIF($4,''), NULLIF($5,''), $6::jsonb,
+		        CASE WHEN $7 = '' THEN NULL ELSE $7::inet END)`,
+		actorID, role, action, targetType, targetID, payloadJSON, ip,
 	); err != nil {
 		// Never fatal — but never silent either.
 		log.Printf("audit: failed to record action=%s target=%s/%s: %v", action, targetType, targetID, err)
@@ -93,15 +93,14 @@ func jsonObject(fields map[string]string) string {
 // ListAdminAudit — GET /api/v1/admin/audit
 func ListAdminAudit(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := middleware.GetTenantID(r.Context())
 
 		q := `SELECT a.audit_id::text, a.actor_id, COALESCE(u.full_name,''), a.actor_role, a.action,
 		             COALESCE(a.target_type,''), COALESCE(a.target_id,''),
 		             COALESCE(a.payload::text,'{}'), COALESCE(host(a.ip_address),''), a.occurred_at
 		      FROM admin_audit_log a
-		      LEFT JOIN users u ON u.user_id::text = a.actor_id AND u.tenant_id = a.tenant_id
-		      WHERE a.tenant_id = $1`
-		args := []interface{}{tenantID}
+		      LEFT JOIN users u ON u.user_id::text = a.actor_id
+		      WHERE TRUE`
+		args := []interface{}{}
 
 		if v := strings.TrimSpace(r.URL.Query().Get("action")); v != "" {
 			args = append(args, v)
@@ -165,7 +164,7 @@ func ListAdminAudit(pool *pgxpool.Pool) http.HandlerFunc {
 		// hardcoded list that drifts as new audited actions are added.
 		actions := []string{}
 		aRows, _ := pool.Query(r.Context(),
-			`SELECT DISTINCT action FROM admin_audit_log WHERE tenant_id = $1 ORDER BY 1`, tenantID)
+			`SELECT DISTINCT action FROM admin_audit_log ORDER BY 1`)
 		if aRows != nil {
 			for aRows.Next() {
 				var a string

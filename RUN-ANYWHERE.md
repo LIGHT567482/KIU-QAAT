@@ -5,9 +5,15 @@ and run it **the same way**:
 
 ## 1. Copy the folder
 Copy this entire `QAAT/` folder to the other laptop (USB, scp…). It already
-contains everything: source, auth RSA keys (`keys/`), settings (`infra/.env`),
-TLS cert (`infra/certs/`), built dashboards (`apps/*/dist`), and all DB
-migrations + the platform super-admin seed.
+contains everything: source, auth RSA keys (`keys/`), settings
+(`infra/field.env`), TLS cert (`infra/certs/`), built dashboards (`apps/*/dist`),
+and all DB migrations.
+
+`infra/field.env` is deliberately not called `.env`: compose auto-loads a file of
+that name from the compose file's own directory, which used to attach these
+field credentials to any compose command — including ones meant for a local
+database. Every invocation now names its env file, and `setup.sh` passes
+`--env-file infra/field.env` for you.
 
 ## 2. Install prerequisites (once)
 - **Docker** + **Docker Compose** (Docker Desktop on Win/macOS; on Linux:
@@ -58,4 +64,5 @@ the app is identical, only this step differs.)
 - Changed frontend code? Rebuild that app first: `cd apps/<app> && pnpm install &&
   pnpm exec vite build` (build WITHOUT `VITE_API_URL` — dashboards detect the host
   at runtime).
-- Fresh empty DB: `docker compose -f infra/docker-compose.yml down -v` then `./setup.sh`.
+- Fresh empty DB: `docker compose -f infra/docker-compose.yml --env-file infra/field.env down -v`
+  then `./setup.sh`.

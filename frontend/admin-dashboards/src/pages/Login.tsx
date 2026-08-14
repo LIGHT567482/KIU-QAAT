@@ -14,7 +14,6 @@ const ROLE_REDIRECT: Partial<Record<Role, string>> = {
   DQA_DIRECTOR: '/dqa',
   QA_OFFICER:   '/qa/reports',
   ADMIN:        '/admin',
-  LECTURER:     '/lecturer',
   HOD:          '/hod',
   DEAN:         '/dean',
   QA_SCHOOL_HANDLER: '/qa-school',
@@ -26,6 +25,7 @@ const ROLE_REDIRECT: Partial<Record<Role, string>> = {
 // them to a route that does not exist would bounce them back here looking like a failed login, so
 // say plainly which app to open instead.
 const NO_WEB_DASHBOARD: Partial<Record<Role, string>> = {
+  LECTURER: 'Lecturers work from the KIU QAAT mobile app — there is no web console for this account. Sign in there with the same details to start a lecture, run a distance class, see your timetable and answer anything recorded against you. To look your attendance up from a browser, use the lecturer portal link below.',
   COORDINATOR: 'Coordinators run sessions from the KIU QAAT mobile app — there is no web dashboard for this account. Sign in there with the same details, or with your coordinator code.',
   // A monitor's work is walking into rooms, so their round lives on the phone. Saying so beats
   // the generic "no dashboard" line, which reads like the account is broken.
@@ -95,19 +95,11 @@ export default function Login() {
   const navigate = useNavigate()
   const [form, setForm] = useState({ email: '', password: '', totp_code: '' })
   const [needsMFA, setNeedsMFA] = useState(false)
-  const [resolvedTenantId, setResolvedTenantId] = useState('')
   const [error, setError] = useState<string | null>(null)
   // Said out loud while a hibernating service spins up, so the button does not just sit there
   // looking broken for a minute.
   const [waking, setWaking] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-
-  async function resolveTenant(email: string): Promise<string> {
-    const { status, data } = await fetchJSON(
-      `${API}/api/v1/auth/tenant-lookup?email=${encodeURIComponent(email)}`, {}, setWaking)
-    if (status !== 200 || !data.tenant_id) throw new Error('No account found for that email address.')
-    return data.tenant_id as string
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -119,22 +111,11 @@ export default function Login() {
       // the same identifier lookup the phone app uses — and then goes through the very same
       // auth-service login, so bcrypt, lockout, MFA and token issuance are unchanged.
       //
-      // The tenant lookup below is skipped for a staff ID because it is keyed on email and there
-      // is one institution: app-login resolves the tenant itself.
+      // No tenant lookup first. app-login resolves the one institution itself and returns the
+      // tenant it used, so the round-trip that used to happen here bought nothing and cost
+      // something: a hiccup on it rejected a correct password with "no account found", and its
+      // answer told an unauthenticated caller which email addresses have accounts.
       const identifier = form.email.trim()
-      const isEmail = identifier.includes('@')
-
-      let tid = resolvedTenantId
-      if (isEmail && !tid) {
-        try {
-          tid = await resolveTenant(identifier)
-          setResolvedTenantId(tid)
-        } catch {
-          setError('No account found for that email address.')
-          setLoading(false)
-          return
-        }
-      }
 
       const { status: loginStatus, data } = await fetchJSON(`${API}/api/v1/auth/app-login`, {
         method: 'POST',
@@ -170,9 +151,8 @@ export default function Login() {
       sessionStorage.setItem('qaat_welcome', (data.full_name as string) || form.email)
       login(data.access_token as string, {
         userId: data.user_id as string,
-        // app-login answers with the tenant it resolved, which is the authoritative one when the
-        // identifier was a staff ID and the email-keyed lookup above never ran.
-        tenantId:  (data.tenant_id as string) || tid,
+        // app-login answers with the tenant it resolved, which is the only authority on it.
+        tenantId:  data.tenant_id as string,
         role:      data.role as Role,
         expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in as number),
         // Carried so every dashboard can greet the person by title and name,
@@ -224,7 +204,7 @@ export default function Login() {
           {/* type="text", not "email": a staff ID is a valid credential here and the browser's
               own email validation would refuse to submit the form before we ever saw it. */}
           <input type="text" placeholder="Staff ID or Email" value={form.email} autoComplete="username"
-            onChange={e => { setForm(f => ({ ...f, email: e.target.value })); setResolvedTenantId('') }}
+            onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
             required style={inp} />
           <PasswordInput placeholder="Password" value={form.password} autoComplete="current-password"
             onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required style={inp} />

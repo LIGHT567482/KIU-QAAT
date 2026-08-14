@@ -36,8 +36,10 @@ interface Dept {
   sessions_held: number; sessions_planned: number
   taught_rate: number; lecturer_show_rate: number
   avg_attendance: number; at_risk: number
-  patrolled: number; patrol_taught: number
+  monitored: number; patrol_taught: number
   no_hod: boolean; unlinked: boolean; hod_never_signed_in: boolean
+  /** 'Head of Department' or 'Director', decided by the server from the department's kind. */
+  head_title: string
 }
 interface Resp { scope?: string; window_days?: number; departments?: Dept[]; unset?: boolean; message?: string }
 
@@ -65,7 +67,7 @@ export default function OrgDepartments({ canNotify = true }: { canNotify?: boole
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 4px' }}>Departments &amp; heads of department</h2>
+      <h2 style={{ margin: '0 0 4px' }}>Departments &amp; their heads</h2>
       <p style={{ color: 'var(--muted)', margin: '0 0 18px', fontSize: 13 }}>
         Every department in <b>{rows[0]?.school_abbreviation || data?.scope || 'your college'}</b>
         {rows[0]?.school && rows[0].school !== rows[0].school_abbreviation ? ` (${rows[0].school})` : ''}, who runs it, and how it is doing.
@@ -126,9 +128,11 @@ function DeptCard({ d, canNotify, onNotify, onOpen }: {
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{d.name}</div>
+          {/* The office, not a generic "Head": the Library is run by a Director and the row that
+              introduces them should say so. Server-decided from the department's kind. */}
           {d.hod ? (
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>
-              Head: <strong style={{ color: 'var(--text)' }}>
+              {d.head_title || 'Head'}: <strong style={{ color: 'var(--text)' }}>
                 {[d.hod.title, d.hod.full_name].filter(Boolean).join(' ')}
               </strong>
               {d.hod.email && <> · {d.hod.email}</>}
@@ -141,7 +145,8 @@ function DeptCard({ d, canNotify, onNotify, onOpen }: {
             </div>
           ) : (
             <div style={{ fontSize: 13, color: '#b91c1c', fontWeight: 600, marginTop: 3 }}>
-              No head of department — nobody is answerable for this department.
+              No {(d.head_title || 'head of department').toLowerCase()} — nobody is answerable
+              for this department.
             </div>
           )}
         </div>
@@ -172,7 +177,7 @@ function DeptCard({ d, canNotify, onNotify, onOpen }: {
               label="Units unstaffed" value={d.units_unstaffed}
               danger={d.units_unstaffed > 0}
             />
-            <Stat label="Patrolled" value={d.patrolled > 0 ? `${d.patrol_taught}/${d.patrolled} teaching` : '—'} />
+            <Stat label="Monitored" value={d.monitored > 0 ? `${d.patrol_taught}/${d.monitored} teaching` : '—'} />
           </div>
 
           <div style={{

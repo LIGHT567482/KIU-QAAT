@@ -39,8 +39,8 @@ func GetUnitLecturers(pool *pgxpool.Pool) http.HandlerFunc {
 			       la.academic_year, la.year, la.semester, la.intake_session::text
 			FROM lecturer_assignments la
 			JOIN lecturers l ON l.lecturer_id = la.lecturer_id
-			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE la.unit_id = $1 AND la.tenant_id = $2
 			ORDER BY l.full_name`, unitID, tenantID)
 		if err != nil {

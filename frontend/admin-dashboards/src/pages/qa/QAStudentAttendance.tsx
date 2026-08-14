@@ -33,7 +33,7 @@ export default function QAStudentAttendance() {
 
   // Real course list (admin) → drives the Course dropdown and the cascading units.
   const coursesQ = useQuery<CourseOpt[]>(
-    () => (isAdmin && tenantId ? api.get(`/api/v1/admin/tenants/${tenantId}/courses`) : Promise.resolve([] as CourseOpt[])),
+    () => (isAdmin && tenantId ? api.get(`/api/v1/admin/courses`) : Promise.resolve([] as CourseOpt[])),
     [isAdmin, tenantId])
   const courses = coursesQ.status === 'ok' ? (coursesQ.data ?? []) : []
   const unitsQ = useQuery<UnitOpt[]>(

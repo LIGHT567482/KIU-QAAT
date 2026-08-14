@@ -29,9 +29,11 @@ class ManifestClient(private val dao: AppDao) {
         val dayOfWeek: Int = 0,         // 1=Mon…7=Sun, 0 = unscheduled / any day
         val startTime: String = "",     // "HH:MM" scheduled start
         val venueId: String = "",       // room / venue label
-        // ONE code covering both lecturer + session (only set when the lecturer is shared across
-        // coordinators today). A coordinator whose lecturer is in another room enters this single
-        // code to mark the lecturer present and start attendance here.
+        // SUPERSEDED, and read by nothing. This was a 4-digit code the server issued daily and
+        // shipped down to whichever coordinators shared a lecturer. It has been replaced by the
+        // 3-digit code every phone DERIVES for itself from the timetable slot (see
+        // CombinedClassCode), which needs no issuing, no storage and no signal. Kept only so an
+        // older cached manifest still parses; delete once the server stops sending session_code.
         val sessionCode: String = "",
     )
     data class Parsed(
@@ -92,6 +94,11 @@ class ManifestClient(private val dao: AppDao) {
                 room = s.optString("room", ""),
                 lecturerName = s.optString("lecturer_name", ""),
                 lecturerPhone = s.optString("lecturer_phone", ""),
+                // The two fields the combined-class code is derived from. The key arrives ONLY on
+                // a lecture the server can see is genuinely shared — an ordinary lecture gets a
+                // blank one, and blank is what keeps the code field off the coordinator's screen.
+                lecturerId = s.optString("lecturer_id", ""),
+                combinedClassKey = s.optString("combined_class_key", ""),
             ))
         }
         if (slots.isNotEmpty()) dao.replaceTimetable(slots)

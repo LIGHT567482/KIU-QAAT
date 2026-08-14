@@ -99,7 +99,7 @@ func checkPatrolDevice(r *http.Request, conn *pgxpool.Conn, tenantID, userID str
 // for the person holding the phone, since it is the only thing they will see.
 func writeDeviceRefusal(w http.ResponseWriter) {
 	writeJSON(w, http.StatusForbidden, errBody("DEVICE_NOT_BOUND",
-		"This phone is not the one registered to your patrol account. Ask an administrator to release your device binding if you have changed phones."))
+		"This phone is not the one registered to your monitor account. Ask an administrator to release your device binding if you have changed phones."))
 }
 
 // BindPatrolDevice claims this handset for the signed-in patroller (trust on first use), and is a
@@ -164,7 +164,7 @@ func BindPatrolDevice(pool *pgxpool.Pool) http.HandlerFunc {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					writeJSON(w, http.StatusForbidden, errBody("DEVICE_IN_USE",
-						"This phone is already registered to another patrol account. Each patroller needs their own handset."))
+						"This phone is already registered to another monitor account. Each monitor needs their own handset."))
 					return
 				}
 				writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -294,6 +294,28 @@ type patrolSlot struct {
 	// patroller and collide on the log's uniqueness key.
 	OfferingID string `json:"offering_id"`
 	Cohort     string `json:"cohort"`
+
+	// EVERY OTHER UNIT BEING TAUGHT IN THIS SAME HOUR, in this same room, by this same lecturer.
+	//
+	// One hour of teaching frequently satisfies several unit codes: the same content is required by
+	// several programmes and each codes it differently. The search returned one of them — whichever
+	// matched what the monitor typed — so the monitor ticked one unit and the students on the other
+	// codes had a lecture with no QA record, while the lecturer got credit for one unit instead of
+	// the several they actually delivered.
+	//
+	// Returned WITH the row rather than as separate results, because they are not separate lectures
+	// to choose between: the monitor is standing in front of all of them at once.
+	AlsoHere []patrolSlotUnit `json:"also_here"`
+}
+
+// patrolSlotUnit is one of the other unit codes running in the same room, hour and lecturer.
+type patrolSlotUnit struct {
+	UnitID     string `json:"unit_id"`
+	UnitName   string `json:"unit_name"`
+	CourseCode string `json:"course_code"`
+	OfferingID string `json:"offering_id"`
+	Cohort     string `json:"cohort"`
+	Room       string `json:"room"`
 }
 
 // PatrolManifest returns today's timetabled sessions for the patroller's tenant.
@@ -341,21 +363,26 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 			                                 'Yr' || o.study_year, 'Sem' || o.semester,
 			                                 NULLIF(o.intake, '')), ''), '')
 			FROM timetable_slots ts
-			JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
-			LEFT JOIN course_offerings o ON o.offering_id = ts.offering_id AND o.tenant_id = ts.tenant_id
-			LEFT JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
+			JOIN course_units cu ON cu.unit_id = ts.unit_id
+			LEFT JOIN course_offerings o ON o.offering_id = ts.offering_id
+			LEFT JOIN courses c ON c.course_id = o.course_id
 			LEFT JOIN LATERAL (
 			    SELECT l.staff_id, l.full_name
 			    FROM lecturers l
-			    WHERE l.tenant_id = ts.tenant_id
-			      AND ( l.lecturer_id = ts.lecturer_id
+			    WHERE ( l.lecturer_id = ts.lecturer_id
 			         OR ( ts.lecturer_id IS NULL AND l.lecturer_id = (
 			               SELECT la.lecturer_id FROM lecturer_assignments la
-			               WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+			               WHERE la.unit_id = ts.unit_id
 			               ORDER BY la.academic_year DESC LIMIT 1) ) )
 			    LIMIT 1
 			) lec ON true
 			WHERE ts.tenant_id = $1
+			  -- A distance / e-learning cohort has no room to walk to (migration 087). Leaving
+			  -- these on the round would send a monitor to an empty hall and produce a "not
+			  -- taught" tick against a lecturer who was teaching online at the time — the exact
+			  -- unfairness the provision-room announcement exists to prevent, arriving by another
+			  -- door. Their lecturer's attendance is recorded by the online start/end instead.
+			  AND COALESCE(o.delivery_mode, 'IN_PERSON') <> 'ONLINE'
 			ORDER BY ts.day_of_week, ts.start_time`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -373,6 +400,13 @@ func PatrolManifest(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			slots = append(slots, s)
 		}
+		rows.Close()
+
+		// The companions travel with the OFFLINE round too. A monitor with no signal is exactly the
+		// one who cannot look up what else is in the room, and a round that names one unit when
+		// three are being delivered produces a record that understates the lecture.
+		attachConcurrentUnits(r.Context(), conn, tenantID, slots)
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"date": time.Now().UTC().Format("2006-01-02"),
 			// Which weekday the server considers today (1=Mon…7=Sun). The phone filters the
@@ -524,7 +558,7 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 					// to know which sitting was meant — and since ticks sync from a phone that may
 					// have been offline for a day, the reader cannot assume it means today.
 					when := lectureWhen(l.SessionDate, l.ScheduledTime)
-					subject := fmt.Sprintf("Patrol: %s", l.UnitName)
+					subject := fmt.Sprintf("Monitor: %s", l.UnitName)
 					if when != "" {
 						subject += " — " + when
 					}
@@ -535,15 +569,28 @@ func PatrolSync(pool *pgxpool.Pool) http.HandlerFunc {
 						map[bool]string{true: " (" + l.CourseCode + ")", false: ""}[l.CourseCode != ""],
 						map[bool]string{true: ", " + when, false: ""}[when != ""],
 						map[bool]string{true: ", in " + l.Room, false: ""}[l.Room != ""])
+					// A NOT TAUGHT message is an accusation, and until now it was a dead end: it
+					// stated the finding and offered nothing to do about it, while the lecturer's
+					// own account lived on a screen they had to know to go and find. It now carries
+					// the reply with it, pointed at this exact lecture (migration 090), so the
+					// answer is one tap from the thing being answered.
+					action, actionRef := "", ""
+					if !l.Taught {
+						action = "APPEAL_NOT_TAUGHT"
+						actionRef = l.UnitID + "|" + l.SessionDate + "|" + l.ScheduledTime
+						bodyTxt += " If you did teach it, say so here — your account is filed " +
+							"beside the monitor's and read with it. It does not overturn the tick " +
+							"on its own; it makes sure there are two accounts and not one."
+					}
 					var nid string
 					// sender_id NULL, and the impersonal name. NULL is not tidiness: the inbox
 					// query LEFT JOINs users on sender_id to prefix the sender's title, so leaving
-					// the patroller's id here would render "Mr. QA Patrol" — their honorific
+					// the patroller's id here would render "Mr. QA Monitor" — their honorific
 					// pinned to the very name that replaced them.
 					if conn.QueryRow(r.Context(), `
-						INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, subject, body)
-						VALUES ($1, NULL, $2, 'QA_PATROLLER', 'DIRECT', $3, $4) RETURNING notification_id::text`,
-						tenantID, patrolSenderName, subject, bodyTxt).Scan(&nid) == nil {
+						INSERT INTO app_notifications (tenant_id, sender_id, sender_name, sender_role, audience, subject, body, action, action_ref)
+						VALUES ($1, NULL, $2, 'QA_PATROLLER', 'DIRECT', $3, $4, NULLIF($5,''), NULLIF($6,'')) RETURNING notification_id::text`,
+						tenantID, patrolSenderName, subject, bodyTxt, action, actionRef).Scan(&nid) == nil {
 						_, _ = conn.Exec(r.Context(),
 							`INSERT INTO notification_recipients (notification_id, tenant_id, recipient_user_id)
 							 VALUES ($1, $2, $3::uuid) ON CONFLICT DO NOTHING`, nid, tenantID, lecUser)

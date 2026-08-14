@@ -203,16 +203,15 @@ func querySlots(ctx context.Context, pool *pgxpool.Pool, w scheduler.Window, off
 		       to_char(ts.start_time, 'HH24:MI'),
 		       lec.user_id::text, COALESCE(lec.full_name, ''), COALESCE(lec.staff_id, '')
 		  FROM timetable_slots ts
-		  JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
+		  JOIN course_units cu ON cu.unit_id = ts.unit_id
 		  JOIN LATERAL (
 		      SELECT l.user_id, l.full_name, l.staff_id
 		        FROM lecturers l
-		       WHERE l.tenant_id = ts.tenant_id
-		         AND l.user_id IS NOT NULL
+		       WHERE l.user_id IS NOT NULL
 		         AND ( l.lecturer_id = ts.lecturer_id
 		            OR ( ts.lecturer_id IS NULL AND l.lecturer_id = (
 		                  SELECT la.lecturer_id FROM lecturer_assignments la
-		                   WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+		                   WHERE la.unit_id = ts.unit_id
 		                   ORDER BY la.academic_year DESC LIMIT 1) ) )
 		       LIMIT 1
 		  ) lec ON true

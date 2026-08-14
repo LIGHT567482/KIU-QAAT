@@ -34,73 +34,9 @@ import (
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
-// ─── GET /api/v1/lecturer/timetable ──────────────────────────────────────────
-
-// LecturerTimetable returns the signed-in lecturer's WHOLE WEEK.
-//
-// The whole week, not today, for the same reason the patrol manifest carries the whole week: a
-// phone caches what it is given, and a lecturer whose last signal was Monday would otherwise spend
-// Tuesday matching against Monday's timetable — offline, confidently, with nothing on screen to
-// say so. A week is a handful of rows; the phone picks the day itself.
-func LecturerTimetable(adminPool *pgxpool.Pool) http.HandlerFunc {
-	type slot struct {
-		UnitID    string `json:"unit_id"`
-		UnitName  string `json:"unit_name"`
-		DayOfWeek int    `json:"day_of_week"` // 1=Mon … 7=Sun
-		StartTime string `json:"start_time"`  // HH:MM
-		Minutes   int    `json:"duration_minutes"`
-		Room      string `json:"room"`
-	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := middleware.GetTenantID(r.Context())
-		userID := middleware.GetUserID(r.Context())
-		lecturerID, ok := resolveLecturerID(adminPool, r, tenantID, userID)
-		if !ok {
-			// An account with no lecturers row is a real, ordinary state in a half-configured
-			// institution. An empty week is the honest answer and lets the phone cache "nothing",
-			// rather than a 404 the app would have to special-case into the same thing.
-			writeJSON(w, http.StatusOK, map[string]interface{}{"slots": []any{}})
-			return
-		}
-
-		// BOTH ways a lecturer is attached to a lecture, because the data uses both and a
-		// timetable that silently omits half of someone's week is worse than none: the phone would
-		// tell them nothing is timetabled at the exact moment they are standing in the room.
-		//
-		//   1. timetable_slots.lecturer_id — the slot names them directly
-		//   2. lecturer_assignments        — they are assigned to the unit, and the slot names
-		//                                    nobody (a very common shape after a CSV import)
-		rows, err := adminPool.Query(r.Context(), `
-			SELECT s.unit_id, COALESCE(cu.name, s.unit_id),
-			       s.day_of_week, to_char(s.start_time, 'HH24:MI'),
-			       COALESCE(s.duration_minutes, 60),
-			       COALESCE(NULLIF(s.room, ''), s.venue_id, '')
-			FROM timetable_slots s
-			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
-			WHERE s.tenant_id = $1
-			  AND ( s.lecturer_id = $2::uuid
-			     OR ( s.lecturer_id IS NULL AND EXISTS (
-			            SELECT 1 FROM lecturer_assignments la
-			             WHERE la.tenant_id = s.tenant_id
-			               AND la.unit_id = s.unit_id
-			               AND la.lecturer_id = $2::uuid ) ) )
-			ORDER BY s.day_of_week, s.start_time`, tenantID, lecturerID)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "could not read the timetable"))
-			return
-		}
-		defer rows.Close()
-
-		out := []slot{}
-		for rows.Next() {
-			var s slot
-			if rows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime, &s.Minutes, &s.Room) == nil {
-				out = append(out, s)
-			}
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"slots": out})
-	}
-}
+// GET /api/v1/lecturer/timetable lives in lecturer_timetable.go — it grew from the phone's
+// minimal week into the dashboard's full grid, and one handler serving both is what keeps the
+// screen a lecturer plans from and the week their phone matches against from disagreeing.
 
 // ─── POST /api/v1/lecturer/presence-claims ───────────────────────────────────
 
@@ -195,7 +131,7 @@ func SubmitPresenceClaims(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			_, execErr := conn.Exec(r.Context(), `
 				INSERT INTO lecturer_presence_claims
-				  (claim_id, tenant_id, lecturer_user_id, lecturer_staff_id, lecturer_name,
+				  (claim_id, lecturer_user_id, lecturer_staff_id, lecturer_name,
 				   latitude, longitude, accuracy_metres, location_status,
 				   -- The phone's clock is the record of when the lecturer stood in the room, and a
 				   -- PAST timestamp is kept exactly as given: that is the whole point of filing
@@ -206,13 +142,13 @@ func SubmitPresenceClaims(pool *pgxpool.Pool) http.HandlerFunc {
 				   captured_at,
 				   unit_id, unit_name, room, day_of_week, scheduled_time, session_date,
 				   match_kind, minutes_from_start, note, device_hash)
-				VALUES ($1::uuid, $2, $3::uuid, $4, $5,
-				        $6, $7, $8, $9,
-				        LEAST($10::timestamptz, now()),
-				        NULLIF($11,''), $12, $13, NULLIF($14::int, 0)::smallint, $15,
-				        NULLIF($16,'')::date, $17, $18, $19, $20)
+				VALUES ($1::uuid, $2::uuid, $3, $4,
+				        $5, $6, $7, $8,
+				        LEAST($9::timestamptz, now()),
+				        NULLIF($10,''), $11, $12, NULLIF($13::int, 0)::smallint, $14,
+				        NULLIF($15,'')::date, $16, $17, $18, $19)
 				ON CONFLICT (claim_id) DO NOTHING`,
-				c.ClaimID, tenantID, userID, staffID, fullName,
+				c.ClaimID, userID, staffID, fullName,
 				c.Latitude, c.Longitude, c.AccuracyMetres, validLocationStatus(c.LocationStatus),
 				c.CapturedAt,
 				c.UnitID, c.UnitName, c.Room, c.DayOfWeek, c.ScheduledTime, c.SessionDate,
@@ -254,8 +190,8 @@ func ListPresenceClaims(pool *pgxpool.Pool) http.HandlerFunc {
 		Note           string   `json:"note"`
 		// The other record. Absent (nil) when no patroller ticked this slot at all — which is
 		// itself the answer to a good number of complaints.
-		PatrolTaught *bool  `json:"patrol_taught"`
-		PatrolRoom   string `json:"patrol_room"`
+		PatrolTaught  *bool  `json:"patrol_taught"`
+		PatrolRoom    string `json:"patrol_room"`
 		PatrolTakenAt string `json:"patrol_taken_at"`
 	}
 
@@ -296,18 +232,16 @@ func ListPresenceClaims(pool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN LATERAL (
 			    SELECT pl.taught, pl.room, pl.taken_at
 			    FROM lecturer_patrol_logs pl
-			    WHERE pl.tenant_id = c.tenant_id
-			      AND pl.session_date = c.session_date
+			    WHERE pl.session_date = c.session_date
 			      AND btrim(lower(pl.lecturer_id)) = btrim(lower(c.lecturer_staff_id))
 			      AND (c.unit_id IS NULL OR pl.unit_id = c.unit_id)
 			    ORDER BY pl.taken_at DESC
 			    LIMIT 1
 			) p ON true
-			WHERE c.tenant_id = $1
-			  AND c.captured_at >= now() - ($2 || ' days')::interval
-			  AND ($3 = '' OR btrim(lower(c.lecturer_staff_id)) = btrim(lower($3)))
+			WHERE c.captured_at >= now() - ($1 || ' days')::interval
+			  AND ($2 = '' OR btrim(lower(c.lecturer_staff_id)) = btrim(lower($2)))
 			ORDER BY c.captured_at DESC
-			LIMIT 500`, tenantID, strconv.Itoa(days), staff)
+			LIMIT 500`, strconv.Itoa(days), staff)
 		if qErr != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", qErr.Error()))
 			return

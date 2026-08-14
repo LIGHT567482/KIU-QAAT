@@ -91,7 +91,7 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 		uRows, err := adminPool.Query(r.Context(), `
 			SELECT DISTINCT cu.unit_id, COALESCE(cu.name, cu.unit_id)
 			FROM lecturer_assignments la
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
 			WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
 			ORDER BY 2`, tenantID, lecturerID)
 		if err != nil {
@@ -127,17 +127,17 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(to_char(ts.start_time,'HH24:MI'),''),
 			       COALESCE(ts.day_of_week,0), COALESCE(ts.duration_minutes,0)
 			FROM timetable_slots ts
-			LEFT JOIN course_units cu     ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
+			LEFT JOIN course_units cu     ON cu.unit_id = ts.unit_id
 			LEFT JOIN course_offerings o  ON o.offering_id = ts.offering_id
-			LEFT JOIN courses c           ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
-			LEFT JOIN users u             ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			LEFT JOIN courses c           ON c.course_id = o.course_id
+			LEFT JOIN users u             ON u.user_id::text = o.coordinator_id
 			LEFT JOIN LATERAL (
 			    SELECT MIN(s2.intake_session) AS intake FROM students_extended s2
 			    WHERE s2.offering_id = o.offering_id AND s2.tenant_id = ts.tenant_id
 			) se_intake ON true
 			WHERE ts.tenant_id = $1
 			  AND EXISTS (SELECT 1 FROM lecturer_assignments la
-			              WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+			              WHERE la.unit_id = ts.unit_id
 			                AND la.lecturer_id = $2::uuid)`+slotWhere+`
 			ORDER BY ts.day_of_week, ts.start_time`, slotArgs...)
 		if err != nil {
@@ -184,7 +184,7 @@ func LecturerCalendar(adminPool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN attendance_logs al ON al.session_id = s.session_id
 			WHERE s.tenant_id = $1 AND s.session_date BETWEEN $3::date AND $4::date
 			  AND EXISTS (SELECT 1 FROM lecturer_assignments la
-			              WHERE la.unit_id = s.unit_id AND la.tenant_id = s.tenant_id
+			              WHERE la.unit_id = s.unit_id
 			                AND la.lecturer_id = $2::uuid)
 			GROUP BY s.unit_id, s.session_date, s.offering_id, s.session_status`,
 			tenantID, lecturerID, from.Format("2006-01-02"), to.Format("2006-01-02"))

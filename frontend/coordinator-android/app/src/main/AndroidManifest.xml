@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
 
+    <!-- requestNetwork(), which is how a STUDENT phone takes and gives back a turn on the class
+         Wi-Fi (see SlotLease). A normal permission: granted at install, no prompt. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
     <!-- Keep the in-room server + session alive while screen is off. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />

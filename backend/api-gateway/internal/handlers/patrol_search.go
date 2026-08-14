@@ -52,24 +52,27 @@ const patrolSearchSQL = `
 	                                 'Yr' || o.study_year, 'Sem' || o.semester,
 	                                 NULLIF(o.intake, '')), ''), '')
 	FROM timetable_slots ts
-	JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
-	LEFT JOIN course_offerings o ON o.offering_id = ts.offering_id AND o.tenant_id = ts.tenant_id
-	LEFT JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
+	JOIN course_units cu ON cu.unit_id = ts.unit_id
+	LEFT JOIN course_offerings o ON o.offering_id = ts.offering_id
+	LEFT JOIN courses c ON c.course_id = o.course_id
 	-- The lecturer for this slot: its own if set, else the unit's assignment. Same
 	-- resolution the manifest uses, so the name the patroller searches by is the name
 	-- the coordinator's dashboard shows.
 	LEFT JOIN LATERAL (
 	    SELECT l.staff_id, l.full_name
 	    FROM lecturers l
-	    WHERE l.tenant_id = ts.tenant_id
-	      AND ( l.lecturer_id = ts.lecturer_id
+	    WHERE ( l.lecturer_id = ts.lecturer_id
 	         OR ( ts.lecturer_id IS NULL AND l.lecturer_id = (
 	               SELECT la.lecturer_id FROM lecturer_assignments la
-	               WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+	               WHERE la.unit_id = ts.unit_id
 	               ORDER BY la.academic_year DESC LIMIT 1) ) )
 	    LIMIT 1
 	) lec ON true
-	WHERE ts.tenant_id = $1 AND ts.day_of_week = $2 `
+	WHERE ts.tenant_id = $1 AND ts.day_of_week = $2
+	  -- Distance / e-learning cohorts are left out for the same reason they are left off the
+	  -- round (see PatrolManifest): there is no room for a monitor to stand in, so the only
+	  -- verdict they could file about one is a wrong one.
+	  AND COALESCE(o.delivery_mode, 'IN_PERSON') <> 'ONLINE' `
 
 // PatrolSearch finds today's sessions by lecturer staff id or by unit code.
 func PatrolSearch(pool *pgxpool.Pool) http.HandlerFunc {
@@ -147,6 +150,12 @@ func PatrolSearch(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			out = append(out, s)
 		}
+		rows.Close()
+
+		// The other unit codes being delivered in this same hour, room and lecturer. Without this
+		// the monitor ticks one of them and the rest of the class has no record — see
+		// patrol_concurrent.go.
+		attachConcurrentUnits(r.Context(), conn, tenantID, out)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"mode":    mode,

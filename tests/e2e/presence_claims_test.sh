@@ -42,7 +42,10 @@ SQL
 trap cleanup EXIT
 cleanup
 
-TODAY=$(date +%F); DOW=$(date +%u)
+# The INSTITUTION's date, not this machine's: the service stamps records in Africa/Kampala
+# (internal/clock), so a host west of it spends several hours each night on yesterday.
+TODAY=$(docker exec -i "$PG" psql -U qaat -d qaat -tAc "SELECT (now() AT TIME ZONE 'Africa/Kampala')::date")
+DOW=$(docker exec -i "$PG" psql -U qaat -d qaat -tAc "SELECT EXTRACT(ISODOW FROM (now() AT TIME ZONE 'Africa/Kampala'))::int")
 docker exec -i "$PG" psql -U qaat -d qaat -q -v ON_ERROR_STOP=1 >/dev/null <<SQL
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 DO \$\$

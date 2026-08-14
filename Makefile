@@ -37,8 +37,13 @@ migrate-adopt:
 
 ## seed: Load test seed data
 seed:
-	$(COMPOSE) exec postgres psql -U qaat -d qaat -f /seeds/001_test_tenants.sql
-	$(COMPOSE) exec postgres psql -U qaat -d qaat -f /seeds/002_test_users.sql
+	@echo "Seeding is retired. QAAT serves ONE institution — Kampala International University —"
+	@echo "and the old seeds created Alpha/Beta/Test tenants beside it. Those files are kept as"
+	@echo "*.sql.retired for reference only; running them would put the multi-tenant demo data"
+	@echo "back into a database that is now single-institution by design."
+	@echo ""
+	@echo "To add accounts, use Administration -> Import in the dashboard."
+	@exit 1
 
 ## keys: Generate RSA-2048 key pair for Auth Service (dev only)
 keys:

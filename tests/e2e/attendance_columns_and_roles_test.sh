@@ -44,7 +44,9 @@ trap cleanup EXIT; cleanup
 
 TEN=$(sql "SELECT tenant_id FROM tenants WHERE tenant_id <> '00000000-0000-0000-0000-000000000000' ORDER BY created_at LIMIT 1")
 OFF='cc111111-0000-4000-8000-0000000c01a1'
-TODAY=$(date +%F)
+# The INSTITUTION's date, not this machine's: the service stamps records in Africa/Kampala
+# (internal/clock), so a host west of it spends several hours each night on yesterday.
+TODAY=$(sql "SELECT (now() AT TIME ZONE 'Africa/Kampala')::date")
 
 docker exec -i "$PG" psql -U qaat -d qaat -q -v ON_ERROR_STOP=1 >/dev/null <<SQL
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -173,7 +175,7 @@ for f in xlsx pdf; do
 done
 
 echo; echo "── 5. a TLC designs their OWN department's timetable ──"
-DOW=$(date +%u)
+DOW=$(sql "SELECT EXTRACT(ISODOW FROM (now() AT TIME ZONE 'Africa/Kampala'))::int")
 check "the TLC may set their department's lecture" \
   "$(code PUT /api/v1/dashboard/timetable "$TLC" "{\"offering_id\":\"$OFF\",\"unit_id\":\"COLT-UNIT\",\"day_of_week\":$DOW,\"session_start\":\"11:00\",\"session_duration_minutes\":60}")" "200"
 check "…and it reaches the QA monitor's round" \

@@ -48,8 +48,8 @@ object NavIcons {
     /** The lecturer's teaching calendar. */
     val Calendar get() = Icons.Filled.DateRange
 
-    /** Shield with a tick — the QA patroller's round. */
-    val Patrol: ImageVector by lazy {
+    /** Shield with a tick — the QA monitor's round. */
+    val Monitor: ImageVector by lazy {
         materialPath("qaat_patrol") {
             moveTo(12f, 1f); lineTo(3f, 5f); verticalLineToRelative(6f)
             curveToRelative(0f, 5.55f, 3.84f, 10.74f, 9f, 12f)

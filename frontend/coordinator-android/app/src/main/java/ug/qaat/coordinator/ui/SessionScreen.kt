@@ -89,48 +89,51 @@ fun SessionScreen(onOpenSession: () -> Unit) {
         // (The manual "Gateway IP" rescue field was removed — student/lecturer phones now auto-discover
         // the hub via the DHCP gateway + NSD, so it's no longer needed.)
         Spacer(Modifier.height(8.dp))
-        Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
-            Text("📴 Tell students to turn Wi-Fi OFF the moment they see ✓ — only ~10 fit at once.",
-                Modifier.padding(12.dp), textAlign = TextAlign.Center)
-        }
+        SlotQueueCard()
 
         // Shared-lecture code: if THIS unit's lecturer is teaching several cohorts at this hour and
         // hasn't STARTed here in person (they are in another coordinator's room), the coordinator
-        // enters the 4-digit code the lecturer read out to unlock check-in here. It belongs to this
-        // lecture, not to the day — their next lecture has a different one.
+        // enters the 3-digit code the lecturer read out to unlock check-in here.
+        //
+        // This whole block is absent from an ordinary lecture, which is nearly all of them: the
+        // manifest only carries a combined-class key for a slot that genuinely shares its room and
+        // hour with another cohort, so no key means no code means nothing on screen.
         if (AppState.currentLecturerHasCode && !AppState.lecturerStartedHere) {
             Spacer(Modifier.height(8.dp))
             var code by remember { mutableStateOf("") }
             var codeErr by remember { mutableStateOf<String?>(null) }
             Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Lecturer teaching several rooms at once? Enter the code they read out to start attendance here.",
+                    Text("This lecture is shared with another cohort. If the lecturer started in " +
+                        "someone else's room, enter the 3 digits they read out to open your register here.",
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
-                            code, { v -> if (v.length <= 4 && v.all { it.isDigit() }) { code = v; codeErr = null } },
-                            Modifier.weight(1f), singleLine = true, label = { Text("Lecturer's code for this lecture") },
+                            code, { v -> if (v.length <= 3 && v.all { it.isDigit() }) { code = v; codeErr = null } },
+                            Modifier.weight(1f), singleLine = true, label = { Text("The lecturer's 3 digits") },
                         )
                         Spacer(Modifier.width(8.dp))
-                        Button(enabled = code.length == 4, onClick = {
+                        Button(enabled = code.length == 3, onClick = {
                             if (ug.qaat.coordinator.session.SessionController.startLecturerByCode(code)) codeErr = null
-                            else codeErr = "That code isn't right for this lecturer's lecture at this hour."
+                            else codeErr = "That isn't today's code for this lecture. Ask the lecturer to read it again."
                         }) { Text("Start") }
                     }
                     codeErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
                 }
             }
         }
-        // Revealed only after the lecturer STARTs in person here: the daily code they read out to
-        // the OTHER coordinators teaching them at the same time so those rooms can start too.
+        // Revealed only after the lecturer STARTs in person here: the code they read out to the
+        // OTHER coordinators sharing this lecture so those cohorts can start too. The lecturer sees
+        // the same three digits on their own phone — this copy is for the case where they have
+        // already put it away, or their handset died after gating in.
         AppState.currentSessionCode?.let { c ->
             Spacer(Modifier.height(8.dp))
             Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                    Text("Code for the other rooms this lecturer is teaching this hour:", style = MaterialTheme.typography.labelSmall)
+                    Text("Code for the other cohorts in this lecture:", style = MaterialTheme.typography.labelSmall)
                     Text(c, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                    Text("Read this out — the other coordinator enters it to start their room.",
+                    Text("Read this out — the other coordinator enters it to open their register. It works only today.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                 }
             }
@@ -230,5 +233,88 @@ private fun AttendanceIdle(onOpenSession: () -> Unit) {
         Button(onClick = onOpenSession, Modifier.fillMaxWidth()) { Text("Take attendance", fontWeight = FontWeight.Bold) }
         Spacer(Modifier.height(20.dp))
         StandbyCard(remember { DashboardClient() }, AppState.token)
+    }
+}
+
+/**
+ * THE QUEUE FOR THE CLASS WI-FI, made visible at the front of the room.
+ *
+ * About ten phones fit on the hotspot at once and a hall holds two hundred, so students take turns.
+ * That used to be invisible from here — the screen said "tell students to turn Wi-Fi off", and
+ * whether any of them did was something the coordinator found out from the people still queuing.
+ * Now the hub knows exactly who is holding a slot (SlotWarden), so this shows it.
+ *
+ * The force-drop button is deliberately ABSENT almost always. It restarts the room Wi-Fi, which is
+ * the only way to shift a phone that will not let go — and it disconnects everybody, mid-check-in
+ * included, and changes the password on the screen behind it. A control that destructive must not
+ * be sitting there inviting a tap whenever the room feels slow, so it appears only once the hub can
+ * demonstrate all three parts of a genuine jam: slots full, somebody ignoring an eviction, and
+ * nothing completed for half a minute.
+ */
+@Composable
+private fun SlotQueueCard() {
+    val ctx = LocalContext.current
+    var confirming by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "📶 ${AppState.slotOccupancy} of ~${ug.qaat.engine.SlotWarden.ASSUMED_CAP} phones connected · " +
+                    "${AppState.slotSettled} checked in",
+                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+            )
+            Text(
+                "Students connect, are marked present, and are disconnected automatically so the " +
+                    "next phone can get on. Nobody needs to turn Wi-Fi off by hand.",
+                style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            if (AppState.slotsJammed) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Slots are full and nothing has gone through for a while — one or more phones " +
+                        "are holding a place without letting go.",
+                    style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = { confirming = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text("⚠  Free all slots", fontWeight = FontWeight.Bold) }
+            }
+
+            note?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Disconnect every phone?") },
+            text = {
+                Text(
+                    "This restarts the room Wi-Fi. Every student is disconnected — including anyone " +
+                        "halfway through checking in — and the Wi-Fi NAME AND PASSWORD both change, " +
+                        "so you will need to read out the new ones and everybody must rejoin.\n\n" +
+                        "Only do this if slots are stuck and students cannot get on."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    SessionService.instance?.forceFreeSlots { note = it }
+                        ?: run { note = "The session service isn't running." }
+                }) { Text("Free all slots", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+        )
     }
 }

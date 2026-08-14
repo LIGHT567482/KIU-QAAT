@@ -1,6 +1,5 @@
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
-import { useAuth } from '../../contexts/AuthContext'
 import { Kpi, KpiRow, Section } from '../../components/Kpi'
 
 // Tenant ADMIN home — scoped to the admin's OWN institution (tenant_id from JWT).
@@ -15,18 +14,16 @@ interface TenantInfo {
 }
 
 export default function AdminHome() {
-  const { user } = useAuth()
-  const tenantId = user?.tenantId ?? ''
   const { status, data } = useQuery<TenantInfo>(() => api.get('/api/v1/branding'))
   const info = status === 'ok' ? data : undefined
 
   const links: { label: string; href: string; desc: string }[] = [
-    { label: 'Schools & Departments', href: `/admin/tenants/${tenantId}/schools`, desc: 'Add schools/colleges and their departments' },
-    { label: 'Courses',     href: `/admin/tenants/${tenantId}/courses`,      desc: 'Courses, levels & cohorts' },
-    { label: 'Students',    href: `/admin/tenants/${tenantId}/students`,     desc: 'Enrolment records' },
-    { label: 'Lecturers',   href: `/admin/tenants/${tenantId}/lecturers`,    desc: 'Lecturer directory' },
-    { label: 'Coordinators',href: `/admin/tenants/${tenantId}/coordinators`, desc: 'Directory, contacts & cohorts' },
-    { label: 'Employees',   href: `/admin/tenants/${tenantId}/employees`,    desc: 'Staff registry & tablet attendance' },
+    { label: 'Schools & Departments', href: `/admin/schools`, desc: 'Add schools/colleges and their departments' },
+    { label: 'Courses',     href: `/admin/courses`,      desc: 'Courses, levels & cohorts' },
+    { label: 'Students',    href: `/admin/students`,     desc: 'Enrolment records' },
+    { label: 'Lecturers',   href: `/admin/lecturers`,    desc: 'Lecturer directory' },
+    { label: 'Coordinators',href: `/admin/coordinators`, desc: 'Directory, contacts & cohorts' },
+    { label: 'Employees',   href: `/admin/employees`,    desc: 'Staff registry & tablet attendance' },
   ]
 
   const now = new Date()
@@ -54,7 +51,7 @@ export default function AdminHome() {
       </div>
 
       {/* The state of the institution, not just links to the screens that manage it. */}
-      <AdminPulse tenantId={tenantId} />
+      <AdminPulse />
 
       <h3 style={{ margin: '26px 0 10px', fontSize: 16 }}>Manage</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
@@ -85,12 +82,12 @@ interface Overview {
  * The admin home used to be six navigation tiles — it told you where the screens were and nothing
  * about whether anything was working. The "Needs attention" row is the reason this exists: every
  * number in it is a SILENT failure somewhere else in the system. An unstaffed unit shows a blank
- * lecturer on the student's timetable and reaches the patrol manifest with nobody named against it.
+ * lecturer on the student's timetable and reaches the monitor manifest with nobody named against it.
  * A student with no cohort is invisible to their own coordinator's roster. A cohort with no
  * coordinator can never have a session opened for it at all. None of these raise an error
  * anywhere — they just do nothing — so the only way anyone finds them is by being shown them.
  */
-function AdminPulse({ tenantId }: { tenantId: string }) {
+function AdminPulse() {
   const { status, data } = useQuery<Overview>(() => api.get('/api/v1/admin/overview'))
   if (status === 'loading') return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading institution status…</p>
   if (status === 'error' || !data) return null
@@ -101,15 +98,15 @@ function AdminPulse({ tenantId }: { tenantId: string }) {
 
   // Ordered by how badly each one silently breaks something, worst first.
   const gapTiles: { label: string; key: string; sub: string; href?: string }[] = [
-    { label: 'Units with no lecturer', key: 'units_unstaffed', sub: 'blank on timetables & monitor rounds', href: `/admin/tenants/${tenantId}/lecturer-assignments` },
-    { label: 'Cohorts with no coordinator', key: 'cohorts_uncoordinated', sub: 'no session can be opened', href: `/admin/tenants/${tenantId}/coordinators` },
+    { label: 'Units with no lecturer', key: 'units_unstaffed', sub: 'blank on timetables & monitor rounds', href: `/admin/lecturer-assignments` },
+    { label: 'Cohorts with no coordinator', key: 'cohorts_uncoordinated', sub: 'no session can be opened', href: `/admin/coordinators` },
     // The org tree breaking away from the academic data. Both directions are silent: the HOD sees
     // a blank dashboard, the dean sees a department that reports nothing, and neither can tell why.
-    { label: 'Departments with no HOD', key: 'departments_no_hod', sub: 'nobody answerable for them', href: `/admin/tenants/${tenantId}/users` },
-    { label: 'Departments not on any course', key: 'departments_unlinked', sub: 'their HOD sees a blank dashboard', href: `/admin/tenants/${tenantId}/courses` },
-    { label: 'Courses naming an unknown department', key: 'courses_orphan_department', sub: 'they belong to no HOD or dean', href: `/admin/tenants/${tenantId}/courses` },
-    { label: 'Students with no cohort', key: 'students_no_cohort', sub: 'invisible to their coordinator', href: `/admin/tenants/${tenantId}/students` },
-    { label: 'Org roles with no unit', key: 'org_roles_unscoped', sub: 'their dashboards show nothing', href: `/admin/tenants/${tenantId}/users` },
+    { label: 'Departments with no HOD', key: 'departments_no_hod', sub: 'nobody answerable for them', href: `/admin/users` },
+    { label: 'Departments not on any course', key: 'departments_unlinked', sub: 'their HOD sees a blank dashboard', href: `/admin/courses` },
+    { label: 'Courses naming an unknown department', key: 'courses_orphan_department', sub: 'they belong to no HOD or dean', href: `/admin/courses` },
+    { label: 'Students with no cohort', key: 'students_no_cohort', sub: 'invisible to their coordinator', href: `/admin/students` },
+    { label: 'Org roles with no unit', key: 'org_roles_unscoped', sub: 'their dashboards show nothing', href: `/admin/users` },
     { label: 'Still on default password', key: 'accounts_default_password', sub: 'never signed in and changed it' },
     { label: 'QA monitors with no handset', key: 'patrollers_unbound', sub: 'cannot start a round' },
     { label: 'Sessions not synced', key: 'sessions_unsynced', sub: 'attendance still on a phone' },

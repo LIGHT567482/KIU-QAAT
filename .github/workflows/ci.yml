@@ -186,6 +186,55 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  coordinator-android:
+    name: Coordinator App — engine & app tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/coordinator-android
+
+    # WHY THIS JOB EXISTS. The phone is where attendance is actually taken — the room code, the
+    # lecturer gate, the check-in validator, the combined-class code, the eviction policy that
+    # decides whether a lecture hall drains or stalls. All of it has unit tests, and until now none
+    # of them ran here: CI tested the Go services and the dashboards and simply never opened the
+    # Android project. A regression in the engine reached a hall before it reached a build log.
+    #
+    # Only the JVM suites run. Nothing here needs a device or an emulator, so the job stays fast
+    # enough to sit on every push; instrumentation tests are a separate problem and not this one.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # local.properties IS checked in (against its own advice) and points at one developer's home
+      # directory, which does not exist on a runner — so it must be overwritten, not merely supplied.
+      # ANDROID_HOME is set on the ubuntu-latest images. The overwrite is confined to the runner's
+      # checkout and never travels back.
+      - name: Point Gradle at the runner's Android SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Engine + app unit tests
+        run: ./gradlew :engine:test :app:testDebugUnitTest --no-daemon --stacktrace
+
+      # The compile step the unit tests do not cover on their own: resource linking and packaging.
+      # A Compose screen that builds but cannot be packaged is still a broken release.
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coordinator-android-test-reports
+          path: |
+            frontend/coordinator-android/engine/build/reports/tests/
+            frontend/coordinator-android/app/build/reports/tests/
+
   # ─── Database ───────────────────────────────────────────────────────────────
   db-migrations:
     name: DB Migrations — apply & verify
@@ -246,9 +295,20 @@ jobs:
             WHERE c.relkind = 'r' AND n.nspname = 'public'
               -- tenants is the tenant REGISTRY (isolating it would hide the row a connection
               -- must resolve BEFORE it can set app.current_tenant); schema_migrations is the
-              -- migrator's ledger; scheduled_job_runs is the scheduler's own bookkeeping and has
-              -- no tenant_id to write a policy against. None of the three is tenant data.
+              -- migrator's ledger; scheduled_job_runs is the scheduler's own bookkeeping. None
+              -- of the three is tenant data.
               AND c.relname NOT IN ('tenants', 'schema_migrations', 'scheduled_job_runs')
+              -- AND the table must actually HAVE a tenant to isolate. The single-institution
+              -- migrations drop tenant_id from tables that no longer need it and disable RLS in
+              -- the same breath — a table with RLS on and no policy denies every row to qaat_app,
+              -- so the two must move together. Fourteen tables have been through that already.
+              -- Demanding a tenant policy on a table with no tenant column asks for a policy that
+              -- could not be written, so this follows the column rather than a list somebody has
+              -- to remember to update: de-tenant a table tomorrow and CI stays honest by itself.
+              AND EXISTS (SELECT 1 FROM information_schema.columns col
+                           WHERE col.table_schema = 'public'
+                             AND col.table_name = c.relname
+                             AND col.column_name = 'tenant_id')
               AND (NOT c.relrowsecurity
                    OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid));")
           if [ "$missing" != "0" ]; then
@@ -259,6 +319,10 @@ jobs:
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE c.relkind = 'r' AND n.nspname = 'public'
                 AND c.relname NOT IN ('tenants', 'schema_migrations', 'scheduled_job_runs')
+                AND EXISTS (SELECT 1 FROM information_schema.columns col
+                             WHERE col.table_schema = 'public'
+                               AND col.table_name = c.relname
+                               AND col.column_name = 'tenant_id')
                 AND (NOT c.relrowsecurity
                      OR NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid))
               ORDER BY c.relname;"
@@ -272,11 +336,31 @@ jobs:
             SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname='qaat_app';
           " | grep -qx "f" || (echo "qaat_app must be NOSUPERUSER + NOBYPASSRLS!" && exit 1)
 
-      - name: Load seed data
+      # db/seeds/*.sql were RETIRED when KIU became single-institution — the product must not
+      # ship demo tenants. This step went on naming two of them and would fail outright on a
+      # missing file. The isolation suite still needs two tenants to have anything to prove, so
+      # the fixture now lives with the test that needs it. ON_ERROR_STOP because a fixture that
+      # half-loads produces exactly the vacuous pass this suite already suffered from.
+      - name: Load the two-tenant isolation fixture
         run: |
           PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test \
-            -f db/seeds/001_test_tenants.sql \
-            -f db/seeds/002_test_users.sql
+            -v ON_ERROR_STOP=1 -f tests/security/fixture.sql
+
+      # A fixture that silently loaded nothing would let every assertion below pass by counting
+      # zero of everything — which is how this gate came to be green while testing nothing.
+      - name: Verify the fixture actually landed
+        run: |
+          for t in users sessions attendance_logs students_extended courses course_units venues; do
+            n=$(PGPASSWORD=testpass psql -h localhost -U qaat -d qaat_test -tA -c \
+              "SELECT COUNT(DISTINCT tenant_id) FROM $t
+                WHERE tenant_id IN ('a0000000-0000-0000-0000-000000000001',
+                                    'b0000000-0000-0000-0000-000000000002');")
+            if [ "$n" != "2" ]; then
+              echo "$t holds rows for $n of the 2 fixture tenants — isolation cannot be proved."
+              exit 1
+            fi
+          done
+          echo "Both fixture tenants present in every isolated table." 
 
       - uses: actions/setup-go@v5
         with:

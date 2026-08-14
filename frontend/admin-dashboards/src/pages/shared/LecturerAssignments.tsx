@@ -12,7 +12,7 @@ import { useQuery } from '../../lib/useApi'
  * a department: the page cannot widen its own reach, only display what it is given.
  *
  * The assignment is not cosmetic. It is what files a lecturer under a department,
- * what puts their name on the coordinator's dashboard and the patrol manifest, and
+ * what puts their name on the coordinator's dashboard and the monitor manifest, and
  * what the QA record is matched against — a unit with nobody assigned shows a
  * blank lecturer on every surface in the system.
  */

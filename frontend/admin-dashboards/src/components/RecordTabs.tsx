@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 // A lecture is now witnessed twice — once by the coordinator who ran the session, once by the QA
-// patroller who walked in on it — so "Lecturer Attendance" is one feature with two pages. This is
+// monitor who walked in on it — so "Lecturer Attendance" is one feature with two pages. This is
 // the shell they share: a heading plus a tab strip, with only the selected page mounted (so the
 // hidden one costs no fetch).
 
@@ -40,6 +40,16 @@ export default function RecordTabs({ title, tabs }: { title: string; tabs: Recor
           )
         })}
       </div>
+
+      {/* The hint has been part of RecordTab since it was written and was never rendered, so every
+          tab that set one showed nothing. It matters most where the tabs are different SYSTEMS
+          rather than two views of one record — a reader picking between "Alerts" and "Messages"
+          needs to know which is which before clicking, not after. */}
+      {current?.hint && (
+        <p style={{ color: 'var(--muted,#64748b)', fontSize: 13, margin: '-6px 0 16px' }}>
+          {current.hint}
+        </p>
+      )}
 
       {current?.render()}
     </div>

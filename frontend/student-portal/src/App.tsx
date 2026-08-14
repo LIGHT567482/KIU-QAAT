@@ -18,7 +18,17 @@ interface Unit {
   deficit_sessions?:     number
 }
 
+interface Overall {
+  sessions_held:     number
+  sessions_attended: number
+  percentage:        number
+  threshold:         number
+  units_at_risk:     number
+  units_total:       number
+}
+
 interface Progress {
+  overall?:      Overall
   student_id:    string
   full_name?:    string
   institution?:  string
@@ -189,6 +199,8 @@ function Results({ data, onBack }: { data: Progress; onBack?: () => void }) {
         )}
       </div>
 
+      {data.overall && data.units.length > 0 && <OverallCard o={data.overall} />}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {data.units.map(u => <UnitCard key={u.unit_id} unit={u} />)}
       </div>
@@ -198,6 +210,58 @@ function Results({ data, onBack }: { data: Progress; onBack?: () => void }) {
           No attendance records found yet. Check back after your first session.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * THE ONE NUMBER THE STUDENT CAME FOR.
+ *
+ * The page listed every unit and left the student to add up eight percentages to answer the first
+ * question they have. This is that total — weighted by sessions actually held, not the mean of the
+ * percentages, because averaging would let a unit with two sessions count as much as one with
+ * thirty and could show a comfortable 70% to somebody who missed most of their teaching.
+ *
+ * It is deliberately NOT presented as a verdict. Eligibility is decided per unit, so a healthy
+ * overall figure can and does hide the single unit that will stop them sitting an exam — which is
+ * why the count of units below the threshold sits beside it, in the stronger colour.
+ */
+function OverallCard({ o }: { o: Overall }) {
+  const risk = o.units_at_risk > 0
+  return (
+    <div style={{
+      display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap',
+      padding: 16, borderRadius: 12, marginBottom: 12,
+      background: risk ? '#fff7ed' : '#f0fdf4',
+      border: `1px solid ${risk ? '#fed7aa' : '#bbf7d0'}`,
+    }}>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: .5, color: 'var(--muted)' }}>
+          OVERALL ATTENDANCE
+        </div>
+        <div style={{ fontSize: 38, fontWeight: 800, lineHeight: 1.1, color: risk ? '#c2410c' : '#166534' }}>
+          {o.percentage}%
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          {o.sessions_attended} of {o.sessions_held} sessions, across all {o.units_total} units
+        </div>
+      </div>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        {risk ? (
+          <div style={{ fontSize: 13, color: '#9a3412', fontWeight: 600 }}>
+            {o.units_at_risk} of your {o.units_total} units {o.units_at_risk === 1 ? 'is' : 'are'} below {o.threshold}%.
+            <div style={{ fontWeight: 400, marginTop: 2 }}>
+              Your overall figure does not decide anything — each unit is judged on its own, so one
+              unit below the line is enough to stop you sitting that exam. The units below say which.
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: '#166534' }}>
+            Every unit is at or above {o.threshold}%. Eligibility is judged per unit, so keep an eye
+            on the individual figures rather than this one.
+          </div>
+        )}
+      </div>
     </div>
   )
 }

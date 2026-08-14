@@ -83,41 +83,58 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Lecturer Attendance', path: '/vc/lecturer-attendance' },
     { label: 'Student Attendance',  path: '/vc/student-attendance' },
     { label: 'Timetable',           path: '/vc/timetable' },
-    { label: 'Alerts',              path: '/vc/alerts' },
+    { label: 'Free Rooms',          path: '/vc/free-rooms' },
+    { label: 'Messages & Alerts',   path: '/vc/messages' },
     { label: 'Employee Attendance', path: '/vc/employee-attendance' },
   ],
+  // The directorate's own sidebar. Kept in the order the work is actually done: what the rules
+  // ARE, then who is falling outside them, then where that is happening, then the QA round that
+  // produced the evidence, then the people to talk to about it.
+  //
+  // Three of these were pages that already existed and were simply unreachable — Alerts and
+  // Employee Attendance had routes in App.tsx and no sidebar entry at all, and the at-risk
+  // watchlist was given to every other oversight role but not to the one that sets the threshold.
+  // A page nobody can navigate to is, from the director's chair, a page that does not exist.
   DQA_DIRECTOR: [
-    { label: 'Thresholds',          path: '/dqa/thresholds' },
+    // Reports leads: it is the map of everything below, and the answer to "where do I get X"
+    // should be the first thing in the list rather than something you learn by exploring it.
+    { label: 'Home',                path: '/dqa' },
+    { label: 'Reports',             path: '/dqa/reports' },
     { label: 'Eligibility',         path: '/dqa/eligibility' },
+    { label: 'Unit Attendance',     path: '/dqa/unit-attendance' },
+    { label: 'At-risk Students',    path: '/dqa/at-risk' },
     { label: 'Course Health',       path: '/dqa/course-health' },
-    { label: 'Trends',              path: '/dqa/trends' },
+    { label: 'By College',          path: '/dqa/org' },
     { label: 'Punctuality',         path: '/dqa/punctuality' },
     { label: 'Lecturer Attendance', path: '/dqa/lecturer-attendance' },
+    { label: 'QA Monitor Coverage', path: '/dqa/monitor-coverage' },
     { label: 'Timetable',           path: '/dqa/timetable' },
+    { label: 'Free Rooms',          path: '/dqa/free-rooms' },
     { label: 'Presence Disputes',   path: '/dqa/presence-claims' },
-    { label: 'Message QA Monitors', path: '/dqa/patroller-messages' },
     { label: 'Student Attendance',  path: '/dqa/student-attendance' },
+    { label: 'Employee Attendance', path: '/dqa/employee-attendance' },
     { label: 'QA Reports',          path: '/dqa/qa-reports' },
-    { label: 'Messages',            path: '/dqa/messages' },
+    { label: 'Messages & Alerts',   path: '/dqa/messages' },
   ],
   QA_OFFICER: [
     { label: 'QA Reports',          path: '/qa/reports' },
     { label: 'Timetable',           path: '/qa/timetable' },
+    { label: 'Free Rooms',          path: '/qa/free-rooms' },
     { label: 'Employee Attendance', path: '/qa/employee-attendance' },
     { label: 'Student Attendance',  path: '/qa/student-attendance' },
     { label: 'Lecturer Attendance', path: '/qa/lecturer-attendance' },
     { label: 'Manual Correction',   path: '/qa/correction' },
     { label: 'Coordinator Health',  path: '/qa/coordinator-health' },
     { label: 'Presence Disputes',   path: '/qa/presence-claims' },
-    { label: 'Message QA Monitors', path: '/qa/patroller-messages' },
     { label: 'Device Resets',       path: '/qa/device-reset' },
-    { label: 'Messages',            path: '/qa/messages' },
+    { label: 'Messages & Alerts',   path: '/qa/messages' },
   ],
   COORDINATOR: [],
-  ADMIN: [], // built per-tenant in adminNav() — needs the admin's tenant_id.
-  LECTURER: [
-    { label: 'My Teaching', path: '/lecturer' },
-  ],
+  // Empty for the same reason as COORDINATOR: a lecturer's work is in the room, on the phone.
+  // Kept as an entry rather than dropped from the Role union, because the role still exists,
+  // still signs in, and Login names the app for them — it just has no pages here.
+  LECTURER: [],
+  ADMIN: [], // built in adminNav() below.
   // HOD and DEAN each had exactly ONE page — a lecturer list — which is why the two roles
   // responsible for a department and a college could see less than the QA rep who visits it.
   // They now open on an overview of their own unit and carry the pages that make it actionable.
@@ -128,30 +145,33 @@ const NAV: Record<Role, NavLink[]> = {
     { label: 'Student Attendance',  path: '/hod/attendance' },
     { label: 'Assignments',         path: '/hod/assignments' },
     { label: 'Timetable',           path: '/hod/timetable' },
-    { label: 'Alerts',              path: '/hod/messages' },
+    { label: 'Messages & Alerts',   path: '/hod/messages' },
   ],
   DEAN: [
     { label: 'Overview',            path: '/dean' },
-    { label: 'Departments & HODs',  path: '/dean/departments' },
+    { label: 'Departments & Heads', path: '/dean/departments' },
     { label: 'Lecturers',           path: '/dean/lecturers' },
     { label: 'At-risk Students',    path: '/dean/at-risk' },
     { label: 'Student Attendance',  path: '/dean/attendance' },
     { label: 'Timetable',           path: '/dean/timetable' },
-    { label: 'Alerts',              path: '/dean/messages' },
+    { label: 'Messages & Alerts',   path: '/dean/messages' },
   ],
   QA_DEPT_REP: [
     { label: 'Overview',       path: '/qa-dept' },
     { label: 'Lecturers',      path: '/qa-dept/lecturers' },
+    { label: 'Student Attendance',  path: '/qa-dept/student-attendance' },
+    { label: 'Lecturer Attendance', path: '/qa-dept/lecturer-attendance' },
     { label: 'At-risk Students', path: '/qa-dept/at-risk' },
     { label: 'File QA Report', path: '/qa-dept/report' },
     { label: 'Timetable',      path: '/qa-dept/timetable' },
-    { label: 'Messages',       path: '/qa-dept/messages' },
+    { label: 'Messages & Alerts', path: '/qa-dept/messages' },
   ],
   // The Teaching & Learning Centre owns the timetable and nothing else — a
   // deliberately narrow console, because that is the whole of the role.
   TLC: [
     { label: 'Timetable',       path: '/tlc' },
     { label: 'Rooms',           path: '/tlc/rooms' },
+    { label: 'Free Rooms',      path: '/tlc/free-rooms' },
   ],
   // These two work from the phone, not here. Empty rather than absent so the map covers the
   // whole Role union and a new role cannot be forgotten silently.
@@ -159,21 +179,23 @@ const NAV: Record<Role, NavLink[]> = {
   STUDENT: [],
   QA_SCHOOL_HANDLER: [
     { label: 'Overview',        path: '/qa-school' },
-    { label: 'Departments & HODs', path: '/qa-school/departments' },
+    { label: 'Departments & Heads', path: '/qa-school/departments' },
     { label: 'QA Coverage',     path: '/qa-school/qa-departments' },
     { label: 'Lecturers',       path: '/qa-school/lecturers' },
+    { label: 'Student Attendance',  path: '/qa-school/student-attendance' },
+    { label: 'Lecturer Attendance', path: '/qa-school/lecturer-attendance' },
     { label: 'At-risk Students', path: '/qa-school/at-risk' },
     { label: 'QA Reports',      path: '/qa-school/reports' },
     { label: 'Presence Disputes', path: '/qa-school/presence-claims' },
     { label: 'Timetable',       path: '/qa-school/timetable' },
-    { label: 'Messages',        path: '/qa-school/messages' },
+    { label: 'Messages & Alerts', path: '/qa-school/messages' },
   ],
 }
 
 // The ADMIN sidebar lists EVERY management page so nothing is buried behind the
 // home grid. The sub-resource pages are keyed by the admin's own tenant_id.
-function adminNav(tenantId: string): NavLink[] {
-  const t = `/admin/tenants/${tenantId}`
+function adminNav(): NavLink[] {
+  const t = `/admin`
   return [
     { label: 'Home',                path: '/admin' },
     { label: 'Administration',      path: `${t}/users` },
@@ -189,18 +211,22 @@ function adminNav(tenantId: string): NavLink[] {
     { label: 'At-risk Students',    path: '/admin/at-risk' },
     { label: 'Reports',             path: '/admin/reports' },
     { label: 'Rooms & Codes',       path: `${t}/rooms` },
+    { label: 'Free Rooms',          path: '/admin/free-rooms' },
     // The trail of who did what. It has been written to since the audit helper landed; before
     // that the table existed and nothing ever wrote a row to it.
     { label: 'Audit Trail',         path: '/admin/audit' },
+    // ADMIN has always been in the gateway's inboxRoles, so notices addressed to the
+    // administrator were being delivered and had nowhere here to be read.
+    { label: 'Messages & Alerts',   path: '/admin/messages' },
     { label: 'Settings',            path: '/admin/settings' },
   ]
 }
 
 function Sidebar({ role, brand }: { role: Role; brand: Branding | null }) {
-  const { user, logout } = useAuth()
+  const { logout } = useAuth()
   const { theme, toggle } = useTheme()
   const [pwOpen, setPwOpen] = useState(false)
-  const links = role === 'ADMIN' ? adminNav(user?.tenantId ?? '') : (NAV[role] ?? [])
+  const links = role === 'ADMIN' ? adminNav() : (NAV[role] ?? [])
   const current = typeof window !== 'undefined' ? window.location.pathname : ''
 
   // Unread-messages badge for the roles that have a Messages inbox. Polls, and refetches
@@ -346,7 +372,7 @@ const pwBtn: React.CSSProperties = { padding: '10px 16px', background: 'var(--br
 // A back-button shown on every sub-page so the user can always go back to the
 // previous page. Hidden on the base role route (e.g. /vc, /qa/reports, /admin).
 function GoBack({ navigate: nav, location: loc }: { navigate: ReturnType<typeof useNavigate>; location: ReturnType<typeof useLocation> }) {
-  const baseRoutes = ['/vc', '/dqa', '/qa/reports', '/admin', '/lecturer', '/hod', '/dean', '/qa-dept', '/qa-school', '/tlc']
+  const baseRoutes = ['/vc', '/dqa', '/qa/reports', '/admin', '/hod', '/dean', '/qa-dept', '/qa-school', '/tlc']
   const isBase = baseRoutes.some(b => loc.pathname === b || loc.pathname === b + '/')
   if (isBase) return null
   return (

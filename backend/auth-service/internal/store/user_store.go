@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,6 +54,32 @@ func (s *UserStore) GetByEmailAndTenant(ctx context.Context, email string, tenan
 		return nil, fmt.Errorf("query user: %w", err)
 	}
 	return u, nil
+}
+
+// SoleTenantID resolves the one institution this deployment serves, for callers that did not
+// supply a tenant_id. It mirrors the api-gateway's singleTenantID: DEFAULT_TENANT_ID if set,
+// otherwise the single non-platform tenant row. The all-zero UUID is the retired super-admin
+// home and is never it.
+//
+// The result is deliberately NOT cached. This runs once per tenant-less login, and a stale
+// cache here would be an authentication failure that survives a restart of nothing — the
+// query is a primary-key-ordered read of a one-row table.
+func (s *UserStore) SoleTenantID(ctx context.Context) (string, error) {
+	if env := os.Getenv("DEFAULT_TENANT_ID"); env != "" {
+		return env, nil
+	}
+	var id string
+	err := s.pool.QueryRow(ctx,
+		`SELECT tenant_id::text FROM tenants
+		  WHERE tenant_id <> '00000000-0000-0000-0000-000000000000'
+		  ORDER BY created_at LIMIT 1`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve sole tenant: %w", err)
+	}
+	return id, nil
 }
 
 // TenantInstitutionID returns the tenant's institution_id (the ADMIN access code),

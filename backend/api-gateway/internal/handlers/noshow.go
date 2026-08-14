@@ -39,7 +39,7 @@ func queryNoShows(r *http.Request, adminPool *pgxpool.Pool, tenantID, date strin
 		WHERE e.tenant_id = $1
 		  AND NOT EXISTS (
 		      SELECT 1 FROM employee_attendance_logs a
-		      WHERE a.tenant_id = e.tenant_id AND a.staff_id = e.staff_id
+		      WHERE a.staff_id = e.staff_id
 		        AND a.event_time::date = $2::date
 		        AND a.event_time::time <= TIME '09:30')
 		ORDER BY e.full_name`, tenantID, date)

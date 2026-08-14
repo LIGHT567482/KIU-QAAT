@@ -37,6 +37,9 @@ class SessionService : Service() {
         // of crashing with UninitializedPropertyAccessException. Readiness is observable via
         // AppState.serverReady, which gates the "Start taking attendance" button.
         @Volatile var server: InRoomServer? = null; private set
+        // The running service, so the session screen can reach [forceFreeSlots] — the one action
+        // that needs the hotspot reservation itself, which only this service holds.
+        @Volatile var instance: SessionService? = null; private set
         // Static so a fresh onCreate can stop an engine leaked by a previous instance still holding
         // :8080 (the "port busy" bind failure) before rebinding.
         @Volatile private var ktor: ApplicationEngine? = null
@@ -48,6 +51,7 @@ class SessionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createChannel()
         // Must call startForeground within 5s of startForegroundService, OR the system kills
         // the process with ForegroundServiceDidNotStartInTimeException (the classic ~6s crash).
@@ -111,6 +115,7 @@ class SessionService : Service() {
             if (!listening) throw IllegalStateException("HTTP server did not bind on port 8080 after 6 tries (port busy or blocked). Reopen the app or reboot the phone.")
             android.util.Log.i(TAG, "hub listening on :8080")
             ug.qaat.coordinator.ui.AppState.serverReady = true
+            startSlotMirror()
 
             // Advertise on the LAN so the student app auto-discovers us (no address typing).
             runCatching {
@@ -187,6 +192,51 @@ class SessionService : Service() {
         }
     }
 
+    /**
+     * Mirror the hub's slot accounting onto the coordinator's screen, twice a second or so.
+     *
+     * Polled rather than pushed because the warden is updated from Ktor request threads and the
+     * screen only needs to be roughly current — a readout that lags a second is fine, a lock
+     * contended by forty simultaneous check-ins is not.
+     */
+    private fun startSlotMirror() = scope.launch {
+        while (true) {
+            val w = server?.warden
+            if (w != null) {
+                ug.qaat.coordinator.ui.AppState.slotOccupancy = w.occupancy()
+                ug.qaat.coordinator.ui.AppState.slotSettled = w.settledCount()
+                ug.qaat.coordinator.ui.AppState.slotsJammed = w.jammed()
+            }
+            delay(2000)
+        }
+    }
+
+    /**
+     * Drop every phone off the class Wi-Fi and bring it back up with fresh credentials.
+     *
+     * The coordinator's last resort when slots are held by phones nothing can talk to — see
+     * [HotspotManager.restart] for why this is the only forcible eviction available, and
+     * [ug.qaat.engine.SlotWarden.jammed] for the test that decides when it is even offered. The
+     * warden is reset alongside it: every lease it was tracking has just been invalidated, and
+     * carrying them over would leave the screen reporting a room that no longer exists.
+     */
+    fun forceFreeSlots(onDone: (String) -> Unit) {
+        if (!this::hotspotMgr.isInitialized) { onDone("The room Wi-Fi isn't app-managed — restart it from your phone's hotspot settings."); return }
+        hotspotMgr.restart(
+            onReady = { info ->
+                hotspot.set(info)
+                ug.qaat.coordinator.ui.AppState.hotspotSsid = info.ssid
+                ug.qaat.coordinator.ui.AppState.hotspotPass = info.passphrase
+                ug.qaat.coordinator.ui.AppState.hotspotUp = true
+                server?.warden?.reset()
+                ug.qaat.coordinator.ui.AppState.slotsJammed = false
+                update("Room Wi-Fi restarted: ${info.ssid}. Students must rejoin with the new password.")
+                onDone("Every phone was disconnected. Read out the NEW Wi-Fi name and password.")
+            },
+            onError = { onDone("Couldn't restart the room Wi-Fi ($it).") },
+        )
+    }
+
     /** Poll a localhost port until something is listening, or the timeout elapses. */
     private suspend fun awaitListening(port: Int, timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -212,7 +262,10 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        instance = null
         ug.qaat.coordinator.ui.AppState.serverReady = false
+        ug.qaat.coordinator.ui.AppState.slotOccupancy = 0
+        ug.qaat.coordinator.ui.AppState.slotsJammed = false
         runCatching { nsd?.unregister() }; nsd = null
         runCatching { ktor?.stop(100, 200) }
         ktor = null

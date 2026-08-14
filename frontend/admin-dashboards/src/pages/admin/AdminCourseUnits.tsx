@@ -70,7 +70,7 @@ export default function AdminCourseUnits() {
 
   useEffect(() => {
     if (!roadmap?.tenant_id) return
-    api.get<Venue[]>(`/api/v1/admin/tenants/${roadmap.tenant_id}/venues`)
+    api.get<Venue[]>(`/api/v1/admin/venues`)
       .then(v => setVenues(v))
       .catch(() => setVenues([]))
   }, [roadmap?.tenant_id])
@@ -378,7 +378,7 @@ function UnitsImportBar({ courseId, onDone }: { courseId: string; onDone: () => 
     fd.append('roster', file)
     fd.append('target_course', courseId) // this page's course is the destination
     if (confirmTransfers) fd.append('confirm_transfers', 'true')
-    return api.upload<ImportResp>(`/api/v1/admin/tenants/${tenantId}/course-units/import`, fd)
+    return api.upload<ImportResp>(`/api/v1/admin/course-units/import`, fd)
   }
   const summarise = (r: ImportResp) => `✓ ${r.inserted} new, ${r.updated} updated, ${r.skipped} skipped${r.errors?.length ? ` · ${r.errors.slice(0, 2).join('; ')}` : ''}`
 
@@ -411,7 +411,7 @@ function UnitsImportBar({ courseId, onDone }: { courseId: string; onDone: () => 
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16, padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
       <span style={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>Bulk units:</span>
       <span style={{ fontSize: 11, color: 'var(--muted)', flex: '1 1 200px' }}>columns — unit_id, name, year, semester, level · units land in THIS course (a unit already under another course asks before moving)</span>
-      <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/course-units/export.xlsx`, 'course-units.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={{ ...btnGhost, border: '1px solid #e2e8f0', padding: '6px 12px', borderRadius: 6 }}>Template / Export</button>
+      <button onClick={() => api.download(`/api/v1/admin/course-units/export.xlsx`, 'course-units.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={{ ...btnGhost, border: '1px solid #e2e8f0', padding: '6px 12px', borderRadius: 6 }}>Template / Export</button>
       <input ref={ref} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={doImport} style={{ display: 'none' }} />
       <button onClick={() => ref.current?.click()} disabled={busy || !tenantId} style={btnPrimary}>{busy ? 'Importing…' : 'Import units'}</button>
       {msg && <div style={{ flexBasis: '100%', fontSize: 12, color: msg.startsWith('✗') ? '#b91c1c' : '#166534' }}>{msg}</div>}

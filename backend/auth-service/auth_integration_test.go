@@ -98,14 +98,21 @@ func setupTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *redis.Clie
 
 func insertUser(t *testing.T, pool *pgxpool.Pool, email, tenantID string) {
 	t.Helper()
+	insertUserWithRole(t, pool, email, tenantID, "COORDINATOR")
+}
+
+// insertUserWithRole exists because the failed-attempt lockout is now role-dependent, so a test
+// of it has to be able to put a user on either side of that line.
+func insertUserWithRole(t *testing.T, pool *pgxpool.Pool, email, tenantID, role string) {
+	t.Helper()
 	hash, _ := bcrypt.GenerateFromPassword([]byte(testPW), 12)
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO users (email, password_hash, role, full_name, tenant_id, is_active)
-		VALUES ($1, $2, 'COORDINATOR', 'Test User', $3, true)
+		VALUES ($1, $2, $4::user_role_enum, 'Test User', $3, true)
 		ON CONFLICT (tenant_id, email) DO NOTHING`,
-		email, string(hash), tenantID)
+		email, string(hash), tenantID, role)
 	if err != nil {
-		t.Fatalf("insert test user: %v", err)
+		t.Fatalf("insert test user (%s): %v", role, err)
 	}
 }
 
@@ -239,12 +246,14 @@ func TestRefresh_RevokedToken_Returns401(t *testing.T) {
 	}
 }
 
-func TestLogin_AccountLockoutAfter5Failures(t *testing.T) {
+// The lockout applies to STUDENTS. A registration number is guessable from a class list, so the
+// attempt count is the only thing between it and the account.
+func TestLogin_StudentIsLockedOutAfter5Failures(t *testing.T) {
 	srv, pool, _ := setupTestServer(t)
-	insertUser(t, pool, "t_lockout@alpha.edu", testTenantA)
+	insertUserWithRole(t, pool, "t_lockout_student@alpha.edu", testTenantA, "STUDENT")
 
 	wrongBody, _ := json.Marshal(map[string]string{
-		"email": "t_lockout@alpha.edu", "password": "WrongPW!", "tenant_id": testTenantA,
+		"email": "t_lockout_student@alpha.edu", "password": "WrongPW!", "tenant_id": testTenantA,
 	})
 	for i := 0; i < 5; i++ {
 		resp, _ := http.Post(srv.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(wrongBody))
@@ -253,12 +262,52 @@ func TestLogin_AccountLockoutAfter5Failures(t *testing.T) {
 
 	// Correct password now also locked.
 	correctBody, _ := json.Marshal(map[string]string{
-		"email": "t_lockout@alpha.edu", "password": testPW, "tenant_id": testTenantA,
+		"email": "t_lockout_student@alpha.edu", "password": testPW, "tenant_id": testTenantA,
 	})
 	resp, _ := http.Post(srv.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(correctBody))
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("expected 429 after lockout, got %d", resp.StatusCode)
+		t.Errorf("expected 429 after 5 failures for a STUDENT, got %d", resp.StatusCode)
+	}
+}
+
+// And to nobody else. The lock is keyed on the account, so if it applied to staff then knowing a
+// colleague's email would be enough to keep them out of the system for fifteen minutes at a time —
+// the mechanism becomes the attack. This asserts the correct password still works AFTER the five
+// failures that would have locked a student, which is the property that actually matters; checking
+// only that the failures return 401 would pass even if the account had been silently locked.
+func TestLogin_StaffIsNotLockedOutAfter5Failures(t *testing.T) {
+	srv, pool, _ := setupTestServer(t)
+	insertUserWithRole(t, pool, "t_lockout_staff@alpha.edu", testTenantA, "COORDINATOR")
+
+	wrongBody, _ := json.Marshal(map[string]string{
+		"email": "t_lockout_staff@alpha.edu", "password": "WrongPW!", "tenant_id": testTenantA,
+	})
+	for i := 0; i < 5; i++ {
+		resp, err := http.Post(srv.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(wrongBody))
+		if err != nil {
+			t.Fatalf("failure %d: post: %v", i+1, err)
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			resp.Body.Close()
+			t.Fatalf("failure %d: expected 401, got %d", i+1, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	correctBody, _ := json.Marshal(map[string]string{
+		"email": "t_lockout_staff@alpha.edu", "password": testPW, "tenant_id": testTenantA,
+	})
+	resp, err := http.Post(srv.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(correctBody))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		t.Errorf("staff account was locked out — the lockout must apply to students only")
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected staff login to succeed after 5 failures, got %d", resp.StatusCode)
 	}
 }
 

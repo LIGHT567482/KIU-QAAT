@@ -12,10 +12,10 @@ import ug.qaat.coordinator.db.PatrolSlotEntity
 import ug.qaat.coordinator.ui.AppState
 
 /**
- * The QA patroller's cloud calls: claim this handset, pull today's timetable, push the round.
+ * The QA monitor's cloud calls: claim this handset, pull today's timetable, push the round.
  *
- * Every call carries `X-Device-Fingerprint`. A patrol record accuses a named lecturer of not
- * having taught, so the gateway will only accept one from the handset the patroller claimed —
+ * Every call carries `X-Device-Fingerprint`. A monitor record accuses a named lecturer of not
+ * having taught, so the gateway will only accept one from the handset the monitor claimed —
  * a stolen or shared token replayed from another phone is refused with DEVICE_NOT_BOUND. The
  * client cannot fake this usefully: the server stores the first fingerprint it sees for that
  * account and compares, so the worst a tampered client achieves is locking itself out.
@@ -24,7 +24,7 @@ class PatrolClient {
     private val http = Net.client()
     private val base = Net.baseUrl
 
-    /** Raised when the gateway rejects this handset. Carries the message the patroller should see. */
+    /** Raised when the gateway rejects this handset. Carries the message the monitor should see. */
     class DeviceRejected(message: String) : Exception(message)
 
     private fun HttpRequestBuilder.auth(token: String, fingerprint: String) {
@@ -33,7 +33,7 @@ class PatrolClient {
     }
 
     /**
-     * Claim this handset for the signed-in patroller. First call binds; later calls from the SAME
+     * Claim this handset for the signed-in monitor. First call binds; later calls from the SAME
      * phone are a no-op confirmation; a call from a different phone is refused until an admin
      * releases the binding. Returns null when the server accepted it.
      */
@@ -46,10 +46,10 @@ class PatrolClient {
         if (r.status.value in 200..299) return@withContext null
         runCatching { JSONObject(r.bodyAsText()).optString("message") }.getOrNull()
             ?.takeIf { it.isNotBlank() }
-            ?: "This phone is not authorised for patrol (${r.status.value})."
+            ?: "This phone is not authorised for monitoring (${r.status.value})."
     }
 
-    // ── The patrol PIN: the second factor in front of the round ──────────────────
+    // ── The monitor PIN: the second factor in front of the round ──────────────────
     //
     // The handset binding above answers "which phone"; the PIN answers "who is holding it". The
     // PIN itself never comes back from the server — only whether one has been set — so the app
@@ -108,8 +108,8 @@ class PatrolClient {
         }.getOrElse {
             // The PIN is verified server-side ON PURPOSE — a locally-checkable secret on a stolen
             // handset is no secret. So being offline here means the round cannot open, and the
-            // patroller is told plainly rather than left tapping.
-            PinAttempt(false, "You need to be online to unlock patrol. Find signal and try again.", 0, false)
+            // monitor is told plainly rather than left tapping.
+            PinAttempt(false, "You need to be online to unlock monitoring. Find signal and try again.", 0, false)
         }
     }
 
@@ -133,6 +133,7 @@ class PatrolClient {
                 durationMinutes = o.optInt("duration_minutes", 60),
                 offeringId = o.optString("offering_id", ""),
                 cohort = o.optString("cohort", ""),
+                alsoHere = alsoHereOf(o),
             )
         }.filter { it.unitId.isNotBlank() && it.startTime.isNotBlank() }
     }
@@ -174,6 +175,7 @@ class PatrolClient {
                     durationMinutes = o.optInt("duration_minutes", 60),
                     offeringId = o.optString("offering_id", ""),
                     cohort = o.optString("cohort", ""),
+                    alsoHere = alsoHereOf(o),
                 )
             }.filter { it.unitId.isNotBlank() }
         }
@@ -207,10 +209,10 @@ class PatrolClient {
     private fun deviceMessage(body: String): String =
         runCatching { JSONObject(body).optString("message") }.getOrNull()
             ?.takeIf { it.isNotBlank() }
-            ?: "This phone is not the one registered for your patrol account."
+            ?: "This phone is not the one registered for your monitor account."
 
     companion object {
-        /** The signed-in patroller's token, or null when the session has gone. */
+        /** The signed-in monitor's token, or null when the session has gone. */
         val token: String? get() = AppState.token
     }
 
@@ -226,9 +228,11 @@ class PatrolClient {
                 x.optString("building"))
         }
         val defaults = mutableMapOf<String, Pair<String, String>>()
+        val depts = mutableMapOf<String, String>()
         val units = (0 until arr("units").length()).map {
             val x = arr("units").getJSONObject(it)
             defaults[x.optString("unit_id")] = x.optString("class_group") to x.optString("school")
+            depts[x.optString("unit_id")] = x.optString("department")
             RefItem(x.optString("unit_id"), x.optString("unit_name").ifBlank { x.optString("unit_id") },
                 x.optString("course_id"))
         }
@@ -238,7 +242,7 @@ class PatrolClient {
                 x.optString("department"))
         }
         val schools = (0 until arr("schools").length()).map { arr("schools").getString(it) }
-        PatrolReference(rooms, units, lecturers, schools, defaults)
+        PatrolReference(rooms, units, lecturers, schools, defaults, depts)
     }
 
     /**
@@ -254,11 +258,21 @@ class PatrolClient {
             .put("room_id", e.roomId).put("room", e.room)
             .put("unit_id", e.unitId).put("unit_name", e.unitName)
             .put("lecturer_staff_id", e.lecturerStaffId).put("lecturer_name", e.lecturerName)
-            .put("class_group", e.classGroup).put("school", e.school)
+            .put("class_group", e.classGroup).put("school", e.school).put("department", e.department)
             .put("students_counted", e.studentsCounted)
-            .put("session_date", e.sessionDate).put("time_of_day", e.timeOfDay)
+            .put("session_date", e.sessionDate)
+            .put("time_of_day", e.timeOfDay).put("end_time", e.endTime)
             .put("taught", e.taught).put("remarks", e.remarks)
-            .put("is_compensation", e.isCompensation).put("compensation_for", e.compensationFor)
+            .put("is_compensation", e.isCompensation)
+            .put("compensation_for_at", e.compensationForAt)
+            .put("also_units", org.json.JSONArray().apply {
+                e.alsoUnits.forEach {
+                    put(JSONObject()
+                        .put("unit_id", it.unitId).put("unit_name", it.unitName)
+                        .put("class_group", it.classGroup).put("school", it.school)
+                        .put("department", it.department))
+                }
+            })
         val r = http.post("$base/api/v1/patrol/manual") {
             auth(token, fingerprint); contentType(ContentType.Application.Json); setBody(payload.toString())
         }
@@ -278,6 +292,28 @@ class PatrolClient {
  * does, and it must be answerable to the same handset.
  */
 
+/**
+ * The other unit codes running in this same hour, room and lecturer, flattened to one line.
+ *
+ * Flattened rather than modelled because it is only ever read: the monitor needs to SEE that the
+ * hour also covers BIT 3110 and CSC 3103 before they tick it, and one string survives the offline
+ * cache without a second table. The server sends the structure; nothing here needs to query it.
+ */
+private fun alsoHereOf(o: JSONObject): String {
+    val arr = o.optJSONArray("also_here") ?: return ""
+    return (0 until arr.length()).mapNotNull { i ->
+        val u = arr.optJSONObject(i) ?: return@mapNotNull null
+        val code = u.optString("unit_id")
+        val name = u.optString("unit_name")
+        val cohort = u.optString("cohort")
+        listOfNotNull(
+            code.takeIf { it.isNotBlank() },
+            name.takeIf { it.isNotBlank() && !it.equals(code, true) },
+        ).joinToString(" — ").let { if (cohort.isBlank()) it else "$it · $cohort" }
+            .takeIf { it.isNotBlank() }
+    }.joinToString(" | ")
+}
+
 /** One entry of a pick-list. `id` is what the server keys on, `label` what the monitor reads. */
 data class RefItem(val id: String, val label: String, val extra: String = "")
 
@@ -290,6 +326,15 @@ data class PatrolReference(
     /** unit_id → the class/group and college the curriculum already knows, so picking a unit
      *  fills them in and the monitor is not asked to retype what the system has. */
     val unitDefaults: Map<String, Pair<String, String>> = emptyMap(),
+    /** unit_id → the DEPARTMENT that owns it. Two unit codes for one lecture usually share a
+     *  college and differ by department, so the department is the field that tells them apart. */
+    val unitDepartments: Map<String, String> = emptyMap(),
+)
+
+/** One extra course unit the same hour of teaching also delivered. */
+data class ExtraUnit(
+    val unitId: String = "", val unitName: String = "",
+    val classGroup: String = "", val school: String = "", val department: String = "",
 )
 
 /** What the monitor saw, for a lecture with nothing on the timetable to tick. */
@@ -297,9 +342,17 @@ data class ManualEntry(
     val roomId: String = "", val room: String = "",
     val unitId: String = "", val unitName: String = "",
     val lecturerStaffId: String = "", val lecturerName: String = "",
-    val classGroup: String = "", val school: String = "",
+    val classGroup: String = "", val school: String = "", val department: String = "",
     val studentsCounted: Int = 0,
-    val sessionDate: String = "", val timeOfDay: String = "",
+    val sessionDate: String = "",
+    /** When the lecture BEGAN and when it was due to END, both HH:MM. */
+    val timeOfDay: String = "", val endTime: String = "",
     val taught: Boolean = true, val remarks: String = "",
-    val isCompensation: Boolean = false, val compensationFor: String = "",
+    val isCompensation: Boolean = false,
+    /** The date AND START TIME of the lecture being made good, "YYYY-MM-DD HH:MM". Required
+     *  whenever isCompensation is set — the server refuses the record without it, because a
+     *  compensation nobody can match to a missed lecture is a claim rather than a record. */
+    val compensationForAt: String = "",
+    /** The other unit codes this same hour delivered. */
+    val alsoUnits: List<ExtraUnit> = emptyList(),
 )

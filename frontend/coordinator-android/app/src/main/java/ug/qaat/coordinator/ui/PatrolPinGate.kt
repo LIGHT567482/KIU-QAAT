@@ -18,9 +18,9 @@ import kotlinx.coroutines.launch
 import ug.qaat.coordinator.net.PatrolClient
 
 /**
- * The patroller's SECOND page — the one they land on after a successful sign-in, before the round.
+ * The monitor's SECOND page — the one they land on after a successful sign-in, before the round.
  *
- * WHY ONLY THIS ROLE. A patrol tick is an accusation: it records that a named lecturer was or was
+ * WHY ONLY THIS ROLE. A monitor tick is an accusation: it records that a named lecturer was or was
  * not teaching, and the QA reports weigh it against the coordinator's own log precisely because it
  * comes from an independent observer. The account password is the weak link in that chain — it is
  * what gets shared "just to help cover the rounds this week" — and once shared, anyone can mark any
@@ -39,7 +39,7 @@ import ug.qaat.coordinator.net.PatrolClient
 @Composable
 fun PatrolPinGate(content: @Composable () -> Unit) {
     val scope = rememberCoroutineScope()
-    // Survives recomposition, NOT the process: closing the app re-asks. A patroller who puts the
+    // Survives recomposition, NOT the process: closing the app re-asks. A monitor who puts the
     // phone down and comes back to a fresh process must prove themselves again.
     var unlocked by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf<PatrolClient.PinState?>(null) }
@@ -57,13 +57,13 @@ fun PatrolPinGate(content: @Composable () -> Unit) {
 
         loadFailed -> PinMessageScreen(
             title = "Can't check your PIN",
-            body = "Patrol needs a connection to unlock. Find signal and try again — your saved ticks are safe.",
+            body = "Monitoring needs a connection to unlock. Find signal and try again — your saved ticks are safe.",
         ) { scope.launch { loadFailed = false; refresh() } }
 
         state == null -> Box(Modifier.fillMaxSize(), Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator()
-                Text("Checking your patrol account…", Modifier.padding(top = 12.dp),
+                Text("Checking your monitor account…", Modifier.padding(top = 12.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -93,9 +93,9 @@ private fun SetPinScreen(onDone: () -> Unit) {
     val ready = pin.length in 4..8 && pin == confirm && !busy
 
     PinScaffold(
-        title = "Set your patrol PIN",
-        blurb = "You'll enter this each time you open patrol, on top of your password. " +
-            "It keeps your ticks yours — nobody who learns your password can file a patrol " +
+        title = "Set your monitor PIN",
+        blurb = "You'll enter this each time you start monitoring, on top of your password. " +
+            "It keeps your ticks yours — nobody who learns your password can file a monitor " +
             "record as you. Choose 4 to 8 digits you won't write down.",
     ) {
         PinField("New PIN", pin, { pin = it })
@@ -120,7 +120,7 @@ private fun SetPinScreen(onDone: () -> Unit) {
                     if (fail == null) onDone() else err = fail
                 }
             },
-        ) { Text(if (busy) "Saving…" else "Save PIN and start patrol") }
+        ) { Text(if (busy) "Saving…" else "Save PIN and start monitoring") }
 
         Spacer(Modifier.height(10.dp))
         Text(
@@ -146,7 +146,7 @@ private fun EnterPinScreen(initiallyLocked: Boolean, attemptsLeft: Int, onUnlock
 
     if (locked) {
         PinMessageScreen(
-            title = "Patrol is locked",
+            title = "Monitoring is locked",
             body = "Too many wrong PINs. Wait a little and try again, or ask an administrator to " +
                 "clear your PIN so you can set a new one.",
             retryLabel = "Try again",
@@ -156,17 +156,17 @@ private fun EnterPinScreen(initiallyLocked: Boolean, attemptsLeft: Int, onUnlock
     }
 
     PinScaffold(
-        title = "Enter your patrol PIN",
+        title = "Enter your monitor PIN",
         blurb = "One more step before today's round.",
     ) {
         PinField("PIN", pin, { pin = it }, isError = err != null)
         err?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-            // Naming the remaining attempts is deliberate: a patroller mistyping in a corridor
+            // Naming the remaining attempts is deliberate: a monitor mistyping in a corridor
             // should know how close they are to being locked out mid-round.
             if (left in 1..2) {
-                Text("$left ${if (left == 1) "try" else "tries"} left before patrol locks.",
+                Text("$left ${if (left == 1) "try" else "tries"} left before monitoring locks.",
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             }
         }
@@ -185,7 +185,7 @@ private fun EnterPinScreen(initiallyLocked: Boolean, attemptsLeft: Int, onUnlock
                     }
                 }
             },
-        ) { Text(if (busy) "Checking…" else "Open patrol") }
+        ) { Text(if (busy) "Checking…" else "Start monitoring") }
 
         Spacer(Modifier.height(20.dp))
         SignOutButton()
@@ -212,10 +212,10 @@ fun ChangePatrolPinDialog(onClose: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(if (done) "PIN changed" else "Change patrol PIN") },
+        title = { Text(if (done) "PIN changed" else "Change monitor PIN") },
         text = {
             if (done) {
-                Text("Your new PIN applies the next time you open patrol.")
+                Text("Your new PIN applies the next time you start monitoring.")
             } else {
                 Column {
                     PinField("Current PIN", current, { current = it })
@@ -286,7 +286,7 @@ private fun PinField(label: String, value: String, onChange: (String) -> Unit, i
     OutlinedTextField(
         value = value,
         // Filtered at the source: the field cannot hold anything the server would reject, so a
-        // patroller never gets "digits only" back from a round-trip.
+        // monitor never gets "digits only" back from a round-trip.
         onValueChange = { onChange(it.filter(Char::isDigit).take(8)) },
         label = { Text(label) },
         singleLine = true,

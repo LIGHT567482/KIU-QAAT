@@ -10,10 +10,54 @@ import ug.qaat.coordinator.server.InRoomServer
 import ug.qaat.coordinator.service.SessionService
 import ug.qaat.coordinator.ui.AppState
 import ug.qaat.engine.*
+import ug.qaat.coordinator.db.TimetableSlotEntity
 import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.util.UUID
+
+/** Minutes since midnight for a timetable "HH:MM", or -1 when it is not one. */
+private fun minutesOfDay(hhmm: String): Int {
+    val parts = hhmm.trim().split(":")
+    if (parts.size < 2) return -1
+    val h = parts[0].toIntOrNull() ?: return -1
+    val m = parts[1].toIntOrNull() ?: return -1
+    if (h !in 0..23 || m !in 0..59) return -1
+    return h * 60 + m
+}
+
+/**
+ * The slot [unitId] is being taught in RIGHT NOW, out of the cached weekly grid.
+ *
+ * It matters which one: the combined-class code is derived from the slot's room, day and hour, so a
+ * unit taught twice on one day derives two different codes, and handing back the wrong slot would
+ * produce three digits that open nobody's register. Picking the earliest slot of the day — which is
+ * what the manifest's own per-unit list does — would be wrong every afternoon.
+ *
+ * So: the slot actually in progress, else the next one still to come today, else the day's last.
+ * The fallbacks exist because a coordinator opens the session a few minutes early as often as a few
+ * minutes late, and neither should silently derive a code from the wrong hour.
+ *
+ * Pure and top-level so it can be tested without a device — see CombinedClassWiringTest.
+ */
+fun slotForToday(
+    slots: List<TimetableSlotEntity>,
+    unitId: String,
+    isoDay: Int,
+    nowMinutes: Int,
+): TimetableSlotEntity? {
+    val today = slots.filter { it.unitId == unitId && it.dayOfWeek == isoDay && minutesOfDay(it.startTime) >= 0 }
+    if (today.size <= 1) return today.firstOrNull()
+    today.firstOrNull {
+        val start = minutesOfDay(it.startTime)
+        nowMinutes >= start && nowMinutes < start + maxOf(it.durationMinutes, 1)
+    }?.let { return it }
+    today.filter { minutesOfDay(it.startTime) >= nowMinutes }
+        .minByOrNull { minutesOfDay(it.startTime) }
+        ?.let { return it }
+    return today.maxByOrNull { minutesOfDay(it.startTime) }
+}
 
 /**
  * Turns "app + hotspot running" into "a live session students can check into", and
@@ -47,7 +91,14 @@ object SessionController {
     private var lecturerStartFp: String = ""
     private var lecturerEndAt: String = ""
     private var lecturerEndFp: String = ""
-    private var sessionCode: String = ""   // the ONE daily code (lecturer+session) for this unit, or ""
+    // THE COMBINED-CLASS CODE for the lecture being taught here, and the three things it is derived
+    // from. Blank on an ordinary lecture — the manifest only carries a combinedClassKey for a slot
+    // the server can see is genuinely shared, so an unshared lecture derives nothing and the
+    // coordinator is never shown a code field. See CombinedClassCode.
+    private var sessionCode: String = ""
+    private var classKeySecret: ByteArray = ByteArray(0)
+    private var lecturerUuid: String = ""
+    private var combinedClassKey: String = ""
     private var enrolled: Int = 0
     private var current: SessionEntity? = null
     // Wall-clock deadline after which a forgotten session auto-closes (scheduled duration + 5m grace).
@@ -84,7 +135,22 @@ object SessionController {
         gateState = GateState.NOT_STARTED
         lecturerStartAt = ""; lecturerStartFp = ""; lecturerEndAt = ""; lecturerEndFp = ""
         this@SessionController.lecturerStaffId = lecturerStaffId
-        sessionCode = m.units.firstOrNull { it.unitId == unitId }?.sessionCode ?: ""
+        // THE COMBINED-CLASS CODE, computed here rather than fetched, because the room it is spoken
+        // in has no uplink and the other coordinators are on their own hotspots. Every cohort of the
+        // same lecture derives the same three digits from the same (lecturer, class, today), so one
+        // number read aloud opens all of them. See CombinedClassCode for why it is only three digits
+        // and what the day binding does and does not promise.
+        //
+        // All three inputs must be present or no code exists — an empty string hashed as a lecturer
+        // id would derive real-looking digits that mean nothing, which is worse than no code at all.
+        val now = LocalTime.now()
+        val todaySlot = slotForToday(m.slots, unitId, LocalDate.now().dayOfWeek.value, now.hour * 60 + now.minute)
+        classKeySecret = m.studentHashKey.takeIf { it.isNotBlank() }?.toByteArray() ?: ByteArray(0)
+        lecturerUuid = todaySlot?.lecturerId.orEmpty()
+        combinedClassKey = todaySlot?.combinedClassKey.orEmpty()
+        sessionCode = if (classKeySecret.isNotEmpty() && lecturerUuid.isNotBlank() && combinedClassKey.isNotBlank())
+            CombinedClassCode.derive(classKeySecret, lecturerUuid, combinedClassKey, LocalDate.now().toString())
+        else ""
         AppState.currentLecturerHasCode = sessionCode.isNotBlank()
         AppState.lecturerStartedHere = false
         AppState.currentSessionCode = null
@@ -147,6 +213,11 @@ object SessionController {
                 },
                 // Students may only check in once the lecturer has passed the START gate.
                 lecturerStarted = { gateState == GateState.STARTED },
+                // Handed to the lecturer's phone the moment they gate in here, so they can read it
+                // out to the other coordinators. Their phone cannot derive it itself — it never
+                // fetches a manifest and holds no key — and that is deliberate: the digits existing
+                // only after a gate-in is what makes them proof the lecturer was in the building.
+                combinedClassCode = { sessionCode },
                 onCheckin = { fields, result ->
                     // Live-roster row: reg-no as typed (the durable ledger keeps the hash), and
                     // the NAME looked up in the cached roster.
@@ -194,11 +265,18 @@ object SessionController {
      * STARTed here, and they are validated against THIS coordinator's own cohort roster.
      */
     fun startLecturerByCode(entered: String): Boolean {
-        if (sessionCode.isBlank() || entered.trim() != sessionCode) return false
+        if (sessionCode.isBlank()) return false
+        // Checked by DERIVING what today's code must be, not by comparing against a stored string.
+        // Same answer here, but it is the shared implementation the server and every other cohort's
+        // phone also run, so the three of them cannot drift apart — and it refuses yesterday's code
+        // for free, because yesterday derives a different number.
+        if (!CombinedClassCode.validate(
+                classKeySecret, entered, lecturerUuid, combinedClassKey, LocalDate.now().toString())
+        ) return false
         if (gateState != GateState.STARTED) {
             gateState = GateState.STARTED
             lecturerStartAt = Instant.now().toString()
-            lecturerStartFp = "daily-code:$sessionCode"   // presence proof carried into the sealed package
+            lecturerStartFp = "combined-class:${entered.trim()}"   // presence proof carried into the sealed package
             AppState.lecturerStartedHere = true
             runCatching { sm?.lecturerStarted() }
         }
@@ -232,6 +310,7 @@ object SessionController {
         AppState.currentLecturerHasCode = false
         AppState.lecturerStartedHere = false
         AppState.currentSessionCode = null
+        sessionCode = ""; classKeySecret = ByteArray(0); lecturerUuid = ""; combinedClassKey = ""
         AppState.hotspotSsid = null
         AppState.hotspotPass = null
         AppState.hotspotUp = false

@@ -86,7 +86,7 @@ func PutThresholds(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		}
 
 		// Bust the Daily Manifest cache — next fetch will include new policy.
-		pattern := fmt.Sprintf("manifest:%s:*", tenantID)
+		pattern := fmt.Sprintf("%s%s:*", manifestCachePrefix, tenantID)
 		keys, _ := rdb.Keys(r.Context(), pattern).Result()
 		if len(keys) > 0 {
 			rdb.Del(r.Context(), keys...) //nolint:errcheck

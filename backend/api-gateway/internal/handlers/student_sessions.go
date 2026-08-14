@@ -39,7 +39,7 @@ func StudentLiveSessions(pool *pgxpool.Pool) http.HandlerFunc {
 		err = conn.QueryRow(r.Context(), `
 			SELECT se.student_id, COALESCE(se.course_id,''), COALESCE(se.offering_id::text,''), se.enrollment_status::text
 			FROM users u
-			JOIN students_extended se ON se.email = u.email AND se.tenant_id = u.tenant_id
+			JOIN students_extended se ON se.email = u.email
 			WHERE u.user_id = $1 AND u.tenant_id = $2`,
 			userID, tenantID).Scan(&studentID, &courseID, &offeringID, &enrollment)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -61,7 +61,12 @@ func StudentLiveSessions(pool *pgxpool.Pool) http.HandlerFunc {
 			       EXISTS (
 			         SELECT 1 FROM attendance_logs al
 			         WHERE al.session_id = s.session_id AND al.student_id = $3
-			       ) AS already_checked_in
+			       ) AS already_checked_in,
+			       -- IN_PERSON or ONLINE (migration 087). The portal must say which: an online
+			       -- class needs the code the lecturer is showing on the shared screen, which
+			       -- CHANGES EVERY TEN SECONDS, while a room's code does not change at all. A
+			       -- student told the wrong one simply fails to check in and cannot see why.
+			       COALESCE(s.delivery_mode, 'IN_PERSON')
 			FROM sessions s
 			JOIN course_units cu ON cu.unit_id = s.unit_id
 			LEFT JOIN venues v ON v.venue_id = s.venue_id AND v.tenant_id = $1
@@ -90,6 +95,7 @@ func StudentLiveSessions(pool *pgxpool.Pool) http.HandlerFunc {
 			PlannedDuration  int    `json:"planned_duration_minutes"`
 			GateOpenTime     string `json:"gate_open_time"`
 			AlreadyCheckedIn bool   `json:"already_checked_in"`
+			DeliveryMode     string `json:"delivery_mode"`
 		}
 
 		out := []liveSession{}
@@ -97,7 +103,7 @@ func StudentLiveSessions(pool *pgxpool.Pool) http.HandlerFunc {
 			var s liveSession
 			rows.Scan(&s.SessionID, &s.UnitID, &s.UnitName, &s.VenueName, //nolint:errcheck
 				&s.CoordinatorName, &s.PlannedStart, &s.PlannedDuration,
-				&s.GateOpenTime, &s.AlreadyCheckedIn)
+				&s.GateOpenTime, &s.AlreadyCheckedIn, &s.DeliveryMode)
 			out = append(out, s)
 		}
 		writeJSON(w, http.StatusOK, out)

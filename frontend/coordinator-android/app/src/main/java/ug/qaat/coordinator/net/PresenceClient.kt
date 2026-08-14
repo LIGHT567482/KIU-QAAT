@@ -17,7 +17,7 @@ import ug.qaat.coordinator.db.TimetableSlotEntity
  * Neither is on the critical path of filing a claim, and that is the design rather than an
  * accident. The button works with the phone in flight mode: the timetable it matches against was
  * cached the last time there was signal, and the claim it writes goes into Room and is uploaded
- * whenever the network comes back. A lecturer disputing a patrol tick is, almost by definition,
+ * whenever the network comes back. A lecturer disputing a monitor tick is, almost by definition,
  * someone who had no signal in that room at that time.
  */
 class PresenceClient {

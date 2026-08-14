@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -76,8 +78,8 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 			       o.study_year, o.semester, COALESCE(o.level,''), COALESCE(o.intake,''),
 			       COALESCE(u.full_name,'')
 			FROM course_offerings o
-			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
-			LEFT JOIN users u ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			JOIN courses c ON c.course_id = o.course_id
+			LEFT JOIN users u ON u.user_id::text = o.coordinator_id
 			WHERE o.tenant_id = $1
 			ORDER BY c.name, o.session_type, o.study_year, o.semester, o.level, o.intake`, tenantID)
 		if err != nil {
@@ -101,8 +103,8 @@ func GetTimetableSlots(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(s.lecturer_id::text,''), COALESCE(l.full_name,''),
 			       COALESCE(c.department,'')
 			FROM timetable_slots s
-			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
-			LEFT JOIN courses     c  ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id
+			LEFT JOIN courses     c  ON c.course_id = cu.course_id
 			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
 			WHERE s.tenant_id = $1
 			ORDER BY s.day_of_week, s.start_time`, tenantID)
@@ -205,6 +207,58 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			return
 		}
 
+		// ── Room clash, across the WHOLE institution ────────────────────────
+		//
+		// The guard above asks whether this COHORT is already busy — a question about the students'
+		// diary, scoped to one offering. This asks whether the ROOM is, and it deliberately looks
+		// past the offering, the department and the college.
+		//
+		// That is the case nobody was catching. Each department has its own TLC, they schedule
+		// independently into one shared pool of rooms, and two of them booking Block C 101 for
+		// Tuesday at 14:00 was accepted by both — discovered by two lecturers and eighty students
+		// arriving at the same door. Rooms are compared case- and whitespace-insensitively because
+		// the room is free text somebody types; an unroomed slot books nothing and is skipped.
+		if room := strings.TrimSpace(req.Room); room != "" {
+			var otherUnit, otherStart, otherCohort string
+			roomErr := conn.QueryRow(r.Context(), `
+				SELECT ts.unit_id, to_char(ts.start_time,'HH24:MI'),
+				       COALESCE(NULLIF(c.department,''), COALESCE(NULLIF(c.school,''), ''))
+				FROM timetable_slots ts
+				LEFT JOIN course_units cu ON cu.unit_id = ts.unit_id
+				LEFT JOIN courses c ON c.course_id = cu.course_id
+				WHERE ts.tenant_id = $1 AND ts.day_of_week = $2
+				  AND btrim(lower(ts.room)) = btrim(lower($3))
+				  -- Not this same slot being re-saved.
+				  AND NOT (ts.offering_id = $4::uuid AND ts.unit_id = $5 AND ts.start_time = $6::time)
+				  AND ts.start_time < ($6::time + make_interval(mins => $7))
+				  AND $6::time     < (ts.start_time + make_interval(mins => ts.duration_minutes))
+				  -- THE COMBINED CLASS IS NOT A CLASH. One lecturer teaching several cohorts in one
+				  -- room at one hour is normal here, and the cohorts often carry the unit under
+				  -- different codes — so two slots sharing a room and time collide only when they
+				  -- name DIFFERENT lecturers, which is the case where only one of them can really
+				  -- be teaching. Mirrors the database constraint in migration 099; unassigned slots
+				  -- fold onto one sentinel so "nobody named twice" is still caught.
+				  AND COALESCE(ts.lecturer_id, '00000000-0000-0000-0000-000000000000'::uuid)
+				      <> COALESCE(NULLIF($8,'')::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+				LIMIT 1`,
+				tenantID, req.DayOfWeek, room, req.OfferingID, req.UnitID, req.StartTime, req.Duration,
+				req.LecturerID,
+			).Scan(&otherUnit, &otherStart, &otherCohort)
+			if roomErr == nil {
+				// Name the other department where we know it. A TLC told only "the room is taken"
+				// has to go and find whose booking it is before they can do anything about it, and
+				// the whole point is that the other booking belongs to somebody else.
+				owner := ""
+				if strings.TrimSpace(otherCohort) != "" {
+					owner = " (" + otherCohort + ")"
+				}
+				writeJSON(w, http.StatusConflict, errBody("ROOM_DOUBLE_BOOKED",
+					fmt.Sprintf("%s is already booked for %s%s at %s that day. Pick another room or another time.",
+						room, otherUnit, owner, otherStart)))
+				return
+			}
+		}
+
 		// The typed room is also resolved against the managed room registry, so the slot carries a
 		// structured venue_id wherever the text names a real room. The free text stays as written —
 		// it is what the grid displays, and an unrecognised room must not be silently dropped.
@@ -226,6 +280,19 @@ func UpsertTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 			RETURNING slot_id::text`,
 			tenantID, req.OfferingID, req.UnitID, req.DayOfWeek, req.StartTime, req.Duration, req.Room, req.LecturerID).Scan(&slotID)
 		if err != nil {
+			// THE RACE THE CHECK ABOVE CANNOT WIN. That check is a read followed by a write, and
+			// two TLCs pressing Save in the same second both read "room free" before either
+			// writes. Migration 091's exclusion constraint is what actually makes the overlap
+			// impossible; this turns its 23P01 into the same sentence the pre-check would have
+			// given, so the loser of the race is told what happened rather than shown a database
+			// error naming a GiST index.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23P01" &&
+				strings.Contains(pgErr.ConstraintName, "room_double_booking") {
+				writeJSON(w, http.StatusConflict, errBody("ROOM_DOUBLE_BOOKED",
+					strings.TrimSpace(req.Room)+" was booked for that time by someone else a moment ago. Pick another room or another time."))
+				return
+			}
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
 		}
@@ -285,7 +352,7 @@ func DeleteTimetableSlot(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc
 // Resolves/creates the offering + unit, links the lecturer if found, upserts slots.
 func ImportTimetable(adminPool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return
@@ -442,6 +509,26 @@ func processTimetableCSV(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 			continue
 		}
 
+		// The room, against every other department's timetable. Checked here as well as by the
+		// constraint so an import reports the clash as a LINE the person can go and fix, rather
+		// than losing the row to a database message about a GiST index.
+		if room := strings.TrimSpace(get("room")); room != "" {
+			var rU, rS string
+			if pool.QueryRow(ctx, `
+				SELECT unit_id, to_char(start_time,'HH24:MI') FROM timetable_slots
+				WHERE tenant_id = $1 AND day_of_week = $2
+				  AND btrim(lower(room)) = btrim(lower($3))
+				  AND NOT (offering_id = $4::uuid AND unit_id = $5 AND start_time = $6::time)
+				  AND start_time < ($6::time + make_interval(mins => $7))
+				  AND $6::time   < (start_time + make_interval(mins => duration_minutes))
+				LIMIT 1`, tenantID, day, room, offeringID, unitID, start, dur).Scan(&rU, &rS) == nil {
+				res.Skipped++
+				res.Errors = append(res.Errors, fmt.Sprintf(
+					"line %d: room %s is already booked for %s at %s that day (another department's timetable)", ln, room, rU, rS))
+				continue
+			}
+		}
+
 		_, err = pool.Exec(ctx, `
 			INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room, lecturer_id, venue_id)
 			VALUES ($1,$2::uuid,$3,$4,$5::time,$6,NULLIF($7,''),NULLIF($8,'')::uuid,`+resolveVenueSQL+`)
@@ -452,6 +539,15 @@ func processTimetableCSV(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 			tenantID, offeringID, unitID, day, start, dur, get("room"), lecturerID)
 		if err != nil {
 			res.Skipped++
+			// Two rows of the SAME file can also collide with each other — the pre-check above
+			// only sees rows already committed — so this is not merely a race backstop here.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23P01" &&
+				strings.Contains(pgErr.ConstraintName, "room_double_booking") {
+				res.Errors = append(res.Errors, fmt.Sprintf(
+					"line %d: room %s is double-booked at that time by another row of this file or another department", ln, strings.TrimSpace(get("room"))))
+				continue
+			}
 			res.Errors = append(res.Errors, fmt.Sprintf("line %d: slot: %s", ln, err.Error()))
 			continue
 		}

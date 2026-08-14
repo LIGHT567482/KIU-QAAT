@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 
 /**
- * "The patroller never reached my room."
+ * "The monitor never reached my room."
  *
- * A QA patrol tick is one person's account of a moment, timestamped and filed against a named
+ * A QA monitor tick is one person's account of a moment, timestamped and filed against a named
  * lecturer. Until now it was the only account on file, so a lecturer marked NOT TAUGHT had nothing
  * to answer with but their word, offered days later against a record made at the time.
  *
@@ -63,11 +63,11 @@ const LOCATION_LABEL: Record<Claim['location_status'], string> = {
  * hands a reviewer the shape of the disagreement, and the reviewer decides.
  */
 function verdict(c: Claim): { text: string; tone: 'conflict' | 'agree' | 'neutral' } {
-  if (c.patrol_taught === null) return { text: 'No patrol record for this lecture', tone: 'neutral' }
+  if (c.patrol_taught === null) return { text: 'No QA monitor record for this lecture', tone: 'neutral' }
   if (c.patrol_taught === false && c.match_kind === 'IN_SLOT')
-    return { text: 'Disagrees — patrol says not taught', tone: 'conflict' }
-  if (c.patrol_taught === false) return { text: 'Patrol says not taught', tone: 'conflict' }
-  return { text: 'Agrees — patrol says taught', tone: 'agree' }
+    return { text: 'Disagrees — monitor says not taught', tone: 'conflict' }
+  if (c.patrol_taught === false) return { text: 'Monitor says not taught', tone: 'conflict' }
+  return { text: 'Agrees — monitor says taught', tone: 'agree' }
 }
 
 function when(iso: string): string {
@@ -78,7 +78,7 @@ function when(iso: string): string {
   })
 }
 
-/** Signed minutes read as English: the number a reviewer actually wants when the patrol log says
+/** Signed minutes read as English: the number a reviewer actually wants when the monitor log says
  *  14:00 and the claim says 14:07. */
 function offset(m: number | null): string {
   if (m === null || m === undefined) return ''
@@ -115,7 +115,7 @@ export default function QAPresenceClaims() {
       <p style={{ color: 'var(--muted)', marginBottom: 20, maxWidth: 760 }}>
         A lecturer's own record of being in the room, captured on their phone at the time — location,
         clock, and the lecture it falls in on the timetable. Filed offline and synced later, so the
-        time shown is when they pressed the button, not when it reached us. The patrol tick for the
+        time shown is when they pressed the button, not when it reached us. The monitor tick for the
         same lecture sits beside each one.
       </p>
 
@@ -147,7 +147,7 @@ export default function QAPresenceClaims() {
       {claims !== null && shown.length === 0 && (
         <p style={{ color: 'var(--muted)' }}>
           {onlyConflicts
-            ? 'No disagreements in this period — every record here matches its patrol tick.'
+            ? 'No disagreements in this period — every record here matches its monitor tick.'
             : 'No lecturer has filed a presence record in this period.'}
         </p>
       )}
@@ -157,7 +157,7 @@ export default function QAPresenceClaims() {
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>
             <thead>
               <tr>
-                {['Lecturer', 'Lecture', 'Lecturer says', 'Location', 'Patrol says', 'Reading'].map(h => (
+                {['Lecturer', 'Lecture', 'Lecturer says', 'Location', 'Monitor says', 'Reading'].map(h => (
                   <th key={h} style={th}>{h}</th>
                 ))}
               </tr>
@@ -235,7 +235,7 @@ export default function QAPresenceClaims() {
 
       <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 20, maxWidth: 760 }}>
         A phone reports the coordinates it is given, so this is evidence rather than proof, and it
-        does not overturn a patrol tick on its own. What it establishes is that the lecturer made the
+        does not overturn a monitor tick on its own. What it establishes is that the lecturer made the
         statement <em>at the time</em>, from a fixed point, against the lecture the timetable says
         they were down for. Records cannot be edited or deleted once filed — by anyone.
       </p>

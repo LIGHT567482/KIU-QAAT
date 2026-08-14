@@ -95,7 +95,7 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 				SELECT COUNT(*) FROM course_units cu
 				WHERE cu.tenant_id = $1
 				  AND NOT EXISTS (SELECT 1 FROM lecturer_assignments la
-				                  WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id)`),
+				                  WHERE la.unit_id = cu.unit_id)`),
 			// No coordinator: nobody can open a session for that cohort at all.
 			"cohorts_uncoordinated": one(`
 				SELECT COUNT(*) FROM course_offerings o
@@ -124,7 +124,7 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 				WHERE d.tenant_id = $1 AND COALESCE(d.kind,'ACADEMIC') <> 'SUPPORT'
 				  AND NOT EXISTS (
 				      SELECT 1 FROM users u
-				      WHERE u.tenant_id = d.tenant_id AND u.role = 'HOD'
+				      WHERE u.role = 'HOD'
 				        AND btrim(lower(u.department)) = btrim(lower(d.name)))`),
 			// A department on the org tree whose NAME matches no course. The org tree and the
 			// academic data have drifted, so every query its HOD's dashboard runs returns nothing
@@ -135,8 +135,7 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 				WHERE d.tenant_id = $1 AND COALESCE(d.kind,'ACADEMIC') <> 'SUPPORT'
 				  AND NOT EXISTS (
 				      SELECT 1 FROM courses c
-				      WHERE c.tenant_id = d.tenant_id
-				        AND btrim(lower(COALESCE(c.department,''))) = btrim(lower(d.name)))`),
+				      WHERE btrim(lower(COALESCE(c.department,''))) = btrim(lower(d.name)))`),
 			// The mirror image: a course naming a department that does not exist on the org tree.
 			// Its lecturers and students belong to no HOD and appear in no dean's college.
 			"courses_orphan_department": one(`
@@ -144,8 +143,7 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 				WHERE c.tenant_id = $1 AND COALESCE(btrim(c.department),'') <> ''
 				  AND NOT EXISTS (
 				      SELECT 1 FROM departments d
-				      WHERE d.tenant_id = c.tenant_id
-				        AND btrim(lower(d.name)) = btrim(lower(c.department)))`),
+				      WHERE btrim(lower(d.name)) = btrim(lower(c.department)))`),
 			// Patrol handsets claimed, against patroller accounts that exist.
 			"patrollers_unbound": one(`
 				SELECT COUNT(*) FROM users u

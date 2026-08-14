@@ -21,6 +21,7 @@ import ug.qaat.coordinator.net.StudentHomeClient
 import ug.qaat.coordinator.store.SessionStore
 import ug.qaat.coordinator.student.CheckinClient
 import ug.qaat.coordinator.student.Discovery
+import ug.qaat.coordinator.student.OnlineCheckinClient
 import ug.qaat.coordinator.student.Fingerprint
 import ug.qaat.coordinator.student.ProgressClient
 import ug.qaat.coordinator.student.RegisterDeviceClient
@@ -33,7 +34,15 @@ private val REASONS = mapOf(
     "DEVICE_BELONGS_TO_ANOTHER_STUDENT" to "This phone is registered to another student.",
     "SESSION_NOT_ACTIVE" to "No active session yet — wait for your coordinator to start.",
     "LECTURER_NOT_STARTED" to "Waiting for the lecturer to start the session.",
+    // Only ~10 phones fit on the class Wi-Fi at once, so a turn that goes nowhere is given up
+    // rather than held. Phrased as the queue it is, not as a failure the student caused.
+    "EVICT_EXPIRED" to "Your turn on the class Wi-Fi ended. Reconnecting shortly…",
 )
+
+/** How long to wait before taking another turn after being moved on without attending.
+ *  RANDOMISED, and that is the point: two hundred phones evicted within the same second would
+ *  otherwise all come back in the same second, and the hall would thrash instead of drain. */
+private val REJOIN_BACKOFF_MS: Long get() = 20_000L + (Math.random() * 20_000L).toLong()
 
 /** The STUDENT experience inside the unified app: one-tap Attend + online My-attendance + Profile.
  *  Identity (reg-number, institution) comes from the login token via AppState. */
@@ -156,11 +165,49 @@ private fun StudentAttend() {
     // successful check-in (so they see any message from their lecturer/coordinator immediately).
     var latestNotif by remember { mutableStateOf<NotificationClient.Notif?>(null) }
     LaunchedEffect(success) { if (success) runCatching { latestNotif = NotificationClient().inbox().firstOrNull() } }
+    // A distance / e-learning class, which has no hotspot to find. Only consulted once the local
+    // search has come up empty, so the hotspot remains the way attendance is taken for every
+    // student who has one — this is the fallback for the students who never will.
+    var online by remember { mutableStateOf<OnlineCheckinClient.LiveOnline?>(null) }
+    var code by remember { mutableStateOf("") }
+
+    // ── Holding a slot on the class Wi-Fi ────────────────────────────────────────
+    // Only ~10 phones fit on the coordinator's hotspot at once, so a turn is something to take and
+    // give back rather than something to keep. These three drive that: the credentials we join
+    // with, and the moment we may next take a turn after being moved on.
+    var wifiSsid by remember { mutableStateOf(SessionStore.classWifiSsid()) }
+    var wifiPass by remember { mutableStateOf(SessionStore.classWifiPass()) }
+    var waitingUntil by remember { mutableStateOf(0L) }
+    var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    /** Give the slot back. Says goodbye to the hub first — best-effort, on a connection we are
+     *  about to drop — then actually lets go, which is the part that frees the slot. */
+    suspend fun letGo() {
+        baseUrl?.let { url -> runCatching { CheckinClient(url, ctx).leave() } }
+        ug.qaat.coordinator.student.SlotLease.release(ctx)
+    }
+
+    // Leaving this screen gives the slot back. A student who checks in and switches to Home, or
+    // drops the app in their pocket, must not keep a classmate off the Wi-Fi for the rest of the
+    // hour — and before this, that was the single commonest way a slot was lost.
+    DisposableEffect(Unit) { onDispose { ug.qaat.coordinator.student.SlotLease.release(ctx) } }
 
     suspend fun discover(showSpinner: Boolean = true) {
         if (showSpinner) { searching = true; status = null }
+        val reg = AppState.studentId.orEmpty()
+
+        // Take a turn on the class Wi-Fi if we do not already hold one. Skipped entirely when the
+        // student is already on the network some other way (Android 9, or a Settings join), which
+        // is why the old discovery path below is kept exactly as it was.
+        val lease = ug.qaat.coordinator.student.SlotLease
+        if (lease.supported && !lease.held && wifiSsid.isNotBlank() &&
+            !ug.qaat.coordinator.student.LanNetwork.onWifi(ctx)
+        ) {
+            lease.acquire(ctx, wifiSsid, wifiPass)
+        }
+
         val url = Discovery(ctx).find()
-        val newSession = url?.let { CheckinClient(it).session() }
+        val newSession = url?.let { CheckinClient(it, ctx).session(reg) }
         // Reset the local "attended" view when the session changes (new sessionId = next round) or
         // the hotspot dropped, so the student is prompted to reconnect / can attend the next session.
         val newId = newSession?.sessionId ?: ""
@@ -168,22 +215,54 @@ private fun StudentAttend() {
         if (newId != oldId) { success = false }
         baseUrl = url
         session = newSession
-        alreadyAttended = newSession?.sessionId?.let { SessionStore.hasAttended(it) } == true
+        // No room found: is one of this student's classes running online? Telling a distance
+        // student to "connect to their coordinator's Wi-Fi" is advice that can never be followed,
+        // and it was the whole of what this screen used to say to them.
+        online = if (newSession?.active == true) null
+                 else runCatching { OnlineCheckinClient().liveOnlineSession() }.getOrNull()
+        val liveId = newSession?.sessionId ?: online?.sessionId ?: ""
+        alreadyAttended = (liveId.isNotBlank() && SessionStore.hasAttended(liveId)) ||
+            online?.alreadyCheckedIn == true
         if (alreadyAttended) success = true
         searching = false
+
+        // The hub moving us on. Two quite different things arrive by the same flag: we are finished
+        // (nothing more to do, so let go and stay gone), or our turn ran out before we could finish
+        // (let go, then come back after a randomised pause so the whole hall does not return at once).
+        if (newSession?.evict == true || alreadyAttended) {
+            letGo()
+            if (newSession?.evictReason == "EVICT_EXPIRED" && !alreadyAttended) {
+                waitingUntil = System.currentTimeMillis() + REJOIN_BACKOFF_MS
+                status = REASONS["EVICT_EXPIRED"]
+                return
+            }
+        }
+
         status = when {
-            url == null -> "Couldn't find your coordinator. Connect to their class Wi-Fi (mobile data OFF)."
+            online != null -> null
+            url == null && !lease.supported && !ug.qaat.coordinator.student.LanNetwork.onWifi(ctx) ->
+                "You are not on any Wi-Fi. Join your coordinator's class network from Wi-Fi settings, then come back."
+            url == null && wifiSsid.isBlank() -> null   // the join form below is the answer, not an error
+            url == null ->
+                "Couldn't reach the class server. Check the Wi-Fi name and password match what your coordinator is showing, and that they have started the session."
             newSession?.active != true -> "Connected, but no session is active yet — wait for it to start."
             else -> null
         }
     }
     LaunchedEffect(Unit) { discover() }
-    // Poll every ~4s so the page reacts on its own: clears to "reconnect" when the hotspot drops,
-    // and re-enables for the next session — no manual refresh needed.
-    LaunchedEffect(Unit) {
+
+    // The screen keeps itself current — EXCEPT once the student is done. The old loop ran every 4
+    // seconds for as long as the screen was open, including long after the ✓, which meant an
+    // attended phone sat on a Wi-Fi slot AND kept the hub busy answering it. Stopping is now part
+    // of the design rather than something the student is asked to do.
+    LaunchedEffect(success, alreadyAttended) {
+        if (success || alreadyAttended) return@LaunchedEffect
         while (true) {
             kotlinx.coroutines.delay(4000)
-            if (!busy && !searching) runCatching { discover(showSpinner = false) }
+            nowTick = System.currentTimeMillis()
+            if (busy || searching) continue
+            if (nowTick < waitingUntil) continue          // serving out a backoff; stay off the air
+            runCatching { discover(showSpinner = false) }
         }
     }
 
@@ -205,10 +284,14 @@ private fun StudentAttend() {
                     Text("ATTENDED ✓", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(12.dp))
-                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
-                    Text("📴 Turn your Wi-Fi OFF now so a classmate can connect and check in.",
-                        Modifier.padding(14.dp), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer)
+                // Was a red box asking the student to turn Wi-Fi off for the sake of the queue —
+                // a favour requested of the one person in the room with nothing left to gain by
+                // doing it. The app now hands the slot back itself, so this states what happened
+                // instead of asking for anything.
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                    Text("✓ Disconnected from the class Wi-Fi — your slot is free for a classmate.",
+                        Modifier.padding(14.dp), textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 // Latest notification, shown right after checking in.
                 latestNotif?.let { n ->
@@ -221,6 +304,71 @@ private fun StudentAttend() {
                         }
                     }
                 }
+            }
+            // ── Waiting for a free slot ──────────────────────────────────────────────────
+            // Our turn ended before the lecturer started, or before we could finish. The slot is
+            // already back with the hall; we are counting down to taking another one. Showing the
+            // countdown matters: a screen that simply said "waiting" would have every student in
+            // the room tapping Retry, which is exactly the stampede the backoff exists to prevent.
+            nowTick < waitingUntil -> {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(12.dp))
+                Text("Waiting for a free slot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Only about ten phones fit on the class Wi-Fi at once, so everyone takes a short " +
+                        "turn. Yours comes back in ${((waitingUntil - nowTick) / 1000).coerceAtLeast(0)}s — " +
+                        "leave this screen open.",
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            // ── The distance / e-learning class ──────────────────────────────────────────
+            online != null && !success -> {
+                Text("Online class", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(online!!.unitName, style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Type the 6-digit code your lecturer is showing. It changes every 10 seconds, " +
+                        "so read it and enter it straight away.",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { v -> code = v.filter { it.isDigit() }.take(6) },
+                    label = { Text("Code on screen") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    enabled = !busy && code.length == 6,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    onClick = {
+                        busy = true; status = null
+                        scope.launch {
+                            val fp = Fingerprint.get(ctx)
+                            val err = OnlineCheckinClient().attend(online!!.sessionId, code, fp)
+                            if (err == null) {
+                                success = true
+                                SessionStore.markAttended(online!!.sessionId); alreadyAttended = true
+                            } else {
+                                status = err
+                                // The code is cleared on a stale-code refusal only: retyping the
+                                // same six digits that just expired would fail again, and a student
+                                // reading a fresh code needs an empty box, not one to correct.
+                                if (err.startsWith("That code has already changed")) code = ""
+                            }
+                            busy = false
+                        }
+                    },
+                ) { Text(if (busy) "Marking…" else "ATTEND", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             }
             session?.active == true && blocked -> {
                 val until = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(AppState.attendBlockUntil))
@@ -241,23 +389,78 @@ private fun StudentAttend() {
                         busy = true; status = null
                         scope.launch {
                             val fp = Fingerprint.get(ctx)
-                            runCatching { CheckinClient(baseUrl!!).attend(AppState.studentId ?: "", fp) }
+                            runCatching { CheckinClient(baseUrl!!, ctx).attend(AppState.studentId ?: "", fp) }
                                 .onSuccess { r ->
                                     if (r.present || r.alreadyPresent) {
                                         success = true
                                         // Remember THIS session so the button stays greyed on reconnect (one per session).
                                         session?.sessionId?.let { SessionStore.markAttended(it); alreadyAttended = true }
-                                    } else status = REASONS[r.reason] ?: "Not marked: ${r.reason ?: "try again"}"
+                                        // Marked present — so let the slot go NOW, without waiting to
+                                        // be told to. The next student is standing there.
+                                        letGo()
+                                    } else {
+                                        status = REASONS[r.reason] ?: "Not marked: ${r.reason ?: "try again"}"
+                                        // Refused AND moved on: a turn we cannot use is a turn worth
+                                        // giving back immediately.
+                                        if (r.evict) {
+                                            letGo()
+                                            if (r.evictReason == "EVICT_EXPIRED")
+                                                waitingUntil = System.currentTimeMillis() + REJOIN_BACKOFF_MS
+                                        }
+                                    }
                                     busy = false
                                 }
-                                .onFailure { status = "Couldn't reach the class server — make sure mobile data is OFF and you're on the coordinator's Wi-Fi."; busy = false }
+                                .onFailure { status = "Couldn't reach the class server — check you're on the class Wi-Fi and that your coordinator has started the session."; busy = false }
                         }
                     },
                 ) { Text(if (busy) "Marking…" else "ATTEND", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             }
+            // ── We need the class Wi-Fi's name and password ──────────────────────────────
+            // The app joins the network itself rather than sending the student to Wi-Fi settings,
+            // which is the only way it can hand the slot BACK afterwards (Android has not let an
+            // app drop its own Settings-joined Wi-Fi since version 10). The price is these two
+            // fields — the same two the student used to type into Settings, read off the same
+            // projected screen. Remembered, so in a class whose hotspot name does not change this
+            // is typed once and never again.
+            ug.qaat.coordinator.student.SlotLease.supported && baseUrl == null -> {
+                Text("Join the class Wi-Fi", style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text(
+                    "Copy the Wi-Fi name and password your coordinator is showing at the front. " +
+                        "The app connects, marks you present, and disconnects on its own.",
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
+                )
+                OutlinedTextField(
+                    value = wifiSsid, onValueChange = { wifiSsid = it }, singleLine = true,
+                    label = { Text("Wi-Fi name") }, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = wifiPass, onValueChange = { wifiPass = it }, singleLine = true,
+                    label = { Text("Wi-Fi password") }, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
+                )
+                Spacer(Modifier.height(14.dp))
+                Button(
+                    enabled = !searching && wifiSsid.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    onClick = {
+                        SessionStore.saveClassWifi(wifiSsid, wifiPass)
+                        scope.launch { discover() }
+                    },
+                ) { Text(if (searching) "Connecting…" else "CONNECT", fontWeight = FontWeight.Bold) }
+                status?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
             else -> Text(status ?: "No active session.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
         }
-        status?.takeIf { !success && session?.active == true && !blocked }?.let {
+        status?.takeIf { !success && !blocked && (session?.active == true || online != null) }?.let {
             Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
         }
         Spacer(Modifier.weight(1f))
@@ -294,7 +497,7 @@ private fun StudentProgress(reloadKey: Int) {
             if (org.isNotBlank()) Text(org, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(12.dp))
-        // Same reason as the patrol round: the LazyColumn body is invoked after this
+        // Same reason as the monitor round: the LazyColumn body is invoked after this
         // composition returns, so it must close over a value, not over the state holder.
         val units = data?.units
         when {

@@ -47,7 +47,7 @@ func requireSupportDepartment(ctx context.Context, pool *pgxpool.Pool, tenantID,
 // GET /api/v1/admin/tenants/{tenant_id}/employees
 func ListEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT employee_pk::text, staff_id, COALESCE(title,''), full_name,
 			       COALESCE(department,''), COALESCE(job_title,''), COALESCE(email,''),
@@ -95,7 +95,7 @@ type employeeReq struct {
 // POST /api/v1/admin/tenants/{tenant_id}/employees
 func CreateEmployee(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req employeeReq
 		if err := decodeJSON(r, &req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed JSON"))
@@ -215,7 +215,7 @@ func DeleteEmployee(adminPool *pgxpool.Pool) http.HandlerFunc {
 // POST /api/v1/admin/tenants/{tenant_id}/employees/import  (multipart field "roster")
 func ImportEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return
@@ -321,7 +321,7 @@ func ImportEmployees(adminPool *pgxpool.Pool) http.HandlerFunc {
 // GET /api/v1/admin/tenants/{tenant_id}/employees/export.xlsx
 func ExportEmployeesXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT staff_id, COALESCE(title,''), full_name, COALESCE(department,''),
 			       COALESCE(job_title,''), COALESCE(email,''), COALESCE(phone,'')

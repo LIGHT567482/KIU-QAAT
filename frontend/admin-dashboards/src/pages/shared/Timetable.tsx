@@ -91,9 +91,9 @@ export default function Timetable({ readOnly = false }: { readOnly?: boolean } =
     setImporting(true); setMsg(null)
     try {
       const fd = new FormData(); fd.append('roster', file)
-      const tenantId = location.pathname.split('/')[3] // /admin/tenants/:id/...
+      
       const res = await api.upload<{ inserted: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/timetable/import`, fd)
+        `/api/v1/admin/timetable/import`, fd)
       setMsg(`Imported: ${res.inserted} slots${res.skipped ? `, ${res.skipped} skipped` : ''}${res.errors?.length ? ` · ${res.errors.slice(0, 3).join('; ')}` : ''}`)
       refetch()
     } catch (e) { setMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed') }
@@ -184,7 +184,7 @@ function CohortTimetable({ offering, slots, units, rows, onChanged, cohortLabel,
   return (
     <div>
       {/* KIU-style header band — white sheet so the timetable sits as its own card
-          on top of whatever background colour the super-admin set for the tenant. */}
+          on top of whatever background colour the institution's branding sets. */}
       <div style={{ background: '#fff', color: '#0f172a', border: `2px solid ${KIU_GREEN}`, borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ textAlign: 'center', padding: '10px 12px', color: KIU_GREEN }}>
           <div style={{ fontWeight: 800, fontSize: 15 }}>Lectures Timetable</div>
@@ -272,7 +272,7 @@ function AddSlot({ offering, units, onDone, onCancel }: {
 
   // The managed room registry, so a room is picked rather than retyped. The field stays a free-text
   // input on purpose — a room that is not on the list yet must still be schedulable — but the hint
-  // below it says whether what was typed resolved to a real room, which is what the patrol manifest
+  // below it says whether what was typed resolved to a real room, which is what the monitor manifest
   // and every per-room report key off.
   const rooms = useQuery<RoomOption[]>(() => api.get('/api/v1/dashboard/rooms'), [])
   const roomList = rooms.data ?? []

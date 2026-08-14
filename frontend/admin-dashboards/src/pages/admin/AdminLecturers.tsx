@@ -55,7 +55,7 @@ const GENDERS = ['', 'Male', 'Female', 'Other']
 export default function AdminLecturers() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const { status, data, refetch } = useQuery<Lecturer[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturers`)
+    () => api.get(`/api/v1/admin/lecturers`)
   )
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '', school_id: '' })
@@ -63,7 +63,7 @@ export default function AdminLecturers() {
   // including a new one who has not been given any unit yet — which is precisely
   // what the derived value could not express.
   const orgSchools = useQuery<{ school_id: string; name: string }[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
+    () => api.get(`/api/v1/admin/schools`), [tenantId])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,7 +74,7 @@ export default function AdminLecturers() {
   const [enroll, setEnroll] = useState<{ name: string; url: string } | null>(null)
   async function makeEnroll(l: Lecturer) {
     try {
-      const res = await api.post<{ enroll_url: string }>(`/api/v1/admin/tenants/${tenantId}/lecturers/${l.lecturer_id}/enroll-link`, {})
+      const res = await api.post<{ enroll_url: string }>(`/api/v1/admin/lecturers/${l.lecturer_id}/enroll-link`, {})
       setEnroll({ name: l.full_name, url: res.enroll_url })
     } catch (e) { alert(e instanceof Error ? e.message : 'Could not create enrolment link') }
   }
@@ -97,7 +97,7 @@ export default function AdminLecturers() {
   async function handleCreate() {
     setSaving(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/lecturers`, form)
+      await api.post(`/api/v1/admin/lecturers`, form)
       setCreating(false)
       setForm({ full_name: '', email: '', phone: '', staff_id: '', title: '', gender: '', school_id: '' })
       refetch()
@@ -141,7 +141,7 @@ export default function AdminLecturers() {
     try {
       const fd = new FormData(); fd.append('roster', file)
       const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/lecturers/import`, fd)
+        `/api/v1/admin/lecturers/import`, fd)
       setNotice({ kind: 'ok', text: `Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped${res.errors?.length ? ` · ${res.errors.length} error(s): ${res.errors.slice(0, 3).join('; ')}` : ''}` })
       refetch()
     } catch (e) { setNotice({ kind: 'error', text: e instanceof Error ? `Import failed: ${e.message}` : 'Import failed' }) }
@@ -169,13 +169,13 @@ export default function AdminLecturers() {
       `Delete ${who}?\n\n` +
       `This removes their unit assignments, enrolled fingerprint and passkey, and disables their sign-in. ` +
       `Their timetabled lectures stay on the timetable with no lecturer attached.\n\n` +
-      `Their teaching record is NOT deleted — attendance logs, patrol ticks and presence claims are kept.\n\n` +
+      `Their teaching record is NOT deleted — attendance logs, monitor ticks and presence claims are kept.\n\n` +
       `This cannot be undone.`)) return
     setDeleting(true); setNotice(null)
     try {
       const res = ids.length === 1
-        ? await api.delete<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/${ids[0]}`)
-        : await api.post<DeleteResult>(`/api/v1/admin/tenants/${tenantId}/lecturers/bulk-delete`, { lecturer_ids: ids })
+        ? await api.delete<DeleteResult>(`/api/v1/admin/lecturers/${ids[0]}`)
+        : await api.post<DeleteResult>(`/api/v1/admin/lecturers/bulk-delete`, { lecturer_ids: ids })
       setNotice({ kind: 'ok', text:
         `Deleted ${res.deleted} lecturer(s). ` +
         `${res.assignments_removed} assignment(s) removed, ` +
@@ -215,11 +215,11 @@ export default function AdminLecturers() {
           <button onClick={editPrefix} style={btnSmall} title="Format for auto-generated staff IDs">
             Auto-ID prefix: {prefix || '(set)'}
           </button>
-          <a href={`/admin/tenants/${tenantId}/lecturer-assignments`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>
+          <a href={`/admin/lecturer-assignments`} style={{ ...btnSmall, textDecoration: 'none', display: 'inline-block' }}>
             View Assignments
           </a>
           <button onClick={() => downloadText('lecturers_template.csv', LECT_COLS.join(',') + '\n')} style={btnSmall} title="Download a blank CSV with the lecturer columns">Template</button>
-          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/lecturers/export.xlsx`, 'lecturers.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall} title="Exports every lecturer">Export Excel</button>
+          <button onClick={() => api.download(`/api/v1/admin/lecturers/export.xlsx`, 'lecturers.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall} title="Exports every lecturer">Export Excel</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
           <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnSmall}>{importing ? 'Importing…' : 'Import (CSV/Excel)'}</button>
           <button onClick={() => setCreating(c => !c)} style={btnPrimary}>
@@ -264,7 +264,7 @@ export default function AdminLecturers() {
               and dean reaches them — assign the lecturer a unit under Assignments. */}
           <p style={{ color: 'var(--muted)', fontSize: 12, margin: '14px 0 0', maxWidth: 620 }}>
             No department or school is set here. A lecturer belongs to the <strong>units they
-            teach</strong> — assign them one under <a href={`/admin/tenants/${tenantId}/lecturer-assignments`} style={{ color: 'var(--brand)' }}>Assignments</a>{' '}
+            teach</strong> — assign them one under <a href={`/admin/lecturer-assignments`} style={{ color: 'var(--brand)' }}>Assignments</a>{' '}
             and they appear to that unit's HOD and dean automatically, in every school they teach in.
           </p>
           <button onClick={handleCreate} disabled={saving || !form.full_name} style={{ ...btnPrimary, marginTop: 16, opacity: !form.full_name ? 0.5 : 1 }}>

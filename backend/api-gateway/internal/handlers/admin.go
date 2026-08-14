@@ -7,11 +7,13 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -219,7 +221,7 @@ func CreateTenant(pool *pgxpool.Pool) http.HandlerFunc {
 // PATCH /api/v1/admin/tenants/{tenant_id}/status — activate or suspend a tenant
 func SetTenantStatus(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/status")
+		tenantID := tenantOf(r)
 		var req struct {
 			IsActive bool `json:"is_active"`
 		}
@@ -236,7 +238,7 @@ func SetTenantStatus(pool *pgxpool.Pool) http.HandlerFunc {
 // tenant. All tenant-scoped rows cascade via the tenant_id FKs (ON DELETE CASCADE).
 func DeleteTenant(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "")
+		tenantID := tenantOf(r)
 		if !middleware.ValidTenantID(tenantID) {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_TENANT", "valid tenant_id required"))
 			return
@@ -264,7 +266,7 @@ func DeleteTenant(adminPool *pgxpool.Pool) http.HandlerFunc {
 // GET /api/v1/admin/tenants/{tenant_id}/users
 func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/users")
+		tenantID := tenantOf(r)
 
 		rows, err := pool.Query(r.Context(), `
 			SELECT user_id, email, role,
@@ -319,10 +321,19 @@ func ListTenantUsers(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
+// MANAGED_ROLES are the roles the admin Users page LISTS. Coordinators, lecturers and students
+// have their own directories and are deliberately absent from it — which is why an email held by
+// one of them reads as "already exists, but it isn't there" unless the message says so.
+var MANAGED_ROLES = map[string]bool{
+	"ADMIN": true, "VC": true, "DVC": true, "QA_OFFICER": true, "DQA_DIRECTOR": true,
+	"DEAN": true, "HOD": true, "QA_SCHOOL_HANDLER": true, "QA_DEPT_REP": true,
+	"QA_PATROLLER": true, "TLC": true,
+}
+
 // POST /api/v1/admin/tenants/{tenant_id}/users
 func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := extractPathID(r.URL.Path, "/api/v1/admin/tenants/", "/users")
+		tenantID := tenantOf(r)
 
 		var req struct {
 			Email              string `json:"email"`
@@ -455,7 +466,45 @@ func CreateUser(pool *pgxpool.Pool) http.HandlerFunc {
 			break
 		}
 		if err2 != nil {
-			writeJSON(w, http.StatusConflict, errBody("EMAIL_TAKEN", "email already registered in this tenant"))
+			// "email already registered" used to be the answer to EVERY failure here, and it was
+			// wrong twice over.
+			//
+			// FIRST, it was often not about the email at all — any insert error, whatever its
+			// cause, came back as a duplicate address, sending the administrator to look for an
+			// account that was never the problem.
+			//
+			// SECOND, even when the email WAS taken, the holder is frequently invisible to the
+			// person reading the message: this page lists the oversight roles only, so a
+			// COORDINATOR, LECTURER or STUDENT — including the logins provisioned automatically
+			// for lecturers and students on first sign-in — holds the address while showing
+			// nowhere on screen. "Email already exists, but it isn't there" is exactly what that
+			// looks like, and it is unfalsifiable from the UI.
+			//
+			// So: only a genuine unique violation on (tenant_id, email) is reported as a taken
+			// email, and it says WHO holds it and in WHAT role.
+			var pgErr *pgconn.PgError
+			if errors.As(err2, &pgErr) && pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "email") {
+				var holderName, holderRole string
+				var holderActive bool
+				_ = pool.QueryRow(r.Context(),
+					`SELECT COALESCE(full_name,''), role::text, COALESCE(is_active,true)
+					   FROM users WHERE tenant_id = $1 AND lower(email) = lower($2)`,
+					tenantID, req.Email).Scan(&holderName, &holderRole, &holderActive)
+				msg := req.Email + " is already in use"
+				if holderRole != "" {
+					msg += " by " + orDash(holderName) + " (" + humanRole(holderRole) + ")"
+					if !holderActive {
+						msg += ", whose account is deactivated"
+					}
+					if !MANAGED_ROLES[holderRole] {
+						msg += ". That role is not listed on this page, which is why you cannot see it — " +
+							"look under Coordinators, Lecturers or Students"
+					}
+				}
+				writeJSON(w, http.StatusConflict, errBody("EMAIL_TAKEN", msg+"."))
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err2.Error()))
 			return
 		}
 

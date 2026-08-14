@@ -64,7 +64,7 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 		err = conn.QueryRow(r.Context(), `
 			SELECT se.student_id, se.enrollment_status::text
 			FROM users u
-			JOIN students_extended se ON se.email = u.email AND se.tenant_id = u.tenant_id
+			JOIN students_extended se ON se.email = u.email
 			WHERE u.user_id = $1 AND u.tenant_id = $2`,
 			userID, tenantID).Scan(&studentID, &enrollment)
 		switch {
@@ -88,15 +88,18 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 			windowStart   *time.Time
 			windowEnd     *time.Time
 			coordinatorIP string
+			deliveryMode  string
+			offeringID    string
 		)
 		err = conn.QueryRow(r.Context(), `
 			SELECT s.checkin_secret, s.session_status::text, s.coordinator_id,
 			       s.checkin_window_start, s.checkin_window_end,
-			       COALESCE(s.coordinator_ip,'')
+			       COALESCE(s.coordinator_ip,''), COALESCE(s.delivery_mode,'IN_PERSON'),
+			       COALESCE(s.offering_id::text,'')
 			FROM sessions s
 			WHERE s.session_id = $1`,
 			req.SessionID).Scan(&secret, &status, &coordID, &windowStart, &windowEnd,
-			&coordinatorIP)
+			&coordinatorIP, &deliveryMode, &offeringID)
 		if err != nil || len(secret) == 0 {
 			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "SESSION_NOT_ACTIVE"})
 			return
@@ -111,22 +114,61 @@ func StudentCheckin(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		// Proximity proof #1: the session's STATIC student room code (does not rotate).
-		// The hard proximity proof is the mandatory LAN check below; this just selects
-		// the room. (The lecturer gate keeps the rotating code.)
-		if !checkin.ValidateStatic(secret, req.RoomCode) {
-			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "PROXIMITY_FAILED"})
-			return
-		}
+		// ── The two proximity proofs, or their distance-learning replacement ────
+		//
+		// An ONLINE session (migration 087) is a distance / e-learning class: there is no room,
+		// no coordinator hotspot, and therefore nothing for the LAN gate to compare against. Run
+		// down the physical path it would reject every distance student with NOT_SAME_NETWORK,
+		// which is why those cohorts had no attendance at all.
+		//
+		// The gate is NOT relaxed for anyone else. Only a session that was explicitly opened as
+		// ONLINE — which the lecturer may only do for a cohort the institution has marked as
+		// e-learning — takes the branch below. A campus session is still judged exactly as before.
+		if deliveryMode == "ONLINE" {
+			// The ROTATING code, not the static one. On campus the static code is safe because
+			// the LAN gate is doing the real work; with no LAN a code that never changed would be
+			// forwarded once on WhatsApp and reused by the whole year group for the rest of the
+			// hour. Rotating narrows that to the ~30s the code is live, which is the most this
+			// can honestly claim: no remote system can prove a body is in front of a screen.
+			if !checkin.Validate(secret, strings.TrimSpace(req.RoomCode), now) {
+				writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "CODE_NOT_CURRENT"})
+				return
+			}
+			// Cohort membership, which the physical path does not require and should not: being in
+			// the room is itself the proof, and a student sitting in on another cohort's lecture is
+			// legitimately marked a guest. Online there is no room to have walked into, so the only
+			// thing left standing between a shared code and a stranger's attendance record is
+			// whether this student is actually enrolled in the class.
+			if offeringID != "" {
+				var enrolledHere bool
+				_ = conn.QueryRow(r.Context(), `
+					SELECT EXISTS(SELECT 1 FROM students_extended se
+					    WHERE se.tenant_id = $1 AND se.student_id = $2
+					      AND se.offering_id = $3::uuid)`,
+					tenantID, studentID, offeringID).Scan(&enrolledHere)
+				if !enrolledHere {
+					writeJSON(w, http.StatusForbidden, checkinResponse{Status: "REJECTED", Reason: "NOT_IN_THIS_COHORT"})
+					return
+				}
+			}
+		} else {
+			// Proximity proof #1: the session's STATIC student room code (does not rotate).
+			// The hard proximity proof is the mandatory LAN check below; this just selects
+			// the room. (The lecturer gate keeps the rotating code.)
+			if !checkin.ValidateStatic(secret, req.RoomCode) {
+				writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "PROXIMITY_FAILED"})
+				return
+			}
 
-		// Proximity proof #2: network proximity (MANDATORY) — the student MUST be on
-		// the room's Wi-Fi (the coordinator's hotspot / same LAN). Connection to the
-		// coordinator's LAN is the proximity model, so this is required: no coordinator
-		// IP anchor (captured when they opened the session on the hotspot) means
-		// presence cannot be proven → reject. Blocks a remote proxy texted the live code.
-		if coordinatorIP == "" || !onSameLAN(middleware.ClientIP(r), coordinatorIP) {
-			writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "NOT_SAME_NETWORK"})
-			return
+			// Proximity proof #2: network proximity (MANDATORY) — the student MUST be on
+			// the room's Wi-Fi (the coordinator's hotspot / same LAN). Connection to the
+			// coordinator's LAN is the proximity model, so this is required: no coordinator
+			// IP anchor (captured when they opened the session on the hotspot) means
+			// presence cannot be proven → reject. Blocks a remote proxy texted the live code.
+			if coordinatorIP == "" || !onSameLAN(middleware.ClientIP(r), coordinatorIP) {
+				writeJSON(w, http.StatusUnprocessableEntity, checkinResponse{Status: "REJECTED", Reason: "NOT_SAME_NETWORK"})
+				return
+			}
 		}
 
 		// Lecturer-started gate: attendance is valid only once the lecturer has scanned

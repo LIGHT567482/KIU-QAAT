@@ -22,10 +22,10 @@ import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
- * "I was here." The lecturer's own record of a moment the QA patrol also records.
+ * "I was here." The lecturer's own record of a moment the QA monitor also records.
  *
- * A patrol tick is one person's account, timestamped and filed against a named lecturer, and until
- * now it was the only account there was. A lecturer teaching in a room the patroller never reached
+ * A monitor tick is one person's account, timestamped and filed against a named lecturer, and until
+ * now it was the only account there was. A lecturer teaching in a room the monitor never reached
  * could answer only with their word, days later, against a record made at the time. This is a
  * record made at the time by the other party.
  *
@@ -37,7 +37,7 @@ import kotlin.coroutines.resume
  *
  * WHAT IT IS AND IS NOT. A phone reports the coordinates it is handed, and someone determined can
  * hand it false ones. This is evidence, not proof, and nothing in the system treats it as proof:
- * it does not overturn a patrol tick, mark attendance, or feed a report. Its worth is that it is
+ * it does not overturn a monitor tick, mark attendance, or feed a report. Its worth is that it is
  * CONTEMPORANEOUS and SPECIFIC — a claim filed at 14:07 at a fixed point, matched to the 14:00
  * slot, is a different object from a recollection offered a week later.
  */
@@ -92,7 +92,7 @@ object PresenceCapture {
      * itself worth recording: it may be the lecturer who is wrong about the day.
      *
      * Slots with dayOfWeek 0 (unscheduled, or a slot the timetable never got a day for) are
-     * included for the same reason the patrol round includes them: absence of a day is not
+     * included for the same reason the monitor round includes them: absence of a day is not
      * evidence of the wrong day, and dropping them would hide a real lecture.
      */
     fun match(slots: List<TimetableSlotEntity>, at: LocalDateTime): SlotMatch {

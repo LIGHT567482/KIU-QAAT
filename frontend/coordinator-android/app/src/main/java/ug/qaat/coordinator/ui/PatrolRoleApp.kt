@@ -34,9 +34,9 @@ import java.time.LocalTime
 import java.util.UUID
 
 /**
- * The QA PATROLLER experience, inside the one KIU QAAT app.
+ * The QA MONITOR experience, inside the one KIU QAAT app.
  *
- * This used to be a second APK (`ug.qaat.patroller`) that patrollers had to be sent separately,
+ * This used to be a second APK (`ug.qaat.monitor`) that monitors had to be sent separately,
  * with its own login, its own copy of the networking, and its own unencrypted database. It is now
  * a role branch like the student's and the lecturer's: same install, same sign-in, same proven
  * TLS stack — so it runs wherever the main app runs, which is every phone it has been put on.
@@ -45,13 +45,13 @@ import java.util.UUID
  *
  *  1. **Role routing** — [RootApp] sends `QA_PATROLLER` here and nowhere else. There is no path
  *     from this screen into the coordinator hub, the lecturer roster, or a student's record.
- *  2. **Handset binding** — the round is gated on [DeviceGate]. The gateway ties the patroller's
- *     account to the first phone that claims it and refuses patrol calls from any other, so a
+ *  2. **Handset binding** — the round is gated on [DeviceGate]. The gateway ties the monitor's
+ *     account to the first phone that claims it and refuses monitor calls from any other, so a
  *     token lifted off this device buys an attacker nothing.
  *  3. **A PIN** — [PatrolPinGate], the second page after sign-in. The binding proves WHICH phone;
  *     the PIN proves WHO is holding it, which is the half a shared password defeats.
  *  4. **No silent re-login** — [PatrolRoleApp] drops the saved credentials the moment it opens.
- *     Every other role may resume without retyping a password; a patroller may not.
+ *     Every other role may resume without retyping a password; a monitor may not.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,14 +65,14 @@ fun PatrolRoleApp() {
     var showChangePw by remember { mutableStateOf(false) }
     if (showChangePw) ChangePasswordDialog(onClose = { showChangePw = false })
 
-    // A patroller's session is never resumable without a password. The credentials the shared
+    // A monitor's session is never resumable without a password. The credentials the shared
     // login screen saved for silent re-login are erased as soon as we know the role is this one,
-    // so a phone that is picked up, lost or handed on cannot walk back into a patrol round.
+    // so a phone that is picked up, lost or handed on cannot walk back into a monitor round.
     LaunchedEffect(Unit) { SessionStore.clearAppCredentials() }
 
     LaunchedEffect(tab, reloadKey) { runCatching { unread = NotificationClient().unread() } }
 
-    // Device first, then person. Checking the handset before asking for the PIN means a patroller
+    // Device first, then person. Checking the handset before asking for the PIN means a monitor
     // on the wrong phone is told so immediately, rather than typing a PIN that was never going to
     // be accepted.
     DeviceGate {
@@ -109,7 +109,7 @@ fun PatrolRoleApp() {
                         unselectedIconColor = onNav.copy(alpha = .65f), unselectedTextColor = onNav.copy(alpha = .65f),
                         indicatorColor = onNav.copy(alpha = .18f),
                     ) else NavigationBarItemDefaults.colors()
-                    NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Patrol, "Patrol") }, label = { Text("Patrol") }, colors = itemColors)
+                    NavigationBarItem(tab == 0, { tab = 0 }, icon = { TabGlyph(NavIcons.Monitor, "Monitor") }, label = { Text("Monitor") }, colors = itemColors)
                     NavigationBarItem(tab == 1, { tab = 1 }, colors = itemColors, label = { Text("Alerts") },
                         icon = { if (unread > 0) BadgedBox(badge = { Badge { Text("$unread") } }) { TabGlyph(NavIcons.Alerts, "Alerts") } else TabGlyph(NavIcons.Alerts, "Alerts") })
                     NavigationBarItem(tab == 2, { tab = 2 }, icon = { TabGlyph(NavIcons.Profile, "Profile") }, label = { Text("Profile") }, colors = itemColors)
@@ -138,10 +138,10 @@ private sealed interface GateState {
 }
 
 /**
- * Claims this handset for the signed-in patroller before any patrol screen is shown, and blocks
+ * Claims this handset for the signed-in monitor before any monitor screen is shown, and blocks
  * the round outright if the server says this is not their phone.
  *
- * Offline is deliberately NOT a refusal: a patroller walking a corridor with no signal must still
+ * Offline is deliberately NOT a refusal: a monitor walking a corridor with no signal must still
  * be able to tick a room. The binding was proved when they signed in, and nothing they record
  * offline reaches the server until a sync — which is itself bound-checked. So a failure to reach
  * the gateway falls through to the round with a warning, while an actual 403 locks it.
@@ -196,12 +196,12 @@ private fun PatrolLockedScreen(message: String) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("🔒", fontSize = 40.sp)
             Spacer(Modifier.height(12.dp))
-            Text("Patrol is locked on this phone", style = MaterialTheme.typography.titleMedium,
+            Text("Monitoring is locked on this phone", style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
             Text(message, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            Text("A patrol account works on one registered handset. If you have changed phones, ask an administrator to release your device binding.",
+            Text("A monitor account works on one registered handset. If you have changed phones, ask an administrator to release your device binding.",
                 textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
@@ -239,9 +239,9 @@ private fun PatrolRoundTab(reloadKey: Int) {
     // SEARCH FIRST. The round used to open on every timetabled session in the institution,
     // each with a pair of tick buttons — a screen that invites ticking without visiting,
     // since the lecturer, room and time are all on it and nothing distinguishes a slot the
-    // patroller stood in front of from one they scrolled past. A patrol record is weighed
+    // monitor stood in front of from one they scrolled past. A monitor record is weighed
     // against the coordinator's own precisely because it comes from someone who was there,
-    // so the patroller now looks a lecturer or unit up before anything appears.
+    // so the monitor now looks a lecturer or unit up before anything appears.
     var mode by remember { mutableStateOf("lecturer") }   // "lecturer" | "unit"
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<PatrolSlotEntity>?>(null) }   // null = nothing searched yet
@@ -279,12 +279,12 @@ private fun PatrolRoundTab(reloadKey: Int) {
 
         results = if (online != null) online else {
             // Offline: search the cached day. Same matching rule as the server — prefix,
-            // case-insensitive, staff id or name — so the patroller does not get a
+            // case-insensitive, staff id or name — so the monitor does not get a
             // different answer depending on whether the signal happened to be up.
             note = "Offline — searching today's cached timetable."
             val needle = q.lowercase()
             // TODAY's slots out of the cached week. The cache used to hold whichever single day
-            // the phone last had signal on, so a patroller who refreshed on Monday walked
+            // the phone last had signal on, so a monitor who refreshed on Monday walked
             // Tuesday's round against Monday's timetable — wrong lecturers, wrong rooms, and
             // nothing on screen to say so. The whole week is cached now and narrowed here.
             val dow = LocalDate.now().dayOfWeek.value
@@ -323,7 +323,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
 
     // Keyed by COHORT as well as unit and time, matching the server's ux_patrol_logs_slot. Two
     // intakes can run the same unit at the same hour in different rooms; without the offering,
-    // ticking one of them showed the OTHER as "already marked TAUGHT" — so the patroller would
+    // ticking one of them showed the OTHER as "already marked TAUGHT" — so the monitor would
     // walk past a lecture believing it had been recorded, and the one that was never visited
     // carried a verdict nobody had witnessed.
     fun slotKey(unitId: String, time: String, offeringId: String) = "$unitId@$time#$offeringId"
@@ -349,7 +349,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Patrol — ${AppState.coordinatorName.orEmpty().ifBlank { "QA" }}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Monitor — ${AppState.coordinatorName.orEmpty().ifBlank { "QA" }}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text(
             "Staff ID: ${AppState.staffId.orEmpty().ifBlank { "—" }}" +
                 if (pending > 0) "  ·  $pending pending sync" else "  ·  all synced",
@@ -359,15 +359,13 @@ private fun PatrolRoundTab(reloadKey: Int) {
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 6.dp))
 
-        // Which way to search. Both find the same lectures; the patroller uses whichever
+        // Which way to search. Both find the same lectures; the monitor uses whichever
         // identifier the door or the badge in front of them happens to carry.
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = mode == "lecturer", onClick = { mode = "lecturer"; results = null },
                 label = { Text("By lecturer ID") })
             FilterChip(selected = mode == "unit", onClick = { mode = "unit"; results = null },
                 label = { Text("By unit code") })
-            Spacer(Modifier.weight(1f))
-            AssistChip(onClick = { manualOpen = true }, label = { Text("Not timetabled?") })
         }
         OutlinedTextField(
             value = query,
@@ -398,7 +396,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
         // Read the hits into a local before branching. The LazyColumn's content lambda runs
         // later, outside this composition, and by then the state can have been cleared back
         // to null — a filter chip or an emptied query does exactly that — so a `results!!`
-        // inside the lambda is a crash waiting for the patroller's next tap.
+        // inside the lambda is a crash waiting for the monitor's next tap.
         val hits = results
         when {
             searching -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) { CircularProgressIndicator() }
@@ -406,9 +404,24 @@ private fun PatrolRoundTab(reloadKey: Int) {
             hits == null -> Text(
                 "No lecturer is shown until you search. Enter the staff ID or the unit code for the room you are at.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
-            hits.isEmpty() -> Text(
-                "Nothing timetabled today matches “${query.trim()}”. Check the ID, or try searching the other way.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 20.dp))
+            hits.isEmpty() -> Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Nothing timetabled today matches “${query.trim()}”. Check the ID, or try searching the other way.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // THE FALLBACK, and only here. A lecture that is genuinely happening in front of
+                // you but is not on the timetable has nothing to tick — that is what this is for,
+                // and it appears at the one moment that is demonstrably true. The server refuses a
+                // manual entry for a lecture that IS on the round, so this cannot be used to skip
+                // the search even if someone finds their way to it.
+                Text(
+                    "If the lecture is happening anyway and simply is not on the timetable, record " +
+                        "it by hand — it will be filed as a manual entry, not as a timetabled one.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = { manualOpen = true }) {
+                    Text("Record this lecture manually")
+                }
+            }
             else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(hits) { s ->
                     PatrolResultCard(s, done[slotKey(s.unitId, s.startTime, s.offeringId)]) { chosen = s }
@@ -418,7 +431,7 @@ private fun PatrolRoundTab(reloadKey: Int) {
     }
 }
 
-/** What the patroller found, when it was not where the timetable said. */
+/** What the monitor found, when it was not where the timetable said. */
 /** What the monitor recorded about a lecture making good an earlier one. */
 private data class Compensation(val forDate: String)
 
@@ -457,6 +470,14 @@ private fun PatrolResultCard(
                 Text(s.cohort, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // The other unit codes in this same hour and room. Shown BEFORE the tick, because a
+            // monitor who does not know the hour also covers two other codes will tick one of them
+            // and leave the rest of the class with no record at all.
+            if (s.alsoHere.isNotBlank()) {
+                Text("Also in this room now: ${s.alsoHere}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary)
+            }
             if (recorded != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -474,7 +495,7 @@ private fun PatrolResultCard(
  * The verdict screen: is this lecturer teaching, yes or no.
  *
  * The "found somewhere else" section is collapsed by default because the lecture being where
- * the timetable said is the ordinary case. When it is not, the patroller is the only person
+ * the timetable said is the ordinary case. When it is not, the monitor is the only person
  * who knows — so recording the real room, time or date here is what turns a moved lecture
  * from a false "not taught" into a fact somebody can act on.
  */
@@ -524,6 +545,28 @@ private fun PatrolConfirmSheet(
             if (slot.cohort.isNotBlank()) {
                 Text(slot.cohort, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (slot.alsoHere.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("This hour also covers", fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        slot.alsoHere.split(" | ").forEach {
+                            Text("• $it", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                        // Said plainly, because the consequence is not obvious from the screen: one
+                        // tick records one unit, and the students on the other codes are only
+                        // covered if those are ticked too.
+                        Text("Your verdict records THIS unit. Tick the others as well so their "
+                            + "students are not left without a record.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
             }
 
             Spacer(Modifier.height(14.dp))
@@ -592,7 +635,7 @@ private fun PatrolConfirmSheet(
 
 // ── Alerts + profile ────────────────────────────────────────────────────────────
 
-/** Inbox only. A patroller reports by ticking a round, not by messaging staff directly, so there
+/** Inbox only. A monitor reports by ticking a round, not by messaging staff directly, so there
  *  is deliberately no composer here — nothing they send could be attributed or acted on. */
 @Composable
 private fun PatrolAlertsTab() {
@@ -615,27 +658,27 @@ private fun PatrolProfileTab(ctx: android.content.Context, onChangePw: () -> Uni
         Spacer(Modifier.height(12.dp))
         AppState.coordinatorName?.takeIf { it.isNotBlank() }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
         AppState.staffId?.let { Text("Staff ID: $it", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Text("QA Patroller", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("QA Monitor", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
         Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
-            Text("This phone is registered to your patrol account. Rounds recorded on any other handset are rejected.",
+            Text("This phone is registered to your monitor account. Rounds recorded on any other handset are rejected.",
                 Modifier.padding(10.dp), style = MaterialTheme.typography.labelSmall)
         }
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = onChangePw, Modifier.fillMaxWidth()) { Text("🔑  Change password") }
         Spacer(Modifier.height(8.dp))
-        // The PIN is changed from inside the round, where the patroller has already proved they
+        // The PIN is changed from inside the round, where the monitor has already proved they
         // know the current one — so a handset left unlocked cannot be used to replace it.
         var changePin by remember { mutableStateOf(false) }
-        OutlinedButton(onClick = { changePin = true }, Modifier.fillMaxWidth()) { Text("🛡  Change patrol PIN") }
+        OutlinedButton(onClick = { changePin = true }, Modifier.fillMaxWidth()) { Text("🛡  Change monitor PIN") }
         if (changePin) ChangePatrolPinDialog { changePin = false }
         Spacer(Modifier.height(8.dp))
         SignOutButton()
     }
 }
 
-// patrolSignOut used to live here, wiping the patrol round before delegating to the old signOut().
-// Erasing the round is right — a patrol log names lecturers and must not outlive the session that
+// patrolSignOut used to live here, wiping the monitor round before delegating to the old signOut().
+// Erasing the round is right — a monitor log names lecturers and must not outlive the session that
 // produced it on a shared or surrendered handset — but it was the ONLY role that cleaned up after
 // itself. That wipe is now part of the shared teardown (AppDao.clearAllForSignOut), so every role
 // gets it, and this role also gets the unsynced-attendance warning it never had.

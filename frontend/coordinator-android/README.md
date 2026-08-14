@@ -4,8 +4,7 @@ Replaces the coordinator PWA. The phone is the in-room hub: an embedded **Ktor**
 in a **foreground service** serves the student `/attend` and lecturer `/gate` pages over its own
 Wi-Fi hotspot, validates locally, stores attendance, and syncs sealed sessions to the cloud when
 online. It **inherits all super-admin/tenant-admin config** via the existing daily manifest
-(`GET /api/v1/manifest/daily`). Spec: `coordinator's app.md`. Plan + decisions:
-`~/.claude/plans/goofy-meandering-peacock.md`.
+(`GET /api/v1/manifest/daily`). Spec: `coordinator's app.md`.
 
 > Students keep **no app** — they scan their QR (camera app opens the URL → room-code form) for
 > check-in, and use the separate reg-no **progress portal** to view attendance. The dashboards are

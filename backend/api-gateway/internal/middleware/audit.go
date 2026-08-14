@@ -52,7 +52,6 @@ func AuditLog(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 
-			tenantID := GetTenantID(r.Context())
 			actorID := GetUserID(r.Context())
 			action := r.Method + " " + r.URL.Path
 
@@ -75,9 +74,9 @@ func AuditLog(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			go func() {
 				pool.Exec(r.Context(), `
 					INSERT INTO admin_audit_log
-					  (tenant_id, actor_id, actor_role, action, payload, ip_address, occurred_at)
-					VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-					tenantID, actorID, role, action,
+					  (actor_id, actor_role, action, payload, ip_address, occurred_at)
+					VALUES ($1,$2,$3,$4,$5,$6)`,
+					actorID, role, action,
 					payloadJSON, ip, time.Now().UTC(),
 				) //nolint:errcheck
 			}()

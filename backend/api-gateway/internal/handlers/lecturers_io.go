@@ -34,7 +34,7 @@ import (
 // POST /api/v1/admin/tenants/{tenant_id}/lecturers/import  (multipart field "roster")
 func ImportLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return
@@ -174,7 +174,7 @@ func processLecturerCSV(ctx context.Context, pool *pgxpool.Pool, tenantID string
 // because assignment is what places a lecturer under a department.
 func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		args := []interface{}{tenantID}
 		having := ""
 		if dept := strings.TrimSpace(r.URL.Query().Get("department")); dept != "" {
@@ -188,10 +188,10 @@ func ExportLecturersXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(l.title,''), COALESCE(l.gender,''),
 			       COALESCE(NULLIF(hs.abbreviation,''), hs.name, '')
 			FROM lecturers l
-			LEFT JOIN schools hs ON hs.school_id = l.school_id AND hs.tenant_id = l.tenant_id
-			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
-			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN schools hs ON hs.school_id = l.school_id
+			LEFT JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id
+			LEFT JOIN course_units cu ON cu.unit_id = la.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE l.tenant_id = $1
 			GROUP BY l.lecturer_id, l.staff_id, l.full_name, l.email, l.phone, l.title, l.gender,
 			         hs.abbreviation, hs.name`+having+`
@@ -310,7 +310,7 @@ func deleteLecturers(ctx context.Context, pool *pgxpool.Pool, tenantID string, i
 // DELETE /api/v1/admin/tenants/{tenant_id}/lecturers/{lecturer_id}
 func DeleteLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		id := strings.TrimSpace(chi.URLParam(r, "lecturer_id"))
 		if id == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "lecturer_id is required"))
@@ -340,7 +340,7 @@ func DeleteLecturer(adminPool *pgxpool.Pool) http.HandlerFunc {
 // empty list deletes nothing while reporting success — the worst possible failure for this button.
 func BulkDeleteLecturers(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var req struct {
 			LecturerIDs []string `json:"lecturer_ids"`
 		}

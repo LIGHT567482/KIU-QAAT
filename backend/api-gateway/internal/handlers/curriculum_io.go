@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -91,7 +90,7 @@ func writeXLSX(w http.ResponseWriter, name string, out [][]string) {
 
 func ImportCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		file, ok := uploadFile(w, r)
 		if !ok {
 			return
@@ -147,7 +146,7 @@ func ImportCourses(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func ExportCoursesXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT course_id, name,
 			       COALESCE(department,''), COALESCE(school,'')
@@ -171,7 +170,7 @@ func ExportCoursesXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func ImportCourseUnits(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		file, ok := uploadFile(w, r)
 		if !ok {
 			return
@@ -285,7 +284,7 @@ func ImportCourseUnits(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func ExportCourseUnitsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT unit_id, course_id, name, COALESCE(year,1), COALESCE(semester,1), COALESCE(level,'')
 			FROM course_units WHERE tenant_id = $1 ORDER BY course_id, year, semester, name`, tenantID)
@@ -309,7 +308,7 @@ func ExportCourseUnitsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 func ImportLecturerAssignmentsFile(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		file, ok := uploadFile(w, r)
 		if !ok {
 			return
@@ -415,7 +414,7 @@ func resolveOrCreateLecturer(ctx context.Context, pool *pgxpool.Pool, tenantID, 
 
 func ExportLecturerAssignmentsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT la.unit_id, COALESCE(l.staff_id,''), COALESCE(l.full_name,''),
 			       COALESCE(la.academic_year,''), COALESCE(la.intake_session,''),

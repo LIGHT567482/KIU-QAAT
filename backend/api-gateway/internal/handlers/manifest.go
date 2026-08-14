@@ -15,11 +15,14 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/qaat/api-gateway/internal/checkin"
 	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
 )
@@ -65,6 +68,111 @@ type manifestSlot struct {
 	Room            string `json:"room"`
 	LecturerName    string `json:"lecturer_name"`
 	LecturerPhone   string `json:"lecturer_phone"`
+	// WHO IS TEACHING, AND WHICH COMBINED LECTURE THIS IS.
+	//
+	// A lecture taught to several cohorts at once has one lecturer and several coordinators, each
+	// on their own hotspot. The lecturer gates in on ONE of them and reads out three digits; the
+	// others type it in. Every phone derives those digits itself from (lecturer, class, today) —
+	// see CombinedClassCode — so nothing has to be fetched or exchanged in a hall with no signal.
+	//
+	// Both fields are here because a phone cannot derive the code without them. The key is NOT
+	// stored anywhere: it is computed from the room, weekday and start time this slot already
+	// carries, which is precisely the institution's own definition of a combined class — units
+	// taught by one lecturer at one time in one room. Computing it server-side rather than leaving
+	// each phone to build the string means a change to the rule ships in one place, and two phones
+	// can never disagree about what to hash because one of them normalised a room name differently.
+	LecturerID       string `json:"lecturer_id"`
+	CombinedClassKey string `json:"combined_class_key"`
+}
+
+// manifestCachePrefix carries the SHAPE of the manifest body, not the day.
+//
+// Manifests are cached until midnight, so a deploy that changes what a field MEANS leaves every
+// coordinator who already fetched today reading the old meaning until tomorrow. That is how this
+// version came to exist: combined_class_key used to be set on every roomed lecture and now marks
+// only a genuinely shared one, and a stale cached body would keep putting a code-entry field in
+// front of coordinators who have no use for it, for the rest of the day, on the phones of exactly
+// the people the change was for.
+//
+// Bump the token whenever the meaning of the body changes. Every place that builds or sweeps a
+// manifest key uses this constant, so the writer and the invalidators cannot drift apart — if they
+// did, an edited timetable would stop reaching the phones and nothing would say so.
+const manifestCachePrefix = "manifest:v2:"
+
+// manifestSlotsQuery is the weekly grid for one offering, with the one extra question the
+// combined-class code depends on: IS THIS LECTURE ACTUALLY SHARED?
+//
+// A combined class is the exception, not the rule. Most lectures are one cohort in one room, and
+// their coordinator must never be shown a code-entry field they have no use for — so the last
+// selected column asks whether some OTHER slot has the same lecturer in the same room at the same
+// hour, and only a slot that answers yes is given a combined-class key.
+//
+// The search spans every offering in the tenant, not just this coordinator's: the other cohorts of
+// a combined lecture are by definition other offerings, which is the whole point. RLS keeps it
+// inside the institution.
+//
+// Same lecturer is REQUIRED rather than inferred from migration 099. 099 makes a different-lecturer
+// overlap impossible, so it might look redundant — but 099 still permits two slots that name NOBODY
+// to share a room, and those are unassigned bookings rather than one lecture. Requiring equality
+// excludes them for free, because NULL is never equal to NULL, and a slot with no lecturer could not
+// derive a code anyway.
+//
+// Held as a named constant rather than inlined so the test can run the query the manifest actually
+// ships — see manifest_combined_test.go.
+const manifestSlotsQuery = `
+	SELECT s.unit_id, COALESCE(cu.name, s.unit_id), s.day_of_week,
+	       to_char(s.start_time,'HH24:MI'), COALESCE(s.duration_minutes, 0),
+	       COALESCE(NULLIF(s.room,''), s.venue_id, ''),
+	       COALESCE(NULLIF(l.full_name,''), la_l.full_name, ''),
+	       COALESCE(NULLIF(l.phone,''),     la_l.phone,     ''),
+	       COALESCE(s.lecturer_id::text, ''),
+	       EXISTS (
+	           SELECT 1 FROM timetable_slots o
+	           WHERE o.tenant_id   = s.tenant_id
+	             AND o.day_of_week = s.day_of_week
+	             AND o.start_time  = s.start_time
+	             AND o.lecturer_id = s.lecturer_id
+	             AND o.slot_id    <> s.slot_id
+	             AND btrim(lower(COALESCE(NULLIF(o.room,''), o.venue_id, ''))) =
+	                 btrim(lower(COALESCE(NULLIF(s.room,''), s.venue_id, '')))
+	       )
+	FROM timetable_slots s
+	LEFT JOIN course_units cu ON cu.unit_id = s.unit_id
+	LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id
+	LEFT JOIN LATERAL (
+	    SELECT l2.full_name, l2.phone FROM lecturer_assignments la
+	    JOIN lecturers l2 ON l2.lecturer_id = la.lecturer_id AND l2.tenant_id = la.tenant_id
+	    WHERE la.unit_id = s.unit_id
+	    ORDER BY la.academic_year DESC LIMIT 1
+	) la_l ON true
+	WHERE s.offering_id = $1::uuid AND s.tenant_id = $2
+	ORDER BY s.day_of_week, s.start_time`
+
+// scanManifestSlots reads the rows of [manifestSlotsQuery] and decides which of them carry a
+// combined-class key. Split out from buildManifest so the rule is testable on its own: the phone
+// reads "this slot has a key" as "this lecture is shared" and puts its code field on screen on
+// exactly that basis, so getting this wrong is visible to every coordinator all day.
+func scanManifestSlots(rows pgx.Rows) []manifestSlot {
+	slots := make([]manifestSlot, 0)
+	for rows.Next() {
+		var s manifestSlot
+		var combined bool
+		if rows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime,
+			&s.DurationMinutes, &s.Room, &s.LecturerName, &s.LecturerPhone,
+			&s.LecturerID, &combined) != nil {
+			continue
+		}
+		// The key is derived from the same three fields every cohort's slot carries, so all of them
+		// land on one string. An unroomed slot cannot be a combined class — there is no room to
+		// share — so it gets no key rather than a misleading one, and neither does a lecture that
+		// nobody else is sitting in. The phone cannot make that second judgement itself: its
+		// manifest holds only its own offering's slots and it never sees the cohort next door.
+		if combined && strings.TrimSpace(s.Room) != "" {
+			s.CombinedClassKey = checkin.CombinedClassKey(s.Room, s.DayOfWeek, s.StartTime)
+		}
+		slots = append(slots, s)
+	}
+	return slots
 }
 
 type rosterEntry struct {
@@ -107,7 +215,7 @@ func ManifestDaily(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		tenantID := middleware.GetTenantID(r.Context())
 		userID := middleware.GetUserID(r.Context())
 		today := clock.Today()
-		cacheKey := fmt.Sprintf("manifest:%s:%s:%s", tenantID, userID, today)
+		cacheKey := fmt.Sprintf("%s%s:%s:%s", manifestCachePrefix, tenantID, userID, today)
 
 		source := "fresh"
 		var manifest *dailyManifest
@@ -183,7 +291,7 @@ func bustTenantManifests(ctx context.Context, rdb *redis.Client, tenantID string
 	if rdb == nil || tenantID == "" {
 		return
 	}
-	keys, err := rdb.Keys(ctx, fmt.Sprintf("manifest:%s:*", tenantID)).Result()
+	keys, err := rdb.Keys(ctx, fmt.Sprintf("%s%s:*", manifestCachePrefix, tenantID)).Result()
 	if err == nil && len(keys) > 0 {
 		rdb.Del(ctx, keys...) //nolint:errcheck
 	}
@@ -193,7 +301,7 @@ func bustCoordinatorManifest(ctx context.Context, rdb *redis.Client, tenantID, c
 	if rdb == nil || coordinatorID == "" {
 		return
 	}
-	keys, err := rdb.Keys(ctx, fmt.Sprintf("manifest:%s:%s:*", tenantID, coordinatorID)).Result()
+	keys, err := rdb.Keys(ctx, fmt.Sprintf("%s%s:%s:*", manifestCachePrefix, tenantID, coordinatorID)).Result()
 	if err == nil && len(keys) > 0 {
 		rdb.Del(ctx, keys...) //nolint:errcheck
 	}
@@ -278,18 +386,18 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		       COALESCE(ts.duration_minutes, ous.session_duration_minutes, 0),
 		       COALESCE(lec.staff_id, ''), COALESCE(lec.full_name, ''), COALESCE(lec.phone, '')
 		FROM course_offerings o
-		JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+		JOIN course_units cu ON cu.course_id = o.course_id
 		-- One row per unit: a unit timetabled twice a week would otherwise duplicate the
 		-- whole manifest entry. The earliest slot in the week is the representative one.
 		LEFT JOIN LATERAL (
 		    SELECT t.day_of_week, t.start_time, t.duration_minutes, t.room, t.venue_id, t.lecturer_id
 		    FROM timetable_slots t
-		    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id AND t.tenant_id = o.tenant_id
+		    WHERE t.unit_id = cu.unit_id AND t.offering_id = o.offering_id
 		    ORDER BY t.day_of_week, t.start_time
 		    LIMIT 1
 		) ts ON true
 		LEFT JOIN offering_unit_schedules ous
-		       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id AND ous.tenant_id = o.tenant_id
+		       ON ous.offering_id = o.offering_id AND ous.unit_id = cu.unit_id
 		-- The lecturer for this unit: the slot's own, else the unit's assignment. Slot
 		-- first, so a one-off cover lecturer set on the timetable is respected.
 		LEFT JOIN LATERAL (
@@ -297,12 +405,12 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 		           COALESCE(sl.full_name, al.full_name) AS full_name,
 		           COALESCE(sl.phone, al.phone)         AS phone
 		    FROM (SELECT 1) _
-		    LEFT JOIN lecturers sl ON sl.lecturer_id = ts.lecturer_id AND sl.tenant_id = o.tenant_id
+		    LEFT JOIN lecturers sl ON sl.lecturer_id = ts.lecturer_id
 		    LEFT JOIN LATERAL (
 		        SELECT l.staff_id, l.full_name, l.phone
 		        FROM lecturer_assignments la
-		        JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-		        WHERE la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
+		        JOIN lecturers l ON l.lecturer_id = la.lecturer_id
+		        WHERE la.unit_id = cu.unit_id
 		        ORDER BY la.academic_year DESC
 		        LIMIT 1
 		    ) al ON true
@@ -369,31 +477,9 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 	// coordinator their roster.
 	slots := make([]manifestSlot, 0)
 	if offeringID != "" {
-		sRows, sErr := conn.Query(ctx, `
-			SELECT s.unit_id, COALESCE(cu.name, s.unit_id), s.day_of_week,
-			       to_char(s.start_time,'HH24:MI'), COALESCE(s.duration_minutes, 0),
-			       COALESCE(NULLIF(s.room,''), s.venue_id, ''),
-			       COALESCE(NULLIF(l.full_name,''), la_l.full_name, ''),
-			       COALESCE(NULLIF(l.phone,''),     la_l.phone,     '')
-			FROM timetable_slots s
-			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id AND cu.tenant_id = s.tenant_id
-			LEFT JOIN lecturers   l  ON l.lecturer_id = s.lecturer_id AND l.tenant_id = s.tenant_id
-			LEFT JOIN LATERAL (
-			    SELECT l2.full_name, l2.phone FROM lecturer_assignments la
-			    JOIN lecturers l2 ON l2.lecturer_id = la.lecturer_id AND l2.tenant_id = la.tenant_id
-			    WHERE la.unit_id = s.unit_id AND la.tenant_id = s.tenant_id
-			    ORDER BY la.academic_year DESC LIMIT 1
-			) la_l ON true
-			WHERE s.offering_id = $1::uuid AND s.tenant_id = $2
-			ORDER BY s.day_of_week, s.start_time`, offeringID, tenantID)
+		sRows, sErr := conn.Query(ctx, manifestSlotsQuery, offeringID, tenantID)
 		if sErr == nil {
-			for sRows.Next() {
-				var s manifestSlot
-				if sRows.Scan(&s.UnitID, &s.UnitName, &s.DayOfWeek, &s.StartTime,
-					&s.DurationMinutes, &s.Room, &s.LecturerName, &s.LecturerPhone) == nil {
-					slots = append(slots, s)
-				}
-			}
+			slots = scanManifestSlots(sRows)
 			sRows.Close()
 		}
 	}
@@ -407,7 +493,7 @@ func buildManifest(ctx context.Context, pool *pgxpool.Pool, tenantID, coordinato
 			SELECT s.student_id, COALESCE(s.full_name,'')
 			FROM students_extended s
 			JOIN course_offerings o ON o.offering_id = s.offering_id
-			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
+			JOIN course_units cu ON cu.course_id = o.course_id
 			WHERE cu.unit_id = $1 AND o.offering_id = $2 AND s.tenant_id = $3
 			  AND s.enrollment_status = 'ACTIVE'`,
 			uid, offeringID, tenantID)
@@ -476,15 +562,14 @@ func lectureShareCode(ctx context.Context, conn *pgxpool.Conn, tenantID, staffID
 	if err := conn.QueryRow(ctx, `
 		SELECT COUNT(DISTINCT ts.offering_id)
 		FROM timetable_slots ts
-		JOIN lecturers l ON l.tenant_id = ts.tenant_id AND l.staff_id = $2
+		JOIN lecturers l ON l.staff_id = $2
 		WHERE ts.tenant_id = $1
 		  AND ts.day_of_week = $3
 		  AND to_char(ts.start_time, 'HH24:MI') = $4
 		  AND ( ts.lecturer_id = l.lecturer_id
 		     OR ( ts.lecturer_id IS NULL AND EXISTS (
 		            SELECT 1 FROM lecturer_assignments la
-		            WHERE la.tenant_id = ts.tenant_id
-		              AND la.unit_id = ts.unit_id
+		            WHERE la.unit_id = ts.unit_id
 		              AND la.lecturer_id = l.lecturer_id) ) )`,
 		tenantID, staffID, dayOfWeek, startTime).Scan(&offerings); err != nil {
 		return ""
@@ -503,21 +588,21 @@ func getOrCreateDailyCode(ctx context.Context, conn *pgxpool.Conn, tenantID, sub
 	var code string
 	_ = conn.QueryRow(ctx, `
 		SELECT code FROM lecturer_daily_codes
-		WHERE tenant_id = $1 AND lecturer_id = $2 AND valid_date = CURRENT_DATE`,
-		tenantID, subject).Scan(&code)
+		WHERE lecturer_id = $1 AND valid_date = CURRENT_DATE`,
+		subject).Scan(&code)
 	if code != "" {
 		return code
 	}
 	for i := 0; i < 40; i++ {
 		candidate := fmt.Sprintf("%04d", rand.Intn(10000))
 		_, _ = conn.Exec(ctx, `
-			INSERT INTO lecturer_daily_codes (tenant_id, lecturer_id, code)
-			VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, tenantID, subject, candidate)
+			INSERT INTO lecturer_daily_codes (lecturer_id, code)
+			VALUES ($1, $2) ON CONFLICT DO NOTHING`, subject, candidate)
 		var got string
 		_ = conn.QueryRow(ctx, `
 			SELECT code FROM lecturer_daily_codes
-			WHERE tenant_id = $1 AND lecturer_id = $2 AND valid_date = CURRENT_DATE`,
-			tenantID, subject).Scan(&got)
+			WHERE lecturer_id = $1 AND valid_date = CURRENT_DATE`,
+			subject).Scan(&got)
 		if got != "" {
 			return got
 		}

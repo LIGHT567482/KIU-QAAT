@@ -13,10 +13,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import ug.qaat.coordinator.net.ExtraUnit
 import ug.qaat.coordinator.net.ManualEntry
 import ug.qaat.coordinator.net.PatrolClient
 import ug.qaat.coordinator.net.PatrolReference
 import ug.qaat.coordinator.net.RefItem
+import ug.qaat.coordinator.student.Fingerprint
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -36,6 +38,7 @@ import java.time.format.DateTimeFormatter
  * the known list is offered first and a typed value is always accepted — and picking a unit fills
  * in its class/group and college, because the monitor should not retype what the system knows.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -54,12 +57,20 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
     var lecturerText by remember { mutableStateOf("") }
     var classGroup by remember { mutableStateOf("") }
     var school by remember { mutableStateOf("") }
+    var department by remember { mutableStateOf("") }
     var students by remember { mutableStateOf("") }
     var taught by remember { mutableStateOf(true) }
     var remarks by remember { mutableStateOf("") }
     var isComp by remember { mutableStateOf(false) }
-    var compFor by remember { mutableStateOf("") }
-    val time = remember { LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")) }
+    // The lecture being made good: a real date and a real time, both required. Free text here is
+    // what made the old field decorative — "last week" cannot be matched to any missed lecture.
+    var compDate by remember { mutableStateOf("") }   // YYYY-MM-DD
+    var compTime by remember { mutableStateOf("") }   // HH:MM
+    // WHEN THE LECTURE RUNS, both ends. The start alone says nothing about what the hour was worth.
+    var begins by remember { mutableStateOf(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))) }
+    var ends by remember { mutableStateOf("") }
+    // The OTHER unit codes this same hour delivered — see the header.
+    var extras by remember { mutableStateOf(listOf<ExtraUnit>()) }
 
     LaunchedEffect(Unit) {
         val token = AppState.token
@@ -80,7 +91,18 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
             if (classGroup.isBlank()) classGroup = cg
             if (school.isBlank()) school = sch
         }
+        ref.unitDepartments[unitId]?.takeIf { it.isNotBlank() }?.let {
+            if (department.isBlank()) department = it
+        }
     }
+
+    // Every college and department this one lecture belongs to, each named ONCE. Two unit codes in
+    // the same college is the common case, and repeating its name would read as two colleges;
+    // two codes in different ones is exactly what a reader has to be able to see at a glance.
+    val colleges = (listOf(school) + extras.map { it.school })
+        .map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+    val departments = (listOf(department) + extras.map { it.department })
+        .map { it.trim() }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -147,16 +169,69 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
                 },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
+            OutlinedTextField(
+                value = department, onValueChange = { department = it },
+                label = { Text("Department") },
+                supportingText = {
+                    Text("Two codes for one lecture usually share a college and differ by department.")
+                },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+
+            // ── The other unit codes this same hour delivers ────────────────────────────────
+            ExtraUnitsSection(
+                ref = ref, extras = extras, onChange = { extras = it },
+                primaryUnitId = unitId, primarySchool = school,
+            )
+            if (colleges.size > 1 || departments.size > 1) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("This lecture spans", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        if (colleges.isNotEmpty()) Text("Colleges: " + colleges.joinToString(", "), fontSize = 12.sp)
+                        if (departments.isNotEmpty()) Text("Departments: " + departments.joinToString(", "), fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // ── When it runs ────────────────────────────────────────────────────────────────
+            Text("Lecture time", fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TimeField("Begins", begins, Modifier.weight(1f)) { begins = it }
+                TimeField("Ends", ends, Modifier.weight(1f)) { ends = it }
+            }
+            val badSpan = ends.isNotBlank() && !endsAfterHHMM(begins, ends)
+            if (badSpan) {
+                Text("The end has to be after the start.", color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelSmall)
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = isComp, onCheckedChange = { isComp = it })
                 Text("This is a compensation lecture")
             }
             if (isComp) {
-                OutlinedTextField(
-                    value = compFor, onValueChange = { compFor = it },
-                    label = { Text("For the lecture of (YYYY-MM-DD, optional)") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                // REQUIRED, and a real date and time — not typed prose. A compensation that cannot
+                // be matched to the lecture it replaces cannot be counted as having replaced it,
+                // and a lecturer missed a Tuesday with two timetabled hours is owed the distinction
+                // between them.
+                Text(
+                    "Which lecture is this making good?",
+                    fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DateField("Its date", compDate, Modifier.weight(1f)) { compDate = it }
+                    TimeField("It began at", compTime, Modifier.weight(1f)) { compTime = it }
+                }
+                Text(
+                    if (compDate.isBlank() || compTime.isBlank())
+                        "Both are needed. Without the time, a Tuesday with two lectures cannot say which one this replaces."
+                    else "Making good the lecture of $compDate at $compTime.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (compDate.isBlank() || compTime.isBlank())
+                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             OutlinedTextField(
@@ -164,7 +239,7 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
                 label = { Text("Remarks (optional)") }, modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "Recorded as today at $time.",
+                "Recorded as today, $begins" + if (ends.isNotBlank()) "–$ends" else "" + ".",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -174,6 +249,11 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
             // teaching should never be one stray tap away.
             Text("Is the lecturer teaching?", fontWeight = FontWeight.SemiBold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // The verdict buttons are disabled rather than allowed to fail on the server: a
+                // monitor in a corridor who taps "Teaching" and gets a rejection has to work out
+                // which of eight fields was wrong, and the two that can be wrong are named here.
+                val blocked = badSpan || (isComp && (compDate.isBlank() || compTime.isBlank()))
+
                 fun submit(isTeaching: Boolean) {
                     taught = isTeaching
                     busy = true; error = null
@@ -185,10 +265,14 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
                             unitId = unitId, unitName = unitText,
                             lecturerStaffId = lecturerId, lecturerName = lecturerText,
                             classGroup = classGroup.trim(), school = school.trim(),
+                            department = department.trim(),
                             studentsCounted = students.toIntOrNull() ?: 0,
-                            sessionDate = LocalDate.now().toString(), timeOfDay = time,
+                            sessionDate = LocalDate.now().toString(),
+                            timeOfDay = begins, endTime = ends,
                             taught = isTeaching, remarks = remarks.trim(),
-                            isCompensation = isComp, compensationFor = compFor.trim(),
+                            isCompensation = isComp,
+                            compensationForAt = if (isComp) "$compDate $compTime" else "",
+                            alsoUnits = extras,
                         )
                         val msg = runCatching { PatrolClient().manual(token, Fingerprint.get(ctx), entry) }
                             .getOrElse { it.message ?: "Could not record it" }
@@ -198,11 +282,11 @@ fun ManualAttendanceSheet(onDismiss: () -> Unit, onRecorded: (String) -> Unit) {
                     }
                 }
                 Button(
-                    modifier = Modifier.weight(1f).height(54.dp), enabled = !busy,
+                    modifier = Modifier.weight(1f).height(54.dp), enabled = !busy && !blocked,
                     onClick = { submit(true) },
                 ) { Text("✓  Teaching", fontWeight = FontWeight.Bold) }
                 Button(
-                    modifier = Modifier.weight(1f).height(54.dp), enabled = !busy,
+                    modifier = Modifier.weight(1f).height(54.dp), enabled = !busy && !blocked,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     onClick = { submit(false) },
                 ) { Text("✗  Not teaching", fontWeight = FontWeight.Bold) }
@@ -281,4 +365,165 @@ private fun PickOrType(
             }
         }
     }
+}
+
+/**
+ * THE OTHER UNIT CODES THIS SAME HOUR DELIVERS.
+ *
+ * One class, one lecturer, one room — and two or three unit codes, because the same taught content
+ * is required by several programmes and each codes and names it differently. A monitor who could
+ * only record one of them left every student on the other codes with a lecture QA never saw, and
+ * credited the lecturer with one unit for an hour that delivered three.
+ *
+ * Picking one fills in its college and department from the curriculum, which is what distinguishes
+ * the codes from one another — they usually share a college and differ by department. A code that
+ * is not in the curriculum can still be typed, on the same terms as the primary unit: the whole
+ * point of this form is the lecture the system does not know about.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExtraUnitsSection(
+    ref: PatrolReference,
+    extras: List<ExtraUnit>,
+    onChange: (List<ExtraUnit>) -> Unit,
+    primaryUnitId: String,
+    primarySchool: String,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Other course units in this same lecture", fontWeight = FontWeight.SemiBold)
+        Text(
+            "Add the other codes this hour also covers, so their students are not left without a record.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        extras.forEachIndexed { i, e ->
+            Surface(shape = MaterialTheme.shapes.small, tonalElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Unit ${i + 2}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                            modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onChange(extras.filterIndexed { j, _ -> j != i }) }) {
+                            Text("Remove")
+                        }
+                    }
+                    PickOrType(
+                        label = "Course unit", options = ref.units,
+                        selectedId = e.unitId, typed = e.unitName,
+                        onPick = { item ->
+                            val id = item?.id.orEmpty()
+                            val d = ref.unitDefaults[id]
+                            onChange(extras.toMutableList().also { l ->
+                                l[i] = e.copy(
+                                    unitId = id, unitName = item?.label.orEmpty(),
+                                    classGroup = e.classGroup.ifBlank { d?.first.orEmpty() },
+                                    // A second code in the same college inherits it rather than
+                                    // being left blank — the college belongs to the lecture as much
+                                    // as to the unit, and a blank would read as "unknown".
+                                    school = e.school.ifBlank { d?.second?.ifBlank { primarySchool } ?: primarySchool },
+                                    department = e.department.ifBlank { ref.unitDepartments[id].orEmpty() },
+                                )
+                            })
+                        },
+                        onType = { t ->
+                            onChange(extras.toMutableList().also { l ->
+                                l[i] = e.copy(unitName = t, unitId = "")
+                            })
+                        },
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = e.classGroup,
+                            onValueChange = { v -> onChange(extras.toMutableList().also { l -> l[i] = e.copy(classGroup = v) }) },
+                            label = { Text("Class / Group") }, singleLine = true, modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = e.department,
+                            onValueChange = { v -> onChange(extras.toMutableList().also { l -> l[i] = e.copy(department = v) }) },
+                            label = { Text("Department") }, singleLine = true, modifier = Modifier.weight(1f),
+                        )
+                    }
+                    OutlinedTextField(
+                        value = e.school,
+                        onValueChange = { v -> onChange(extras.toMutableList().also { l -> l[i] = e.copy(school = v) }) },
+                        label = { Text("School / College") },
+                        supportingText = {
+                            Text(
+                                if (e.school.isNotBlank() && e.school.equals(primarySchool, true))
+                                    "Same college as the first unit — it is recorded once."
+                                else "A different college from the first unit."
+                            )
+                        },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (e.unitId.isNotBlank() && e.unitId.equals(primaryUnitId, true)) {
+                        Text("This is the same unit as the first one — it will not be recorded twice.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = { onChange(extras + ExtraUnit(school = primarySchool)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (extras.isEmpty()) "+ Add another course unit" else "+ Add one more") }
+    }
+}
+
+/** A time field that only ever holds HH:MM. Typed digits are shaped as they are entered, so the
+ *  form cannot carry prose where the record needs a clock time. */
+@Composable
+private fun TimeField(label: String, value: String, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { raw ->
+            val d = raw.filter { it.isDigit() }.take(4)
+            onChange(when {
+                d.length <= 2 -> d
+                else -> d.substring(0, 2) + ":" + d.substring(2)
+            })
+        },
+        label = { Text(label) }, placeholder = { Text("HH:MM") },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true, modifier = modifier,
+        isError = value.isNotBlank() && !isHHMM(value),
+    )
+}
+
+/** A date field that only ever holds YYYY-MM-DD, for the same reason. */
+@Composable
+private fun DateField(label: String, value: String, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { raw ->
+            val d = raw.filter { it.isDigit() }.take(8)
+            onChange(when {
+                d.length <= 4 -> d
+                d.length <= 6 -> d.substring(0, 4) + "-" + d.substring(4)
+                else -> d.substring(0, 4) + "-" + d.substring(4, 6) + "-" + d.substring(6)
+            })
+        },
+        label = { Text(label) }, placeholder = { Text("YYYY-MM-DD") },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+        singleLine = true, modifier = modifier,
+        isError = value.isNotBlank() && runCatching { LocalDate.parse(value) }.isFailure,
+    )
+}
+
+private fun isHHMM(s: String): Boolean =
+    s.length == 5 && s[2] == ':' &&
+        (s.substring(0, 2).toIntOrNull() ?: 99) in 0..23 &&
+        (s.substring(3, 5).toIntOrNull() ?: 99) in 0..59
+
+private fun hhmmToMinutes(s: String): Int =
+    if (!isHHMM(s)) -1 else s.substring(0, 2).toInt() * 60 + s.substring(3, 5).toInt()
+
+/** A class that "ends" before it began is a typo, and storing it would put a negative hour into
+ *  contact-time reporting. */
+internal fun endsAfterHHMM(begins: String, ends: String): Boolean {
+    val b = hhmmToMinutes(begins); val e = hhmmToMinutes(ends)
+    return b >= 0 && e >= 0 && e > b
 }

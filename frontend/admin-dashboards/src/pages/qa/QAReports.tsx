@@ -4,10 +4,10 @@ import { useQuery } from '../../lib/useApi'
 import { QASubmissionsPanel } from './QAOrgDashboard'
 import ExportButtons from '../../components/ExportButtons'
 
-// QA reports: (1) cross-dimension lecturer-teaching report from patrol data (filterable), and
+// QA reports: (1) cross-dimension lecturer-teaching report from monitor data (filterable), and
 // (2) today's employee biometric no-shows with a one-click email + WhatsApp notify.
 
-interface TeachRow { lecturer_id: string; full_name: string; department: string; school: string; taught: number; patrolled: number }
+interface TeachRow { lecturer_id: string; full_name: string; department: string; school: string; taught: number; monitored: number }
 interface TeachResp { rows: TeachRow[]; total_taught: number; total_patrolled: number }
 interface NoShow { staff_id: string; name: string; email: string; phone: string }
 interface NoShowResp { date: string; no_shows: NoShow[] }
@@ -59,14 +59,14 @@ export default function QAReports() {
             <thead><tr style={htr}><th style={th}>Lecturer</th><th style={th}>Staff ID</th><th style={th}>Department</th><th style={th}>School</th><th style={th}>Taught / Monitored</th></tr></thead>
             <tbody>
               {rows.map(l => {
-                const pct = l.patrolled ? Math.round((l.taught / l.patrolled) * 100) : null
+                const pct = l.monitored ? Math.round((l.taught / l.monitored) * 100) : null
                 return (
                   <tr key={l.lecturer_id} style={tr}>
                     <td style={td}><b>{l.full_name || l.lecturer_id}</b></td>
                     <td style={td}>{l.lecturer_id}</td>
                     <td style={td}>{l.department || '—'}</td>
                     <td style={td}>{l.school || '—'}</td>
-                    <td style={td}>{l.taught}/{l.patrolled}{pct !== null && <span style={{ marginLeft: 8, fontWeight: 700, color: pct >= 75 ? '#15803d' : '#b91c1c' }}>{pct}%</span>}</td>
+                    <td style={td}>{l.taught}/{l.monitored}{pct !== null && <span style={{ marginLeft: 8, fontWeight: 700, color: pct >= 75 ? '#15803d' : '#b91c1c' }}>{pct}%</span>}</td>
                   </tr>
                 )
               })}

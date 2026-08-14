@@ -5,7 +5,8 @@ import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
 import RecordTabs from '../../components/RecordTabs'
 import CompensationTag from '../../components/CompensationTag'
-import PatrolLecturerAttendance from '../shared/PatrolLecturerAttendance'
+import ProvisionTag from '../../components/ProvisionTag'
+import MonitorLecturerAttendance from '../shared/MonitorLecturerAttendance'
 
 interface SummaryRow {
   lecturer_id:         string
@@ -40,15 +41,19 @@ interface LogRow {
   /** Recorded by that monitor as making good an earlier lecture. */
   is_compensation: boolean
   compensation_for: string
+  /** The room it was actually taught in, and whether that was the timetabled one. */
+  room: string
+  room_is_provision: boolean
+  provision_note: string
 }
 
 // Two independent records of the same lectures, on two pages of one feature — the coordinator's
-// session log and the QA patroller's spot-check. Kept apart so a disagreement stays visible.
+// session log and the QA monitor's spot-check. Kept apart so a disagreement stays visible.
 export default function AdminLecturerAttendance() {
   return (
     <RecordTabs title="Lecturer Attendance" tabs={[
       { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
-      { id: 'patrol',      label: 'QA patrol record',   render: () => <PatrolLecturerAttendance /> },
+      { id: 'monitor',      label: 'QA monitor record',  render: () => <MonitorLecturerAttendance /> },
     ]} />
   )
 }
@@ -57,11 +62,11 @@ function CoordinatorRecord() {
   const { tenantId } = useParams<{ tenantId: string }>()
 
   const { status: sumStatus, data: summary } = useQuery<SummaryRow[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturer-attendance/summary`),
+    () => api.get(`/api/v1/admin/lecturer-attendance/summary`),
     [tenantId],
   )
   const { status: logStatus, data: logs } = useQuery<LogRow[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/lecturer-attendance`),
+    () => api.get(`/api/v1/admin/lecturer-attendance`),
     [tenantId],
   )
 
@@ -154,7 +159,7 @@ function CoordinatorRecord() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
                       <thead>
                         <tr>
-                          {['Date', 'Unit', 'Class/Group', 'Students', 'Gate Open', 'Gate Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => (
+                          {['Date', 'Unit', 'Class/Group', 'Room', 'Students', 'Gate Open', 'Gate Close', 'Contact Hrs', 'QA Monitor', 'Status'].map(h => (
                             <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--muted)', fontWeight: 600 }}>{h}</th>
                           ))}
                         </tr>
@@ -168,6 +173,10 @@ function CoordinatorRecord() {
                               {l.is_compensation && <CompensationTag forDate={l.compensation_for} />}
                             </td>
                             <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{l.class_group || '—'}</td>
+                            <td style={{ padding: '6px 10px' }}>
+                              {l.room || '—'}
+                              {l.room_is_provision && <ProvisionTag note={l.provision_note} />}
+                            </td>
                             {/* How many actually came. A lecture the lecturer started and nobody
                                 attended is a very different event from a full room, and the log
                                 could not tell them apart. */}
@@ -184,7 +193,7 @@ function CoordinatorRecord() {
                           </tr>
                         ))}
                         {logsFor(s.lecturer_id).length === 0 && (
-                          <tr><td colSpan={9} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>
+                          <tr><td colSpan={10} style={{ padding: 12, color: 'var(--muted)' }}>No session logs.</td></tr>
                         )}
                       </tbody>
                     </table>

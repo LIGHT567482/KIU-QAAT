@@ -73,7 +73,7 @@ func buildSemesterArchive(ctx context.Context, q rowQuerier, tenantID string, st
 			FROM attendance_logs al
 			JOIN sessions s        ON s.session_id = al.session_id
 			LEFT JOIN course_units cu ON cu.unit_id = s.unit_id
-			LEFT JOIN students_extended se ON se.student_id = al.student_id AND se.tenant_id = al.tenant_id
+			LEFT JOIN students_extended se ON se.student_id = al.student_id
 			WHERE al.tenant_id = $1 AND ($2::text[] IS NULL OR al.student_id = ANY($2))
 			ORDER BY s.session_date, al.session_id, al.student_id`, tenantID, scope)
 		if err != nil {
@@ -174,15 +174,13 @@ func buildSemesterArchive(ctx context.Context, q rowQuerier, tenantID string, st
 // ── GET /api/v1/admin/tenants/{tenant_id}/semester-archives ──────────────────
 func ListSemesterArchives(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
 
 		rows, err := adminPool.Query(r.Context(), `
 			SELECT archive_id::text, label, COALESCE(intakes,'{}'), COALESCE(academic_year,''),
 			       COALESCE(semester,0), filename, size_bytes, attendance_rows, session_rows,
 			       lecturer_rows, COALESCE(created_by,''), created_at::text
 			FROM semester_archives
-			WHERE tenant_id = $1
-			ORDER BY created_at DESC`, tenantID)
+			ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -220,14 +218,13 @@ func ListSemesterArchives(adminPool *pgxpool.Pool) http.HandlerFunc {
 // ── GET /api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id}/download ──
 func DownloadSemesterArchive(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
 		archiveID := chi.URLParam(r, "archive_id")
 
 		var filename string
 		var content []byte
 		err := adminPool.QueryRow(r.Context(), `
 			SELECT filename, content FROM semester_archives
-			WHERE archive_id = $1::uuid AND tenant_id = $2`, archiveID, tenantID).Scan(&filename, &content)
+			WHERE archive_id = $1::uuid`, archiveID).Scan(&filename, &content)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "archive not found"))
 			return
@@ -245,11 +242,10 @@ func DownloadSemesterArchive(adminPool *pgxpool.Pool) http.HandlerFunc {
 // ── DELETE /api/v1/admin/tenants/{tenant_id}/semester-archives/{archive_id} ───
 func DeleteSemesterArchive(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
 		archiveID := chi.URLParam(r, "archive_id")
 
 		tag, err := adminPool.Exec(r.Context(),
-			`DELETE FROM semester_archives WHERE archive_id = $1::uuid AND tenant_id = $2`, archiveID, tenantID)
+			`DELETE FROM semester_archives WHERE archive_id = $1::uuid`, archiveID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

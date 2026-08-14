@@ -303,5 +303,5 @@ in within the same 1–2 minutes across hundreds of rooms):**
 2. Test the student page on a real iPhone and Android over HTTPS.
 3. Run the k6 load tests to replace the estimates in §5 with real numbers.
 4. Security-review the services that haven't been looked at.
-5. Update `CLAUDE.md` / `ARCHITECT.md` to describe the online check-in (they still
-   describe the old offline-LAN design).
+5. Update `ARCHITECT.md` to describe the online check-in (it still describes the
+   old offline-LAN design).

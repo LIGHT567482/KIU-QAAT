@@ -62,9 +62,9 @@ func LecturerOverview(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(DISTINCT s.session_id),
 			       COALESCE(MAX(s.session_date)::text,'')
 			FROM lecturer_assignments la
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
-			LEFT JOIN sessions s ON s.unit_id = cu.unit_id AND s.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
+			LEFT JOIN sessions s ON s.unit_id = cu.unit_id
 			WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
 			GROUP BY cu.unit_id, cu.name, cu.year, cu.semester, c.name
 			ORDER BY COALESCE(c.name,''), COALESCE(cu.year,1), COALESCE(cu.semester,1), cu.name`, tenantID, lecturerID)
@@ -111,6 +111,14 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 		Date        string `json:"session_date"`
 		Coordinator string `json:"coordinator_name"`
 		Status      string `json:"session_status"`
+		Room        string `json:"room"`
+		// The room was substituted for the timetabled one (migration 085).
+		RoomIsProvision bool   `json:"room_is_provision"`
+		QAMonitor       string `json:"qa_monitor"`
+		IsCompensation  bool   `json:"is_compensation"`
+		// IN_PERSON or ONLINE (migration 087). An online session has no room and was never on a
+		// monitor's round, so a blank room and a missing monitor mean something different here.
+		DeliveryMode string `json:"delivery_mode"`
 	}
 	type student struct {
 		StudentID string `json:"student_id"`
@@ -169,8 +177,8 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 		cRows, err := adminPool.Query(r.Context(), `
 			SELECT o.offering_id::text, o.session_type, COALESCE(c.level,''), COALESCE(u.full_name,'')
 			FROM course_offerings o
-			JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = o.tenant_id
-			LEFT JOIN users u ON u.user_id::text = o.coordinator_id AND u.tenant_id = o.tenant_id
+			JOIN courses c ON c.course_id = o.course_id
+			LEFT JOIN users u ON u.user_id::text = o.coordinator_id
 			WHERE o.tenant_id = $1 AND o.course_id = $2
 			ORDER BY o.session_type`, tenantID, courseID)
 		if err != nil {
@@ -196,9 +204,25 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}{}
 		sRows, err := adminPool.Query(r.Context(), `
 			SELECT s.session_id::text, s.session_date::text, COALESCE(s.offering_id::text,''),
-			       COALESCE(u.full_name, ''), s.session_status::text
+			       COALESCE(u.full_name, ''), s.session_status::text,
+			       -- The room it was actually taught in, and whether that was the timetabled one.
+			       -- A lecturer disputing a monitor's "not taught" needs the substitution on their
+			       -- OWN page: it is the fact that explains why the monitor found an empty room.
+			       COALESCE(NULLIF(v.name,''), s.venue_id, ''), s.room_is_provision,
+			       -- And the monitor's side of the same lecture, so the second record about them is
+			       -- something they can see rather than something quoted back at them later.
+			       COALESCE(mon.patroller_name,''), COALESCE(mon.is_compensation,false),
+			       COALESCE(s.delivery_mode,'IN_PERSON')
 			FROM sessions s
-			LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
+			LEFT JOIN users  u ON u.user_id::text = s.coordinator_id
+			LEFT JOIN venues v ON v.venue_id = s.venue_id
+			LEFT JOIN LATERAL (
+			    SELECT pl.patroller_name, pl.is_compensation
+			      FROM lecturer_patrol_logs pl
+			     WHERE pl.unit_id = s.unit_id
+			       AND pl.session_date = s.session_date
+			     ORDER BY pl.is_compensation DESC, pl.taken_at DESC LIMIT 1
+			) mon ON true
 			WHERE s.tenant_id = $1 AND s.unit_id = $2
 			ORDER BY s.session_date, s.gate_open_time`, tenantID, unitID)
 		if err != nil {
@@ -208,7 +232,9 @@ func LecturerAttendance(adminPool *pgxpool.Pool) http.HandlerFunc {
 		for sRows.Next() {
 			var sx sess
 			var offID string
-			sRows.Scan(&sx.SessionID, &sx.Date, &offID, &sx.Coordinator, &sx.Status) //nolint:errcheck
+			sRows.Scan(&sx.SessionID, &sx.Date, &offID, &sx.Coordinator, &sx.Status,
+				&sx.Room, &sx.RoomIsProvision, &sx.QAMonitor, &sx.IsCompensation,
+				&sx.DeliveryMode) //nolint:errcheck
 			c, found := byOffering[offID]
 			if !found {
 				c = unassigned

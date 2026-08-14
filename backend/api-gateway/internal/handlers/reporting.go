@@ -529,7 +529,7 @@ func GetEligibility(pool *pgxpool.Pool) http.HandlerFunc {
 			       s.sessions_held, s.sessions_attended, s.attendance_percentage,
 			       75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			FROM student_attendance_summary s
-			JOIN tenants t ON t.tenant_id = s.tenant_id
+			CROSS JOIN tenants t
 			WHERE s.student_id = $1 AND s.tenant_id = $2`, studentID, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -606,8 +606,8 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(se.semester,1), COALESCE(t.name,''),
 			       COALESCE(c.school,''), COALESCE(c.department,'')
 			FROM students_extended se
-			JOIN tenants t ON t.tenant_id = se.tenant_id
-			LEFT JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
+			CROSS JOIN tenants t
+			LEFT JOIN courses c ON c.course_id = se.course_id
 			WHERE se.student_id = $1 AND se.tenant_id = $2 LIMIT 1`,
 			reg, scopeTenant).Scan(&tenantID, &fullName, &academicYear, &semester, &institution, &school, &department)
 		if err != nil {
@@ -619,7 +619,7 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SELECT s.unit_id, s.unit_name, s.sessions_held, s.sessions_attended,
 			       s.attendance_percentage, 75 /* fixed: internal/policy.AttendanceThresholdPercent */
 			FROM student_attendance_summary s
-			JOIN tenants t ON t.tenant_id = s.tenant_id
+			CROSS JOIN tenants t
 			WHERE s.student_id = $1 AND s.tenant_id = $2`, reg, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -657,6 +657,36 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			units = []unitResult{}
 		}
 
+		// ── THE OVERALL FIGURE ───────────────────────────────────────────────────────────────
+		//
+		// The per-unit rows were the whole answer, and a student with eight units had to add up
+		// eight numbers to find out how they were doing — which is the first thing they want to
+		// know and the last thing the screen told them.
+		//
+		// It is a WEIGHTED total: sessions attended over sessions held across every unit, not the
+		// mean of the percentages. Averaging the percentages would let a unit with two sessions
+		// count as much as one with thirty, so a student could show 70% overall while having missed
+		// most of the teaching they actually had. The overall figure is deliberately NOT an
+		// eligibility verdict — eligibility is decided per unit, and a healthy total hides the one
+		// unit that will stop them sitting an exam. So the count of units below the threshold
+		// travels with it, because that is the number that actually decides anything.
+		var totHeld, totAttended, atRisk int
+		threshold := 75
+		for _, u := range units {
+			totHeld += u.SessionsHeld
+			totAttended += u.SessionsAttended
+			if u.Threshold > 0 {
+				threshold = u.Threshold
+			}
+			if u.Status == "EXAM_INELIGIBLE" {
+				atRisk++
+			}
+		}
+		overallPct := 0.0
+		if totHeld > 0 {
+			overallPct = round1(float64(totAttended) / float64(totHeld) * 100)
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"student_id":    reg,
 			"full_name":     fullName,
@@ -666,6 +696,16 @@ func StudentProgressByReg(adminPool *pgxpool.Pool) http.HandlerFunc {
 			"school":        school,
 			"department":    department,
 			"units":         units,
+			"overall": map[string]interface{}{
+				"sessions_held":     totHeld,
+				"sessions_attended": totAttended,
+				"percentage":        overallPct,
+				"threshold":         threshold,
+				// Units below the threshold. The number that decides whether they sit their exams —
+				// which the overall percentage on its own can hide entirely.
+				"units_at_risk": atRisk,
+				"units_total":   len(units),
+			},
 		})
 	}
 }

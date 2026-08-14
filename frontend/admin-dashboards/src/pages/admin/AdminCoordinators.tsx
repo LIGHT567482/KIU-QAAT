@@ -27,7 +27,7 @@ const GENDERS = ['', 'Male', 'Female', 'Other']
 export default function AdminCoordinators() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const { status, data, refetch } = useQuery<Coordinator[]>(
-    () => api.get(`/api/v1/admin/tenants/${tenantId}/coordinators`), [tenantId])
+    () => api.get(`/api/v1/admin/coordinators`), [tenantId])
   const titlesQ = useQuery<{ titles: string[] }>(() => api.get('/api/v1/admin/settings/titles'), [tenantId])
   const titles = (titlesQ.status === 'ok' ? titlesQ.data?.titles : null) ?? []
 
@@ -52,7 +52,7 @@ export default function AdminCoordinators() {
     try {
       const fd = new FormData(); fd.append('roster', file)
       const r = await api.upload<{ created: number; updated: number; skipped: number; new_logins: { email: string; temp_password: string }[] }>(
-        `/api/v1/admin/tenants/${tenantId}/coordinators/import`, fd)
+        `/api/v1/admin/coordinators/import`, fd)
       const creds = r.new_logins?.length ? ` · new logins: ${r.new_logins.map(n => `${n.email}=${n.temp_password}`).join(', ')}` : ''
       setMsg(`Imported: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped${creds}`)
       refetch()
@@ -91,13 +91,13 @@ export default function AdminCoordinators() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
-          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
+          <a href="/admin" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Coordinators</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>Directory of coordinators with their contacts and the session they coordinate.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={manageTitles} style={btnGhost} title="Define the title list (Prof., Dr., Eng.…)">Manage titles</button>
-          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/coordinators/export.xlsx`, 'coordinators.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnGhost}>Export Excel</button>
+          <button onClick={() => api.download(`/api/v1/admin/coordinators/export.xlsx`, 'coordinators.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnGhost}>Export Excel</button>
           <input ref={fileRef} type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImport} style={{ display: 'none' }} />
           <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnGhost}>{importing ? 'Importing…' : 'Import (CSV/Excel)'}</button>
         </div>

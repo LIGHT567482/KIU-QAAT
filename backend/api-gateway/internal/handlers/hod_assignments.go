@@ -88,9 +88,9 @@ func HODListAssignments(pool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(la.academic_year,''), COALESCE(la.year,1), COALESCE(la.semester,1),
 			       COALESCE(la.intake_session::text,'')
 			FROM lecturer_assignments la
-			JOIN lecturers    l  ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
-			JOIN course_units cu ON cu.unit_id   = la.unit_id      AND cu.tenant_id = la.tenant_id
-			JOIN courses      c  ON c.course_id  = cu.course_id    AND c.tenant_id = cu.tenant_id
+			JOIN lecturers    l  ON l.lecturer_id = la.lecturer_id
+			JOIN course_units cu ON cu.unit_id   = la.unit_id     
+			JOIN courses      c  ON c.course_id  = cu.course_id   
 			WHERE la.tenant_id = $1`+where+`
 			ORDER BY l.full_name, cu.name`, args...)
 		if err != nil {
@@ -157,9 +157,9 @@ func HODAssignable(pool *pgxpool.Pool) http.HandlerFunc {
 			SELECT cu.unit_id, COALESCE(cu.name,''), c.course_id, COALESCE(c.name,''),
 			       COALESCE(cu.year,1), COALESCE(cu.semester,1),
 			       (SELECT COUNT(*) FROM lecturer_assignments la
-			         WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id)
+			         WHERE la.unit_id = cu.unit_id)
 			FROM course_units cu
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE cu.tenant_id = $1`+where+`
 			ORDER BY c.name, cu.year, cu.semester, cu.name`, args...)
 		if err != nil {
@@ -244,7 +244,7 @@ func HODCreateAssignment(pool *pgxpool.Pool) http.HandlerFunc {
 		err = conn.QueryRow(r.Context(), `
 			SELECT c.course_id
 			FROM course_units cu
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE cu.tenant_id = $1 AND cu.unit_id = $2`+where+` LIMIT 1`, args...).Scan(&courseID)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, errBody("OUT_OF_SCOPE",
@@ -331,8 +331,8 @@ func HODDeleteAssignment(pool *pgxpool.Pool) http.HandlerFunc {
 			DELETE FROM lecturer_assignments la
 			 USING course_units cu, courses c
 			 WHERE la.tenant_id = $1 AND la.assignment_id = $2::uuid
-			   AND cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			   AND c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id`+where, args...)
+			   AND cu.unit_id = la.unit_id
+			   AND c.course_id = cu.course_id`+where, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

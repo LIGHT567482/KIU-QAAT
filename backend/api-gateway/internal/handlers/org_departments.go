@@ -48,6 +48,12 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		SchoolAbbr   string `json:"school_abbreviation"`
 		Kind         string `json:"kind"`
 		HOD          *hod   `json:"hod"`
+		// What this department's head is CALLED. An academic department is run by a head of
+		// department; Library, ICT, Bursary, Finance and Admissions are run by a director, the
+		// same way quality assurance is run by the DQA. Calling a director an HOD in the one
+		// screen that lists them is simply wrong, and the org chart already records which kind
+		// each department is — so the title is derived from that rather than guessed per screen.
+		HeadTitle string `json:"head_title"`
 
 		Courses        int `json:"courses"`
 		Units          int `json:"units"`
@@ -94,7 +100,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		args := []interface{}{tenantID}
 		q := `SELECT d.department_id::text, d.name, COALESCE(s.name,''), COALESCE(d.kind,'ACADEMIC'), COALESCE(s.abbreviation,'')
 		      FROM departments d
-		      LEFT JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+		      LEFT JOIN schools s ON s.school_id = d.school_id
 		      WHERE d.tenant_id = $1`
 		if !s.Unbounded {
 			// A dean is bounded by their school; support departments (school_id NULL) belong to no
@@ -171,11 +177,11 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(DISTINCT cu.unit_id),
 			       COUNT(DISTINCT cu.unit_id) FILTER (
 			           WHERE NOT EXISTS (SELECT 1 FROM lecturer_assignments la
-			                             WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id)),
+			                             WHERE la.unit_id = cu.unit_id)),
 			       COUNT(DISTINCT la.lecturer_id)
 			FROM courses c
-			LEFT JOIN course_units cu ON cu.course_id = c.course_id AND cu.tenant_id = c.tenant_id
-			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
+			LEFT JOIN course_units cu ON cu.course_id = c.course_id
+			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
 			WHERE c.tenant_id = $1
 			GROUP BY 1`, tenantID)
 		if cRows != nil {
@@ -199,10 +205,10 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			       ROUND(COALESCE(AVG(sas.attendance_percentage),0),1),
 			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */)
 			FROM students_extended se
-			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
-			JOIN tenants t ON t.tenant_id = se.tenant_id
+			JOIN courses c ON c.course_id = se.course_id
+			CROSS JOIN tenants t
 			LEFT JOIN student_attendance_summary sas
-			       ON sas.student_id = se.student_id AND sas.tenant_id = se.tenant_id
+			       ON sas.student_id = se.student_id
 			WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'
 			GROUP BY 1`, tenantID)
 		if sRows != nil {
@@ -230,11 +236,11 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(*),
 			       COUNT(*) FILTER (WHERE lal.log_id IS NOT NULL)
 			FROM sessions ss
-			JOIN course_units cu ON cu.unit_id = ss.unit_id AND cu.tenant_id = ss.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = ss.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			LEFT JOIN LATERAL (
 			    SELECT log_id FROM lecturer_attendance_logs l
-			    WHERE l.tenant_id = ss.tenant_id AND l.unit_id = ss.unit_id
+			    WHERE l.unit_id = ss.unit_id
 			      AND l.session_date = ss.session_date
 			    LIMIT 1
 			) lal ON true
@@ -261,8 +267,8 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		tRows, _ := pool.Query(r.Context(), `
 			SELECT COALESCE(c.department,''), COUNT(*)
 			FROM timetable_slots ts
-			JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = ts.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE ts.tenant_id = $1
 			GROUP BY 1`, tenantID)
 		if tRows != nil {
@@ -289,8 +295,8 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 		pRows, _ := pool.Query(r.Context(), `
 			SELECT COALESCE(c.department,''), COUNT(*), COUNT(*) FILTER (WHERE p.taught)
 			FROM lecturer_patrol_logs p
-			JOIN course_units cu ON cu.unit_id = p.unit_id AND cu.tenant_id = p.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = p.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE p.tenant_id = $1 AND p.session_date >= $2::date
 			GROUP BY 1`, tenantID, since)
 		if pRows != nil {
@@ -309,6 +315,7 @@ func OrgDepartments(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// ── Flag the coordination faults ─────────────────────────────────────
 		for i := range out {
+			out[i].HeadTitle = headTitleFor(out[i].Kind)
 			out[i].NoHOD = out[i].HOD == nil
 			out[i].HODNeverIn = out[i].HOD != nil && out[i].HOD.LastLoginAt == ""
 			// No course carries this department's name, so nothing the HOD's dashboard queries can

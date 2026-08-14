@@ -42,7 +42,7 @@ const lecturerLogColumns = `
 	    COALESCE(
 	        (SELECT o.study_year || ':' || o.semester
 	           FROM sessions ss
-	           JOIN course_offerings o ON o.offering_id = ss.offering_id AND o.tenant_id = ss.tenant_id
+	           JOIN course_offerings o ON o.offering_id = ss.offering_id
 	          WHERE ss.session_id = lal.session_id),
 	        -- No offering on the session (an older log, or a unit taught outside one): fall back to
 	        -- the unit's own place in the curriculum, which is the same answer whenever a unit is
@@ -53,7 +53,32 @@ const lecturerLogColumns = `
 	    COALESCE(mon.monitor_name, '')                                                 AS qa_monitor,
 	    COALESCE(mon.monitor_staff_id, '')                                             AS qa_monitor_staff_id,
 	    COALESCE(mon.is_compensation, false)                                           AS is_compensation,
-	    COALESCE(mon.compensation_for::text, '')                                       AS compensation_for`
+	    COALESCE(mon.compensation_for::text, '')                                       AS compensation_for,
+	    -- WHERE it was taught, and whether that was the timetabled room. A provision is a room
+	    -- the coordinator substituted at the door (migration 085); without it on the log, a
+	    -- monitor's "not taught" against the timetabled room and the lecturer's account of
+	    -- teaching are two records that cannot be reconciled by anyone reading them later.
+	    COALESCE((SELECT COALESCE(NULLIF(v.name,''), ss.venue_id)
+	                FROM sessions ss
+	                LEFT JOIN venues v ON v.venue_id = ss.venue_id
+	               WHERE ss.session_id = lal.session_id), '')                             AS room,
+	    COALESCE((SELECT ss.room_is_provision FROM sessions ss
+	               WHERE ss.session_id = lal.session_id), false)                          AS room_is_provision,
+	    COALESCE((SELECT ss.provision_note FROM sessions ss
+	               WHERE ss.session_id = lal.session_id), '')                             AS provision_note,
+	    -- The lecture was not on the timetable at all (migration 086). Distinct from a provision:
+	    -- that is the right lecture in the wrong room, this is a lecture the schedule never had.
+	    -- Both matter to a reader comparing this record with the monitor's.
+	    COALESCE((SELECT ss.unscheduled FROM sessions ss
+	               WHERE ss.session_id = lal.session_id), false)                          AS unscheduled,
+	    -- HOW it was delivered (migration 087). An ONLINE row is a distance / e-learning class: the
+	    -- lecturer started it themselves from wherever they were and the students checked in with
+	    -- the rotating code, with no room and no proximity gate. That is a weaker proof than
+	    -- standing in a hall, so it travels with the row rather than being left for a reader to
+	    -- assume — a blank room on an online lecture is not a missing room, and the absence of a QA
+	    -- monitor is not an unvisited one.
+	    COALESCE((SELECT ss.delivery_mode FROM sessions ss
+	               WHERE ss.session_id = lal.session_id), 'IN_PERSON')                    AS delivery_mode`
 
 // lecturerLogMonitorJoin resolves the monitor record for the log aliased `lal`. Kept next to the
 // columns above because neither is valid without the other.
@@ -91,6 +116,11 @@ type lecturerLogExtras struct {
 	QAMonitorStaffID string `json:"qa_monitor_staff_id"`
 	IsCompensation   bool   `json:"is_compensation"`
 	CompensationFor  string `json:"compensation_for"`
+	Room             string `json:"room"`
+	RoomIsProvision  bool   `json:"room_is_provision"`
+	ProvisionNote    string `json:"provision_note"`
+	Unscheduled      bool   `json:"unscheduled"`
+	DeliveryMode     string `json:"delivery_mode"`
 }
 
 // scanTargets returns the destinations for the shared columns, in the order lecturerLogColumns
@@ -99,5 +129,6 @@ func (e *lecturerLogExtras) scanTargets() []interface{} {
 	return []interface{}{
 		&e.StudentsAttended, &e.ClassGroup, &e.QAMonitor,
 		&e.QAMonitorStaffID, &e.IsCompensation, &e.CompensationFor,
+		&e.Room, &e.RoomIsProvision, &e.ProvisionNote, &e.Unscheduled, &e.DeliveryMode,
 	}
 }

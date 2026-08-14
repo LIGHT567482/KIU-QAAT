@@ -34,11 +34,11 @@ type patrolVisit struct {
 	LecturerID   string `json:"lecturer_id"`
 	LecturerName string `json:"lecturer_name"`
 	UnitID       string `json:"unit_id"`
-	UnitName    string `json:"unit_name"`
-	Room        string `json:"room"`
-	SessionDate string `json:"session_date"`
-	Scheduled   string `json:"scheduled_time"`
-	Taught      bool   `json:"taught"`
+	UnitName     string `json:"unit_name"`
+	Room         string `json:"room"`
+	SessionDate  string `json:"session_date"`
+	Scheduled    string `json:"scheduled_time"`
+	Taught       bool   `json:"taught"`
 	// patroller_name / patroller_staff_id are also emitted as qa_monitor / qa_monitor_staff_id.
 	// The old names stay so the handsets already in the field keep parsing this; the new ones are
 	// what every screen and download now reads, because "monitor" is what the institution calls
@@ -96,6 +96,14 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 		args = append(args, v)
 		where += " AND p.session_date <= $" + itoa(len(args)) + "::date"
 	}
+	// ORG SCOPE, for the college- and department-bounded QA roles now reading this page. Resolved
+	// from the account and appended AFTER the caller's own date filters, so it cannot be widened
+	// by anything in the request. Institution-wide roles add nothing.
+	//
+	// The scope names `c.department` / `c.school`, so the queries below join `courses c` through
+	// the patrolled unit — the patrol log itself carries a free-text school and no department at
+	// all, and scoping on that would quietly miss every row written before the column existed.
+	where += lecturerLogScope(r, pool, tenantID, &args)
 
 	// Visits, newest first — the detail rows behind each lecturer.
 	vRows, err := conn.Query(r.Context(), `
@@ -118,12 +126,17 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 		       COALESCE(p.students_counted,
 		                (SELECT COUNT(*) FROM attendance_logs al
 		                  JOIN sessions ss ON ss.session_id = al.session_id
-		                 WHERE ss.tenant_id = p.tenant_id AND ss.unit_id = p.unit_id
+		                 WHERE ss.unit_id = p.unit_id
 		                   AND ss.session_date = p.session_date), 0),
 		       COALESCE(p.entry_method,'PATROL'), COALESCE(p.school,'')
 		FROM lecturer_patrol_logs p
-		LEFT JOIN course_offerings o ON o.offering_id = p.offering_id AND o.tenant_id = p.tenant_id
-		LEFT JOIN lecturers l ON l.staff_id = p.lecturer_id AND l.tenant_id = p.tenant_id
+		LEFT JOIN course_offerings o ON o.offering_id = p.offering_id
+		LEFT JOIN lecturers l ON l.staff_id = p.lecturer_id
+		-- Joined for the org scope appended below (c.department / c.school). The rollup query
+		-- further down already had these; the visit rows did not, so a bounded caller would have
+		-- got a summary of their own college beside a visit list of the whole institution.
+		LEFT JOIN course_units cu ON cu.unit_id = p.unit_id
+		LEFT JOIN courses c ON c.course_id = cu.course_id
 		WHERE p.tenant_id = $1`+where+`
 		ORDER BY p.session_date DESC, p.scheduled_time DESC`, args...)
 	if err != nil {
@@ -161,9 +174,9 @@ func queryPatrolAttendance(r *http.Request, pool *pgxpool.Pool) ([]patrolLecture
 		       COUNT(*) FILTER (WHERE p.taught)      AS taught,
 		       MAX(p.session_date)::text             AS last_patrol
 		FROM lecturer_patrol_logs p
-		LEFT JOIN lecturers l   ON l.staff_id = p.lecturer_id AND l.tenant_id = p.tenant_id
-		LEFT JOIN course_units cu ON cu.unit_id = p.unit_id   AND cu.tenant_id = p.tenant_id
-		LEFT JOIN courses c     ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+		LEFT JOIN lecturers l   ON l.staff_id = p.lecturer_id
+		LEFT JOIN course_units cu ON cu.unit_id = p.unit_id  
+		LEFT JOIN courses c     ON c.course_id = cu.course_id
 		WHERE p.tenant_id = $1`+where+`
 		GROUP BY p.lecturer_id
 		ORDER BY 2`, args...)

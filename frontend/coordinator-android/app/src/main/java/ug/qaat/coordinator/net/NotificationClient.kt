@@ -93,3 +93,69 @@ class NotificationClient {
         }.getOrElse { "Network error — check your connection." }
     }
 }
+
+/**
+ * WHO A LECTURER CAN WRITE TO, BY NAME.
+ *
+ * "The coordinator" is not an address. One unit is routinely taught to a Day, an Evening, a Weekend
+ * and an e-learning cohort, each with its own coordinator, and the message a lecturer has in mind
+ * — "my Saturday class has no projector" — is for exactly one of them. Sent to all four it leaves
+ * three wondering which room is meant and the one who should act assuming somebody else will.
+ *
+ * Each person therefore arrives WITH the cohort they belong to, because that is what tells two of
+ * them apart: a lecturer knows their coordinators as "the Saturday one", not by name.
+ */
+class LecturerRecipientsClient {
+    private val http = Net.client()
+    private val base = Net.baseUrl
+
+    data class Coordinator(
+        val userId: String, val name: String, val code: String,
+        val cohort: String, val course: String, val units: String,
+    ) {
+        val label: String get() = listOf(name.ifBlank { code }, cohort).filter { it.isNotBlank() }.joinToString(" · ")
+    }
+
+    data class Student(
+        val studentId: String, val name: String, val cohort: String,
+        val unitId: String, val unitName: String,
+    ) {
+        val label: String get() = listOf(name, studentId).filter { it.isNotBlank() }.joinToString(" · ")
+    }
+
+    data class Recipients(
+        val coordinators: List<Coordinator> = emptyList(),
+        val students: List<Student> = emptyList(),
+    )
+
+    suspend fun load(): Recipients = withContext(Dispatchers.IO) {
+        val token = AppState.token ?: return@withContext Recipients()
+        runCatching {
+            val r = http.get("$base/api/v1/lecturer/recipients") {
+                header("Authorization", "Bearer $token")
+            }
+            if (r.status.value !in 200..299) return@runCatching Recipients()
+            val o = JSONObject(r.bodyAsText())
+            val cs = o.optJSONArray("coordinators") ?: JSONArray()
+            val ss = o.optJSONArray("students") ?: JSONArray()
+            Recipients(
+                coordinators = (0 until cs.length()).map {
+                    val x = cs.getJSONObject(it)
+                    Coordinator(
+                        userId = x.optString("user_id"), name = x.optString("full_name"),
+                        code = x.optString("coordinator_code"), cohort = x.optString("cohort"),
+                        course = x.optString("course_name"), units = x.optString("units"),
+                    )
+                }.filter { it.userId.isNotBlank() },
+                students = (0 until ss.length()).map {
+                    val x = ss.getJSONObject(it)
+                    Student(
+                        studentId = x.optString("student_id"), name = x.optString("full_name"),
+                        cohort = x.optString("cohort"), unitId = x.optString("unit_id"),
+                        unitName = x.optString("unit_name"),
+                    )
+                }.filter { it.studentId.isNotBlank() },
+            )
+        }.getOrElse { Recipients() }
+    }
+}

@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { useQuery } from '../lib/useApi'
 
 // Shared HOD/Dean dashboard: lists the lecturers in the viewer's department (HOD) or school (Dean)
-// with their teaching progress (patrolled sessions found TEACHING vs total), and lets them notify
+// with their teaching progress (monitored sessions found TEACHING vs total), and lets them notify
 // lecturers (bulk or one) and message the DQA/Admin — all via the existing app-notifications system.
 
 interface LecturerRow {

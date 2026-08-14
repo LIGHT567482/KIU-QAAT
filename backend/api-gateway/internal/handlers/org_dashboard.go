@@ -178,9 +178,9 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(DISTINCT cu.unit_id),
 			       COUNT(DISTINCT cu.unit_id) FILTER (
 			           WHERE NOT EXISTS (SELECT 1 FROM lecturer_assignments la
-			                             WHERE la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id))
+			                             WHERE la.unit_id = cu.unit_id))
 			FROM courses c
-			LEFT JOIN course_units cu ON cu.course_id = c.course_id AND cu.tenant_id = c.tenant_id
+			LEFT JOIN course_units cu ON cu.course_id = c.course_id
 			WHERE c.tenant_id = $1`+s.whereScope(&args), args...,
 		).Scan(&o.Courses, &o.Units, &o.UnitsUnstaffed)
 
@@ -189,9 +189,9 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		_ = pool.QueryRow(r.Context(), `
 			SELECT COUNT(DISTINCT l.lecturer_id)
 			FROM lecturers l
-			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE l.tenant_id = $1`+s.whereScope(&args), args...).Scan(&o.Lecturers)
 
 		// Active students on courses in scope.
@@ -199,7 +199,7 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		_ = pool.QueryRow(r.Context(), `
 			SELECT COUNT(*)
 			FROM students_extended se
-			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
+			JOIN courses c ON c.course_id = se.course_id
 			WHERE se.tenant_id = $1 AND se.enrollment_status = 'ACTIVE'`+s.whereScope(&args), args...).Scan(&o.Students)
 
 		// Sessions actually held in the window vs the timetable's expectation for the same period.
@@ -207,8 +207,8 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		_ = pool.QueryRow(r.Context(), `
 			SELECT COUNT(*)
 			FROM sessions ss
-			JOIN course_units cu ON cu.unit_id = ss.unit_id AND cu.tenant_id = ss.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = ss.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE ss.tenant_id = $1 AND ss.session_date >= $2::date`+s.whereScope(&args), args...).Scan(&o.SessionsHeld)
 
 		// The denominator: each weekly timetable slot recurs once a week over the window.
@@ -217,8 +217,8 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 		_ = pool.QueryRow(r.Context(), `
 			SELECT COUNT(*)
 			FROM timetable_slots ts
-			JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = ts.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE ts.tenant_id = $1`+s.whereScope(&args), args...).Scan(&weeklySlots)
 		o.SessionsPlanned = weeklySlots * 13 // ~13 teaching weeks in the 90-day window
 		if o.SessionsPlanned > 0 {
@@ -235,9 +235,9 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(DISTINCT sas.student_id) FILTER (WHERE sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */),
 			       MAX(75 /* fixed: internal/policy.AttendanceThresholdPercent */)
 			FROM student_attendance_summary sas
-			JOIN students_extended se ON se.student_id = sas.student_id AND se.tenant_id = sas.tenant_id
-			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
-			JOIN tenants t ON t.tenant_id = sas.tenant_id
+			JOIN students_extended se ON se.student_id = sas.student_id
+			JOIN courses c ON c.course_id = se.course_id
+			CROSS JOIN tenants t
 			WHERE sas.tenant_id = $1`+s.whereScope(&args), args...).Scan(&o.AvgAttendance, &o.AtRisk, &o.Threshold)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -301,10 +301,10 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 			       75 /* fixed: internal/policy.AttendanceThresholdPercent */,
 			       GREATEST(0, CEIL(75 /* fixed: internal/policy.AttendanceThresholdPercent */::numeric / 100.0 * sas.sessions_held) - sas.sessions_attended)::int
 			FROM student_attendance_summary sas
-			JOIN students_extended se ON se.student_id = sas.student_id AND se.tenant_id = sas.tenant_id
-			JOIN courses c ON c.course_id = se.course_id AND c.tenant_id = se.tenant_id
-			LEFT JOIN course_units cu ON cu.unit_id = sas.unit_id AND cu.tenant_id = sas.tenant_id
-			JOIN tenants t ON t.tenant_id = sas.tenant_id
+			JOIN students_extended se ON se.student_id = sas.student_id
+			JOIN courses c ON c.course_id = se.course_id
+			LEFT JOIN course_units cu ON cu.unit_id = sas.unit_id
+			CROSS JOIN tenants t
 			WHERE sas.tenant_id = $1
 			  AND se.enrollment_status = 'ACTIVE'
 			  AND sas.attendance_percentage < 75 /* fixed: internal/policy.AttendanceThresholdPercent */` + s.whereScope(&args)

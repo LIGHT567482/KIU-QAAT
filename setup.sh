@@ -4,8 +4,8 @@
 #   ./setup.sh
 #
 # Prereqs: Docker + Docker Compose (v1 or v2). Everything else is self-contained
-# in this folder: source, RSA keys, infra/.env, TLS cert, DB migrations + the
-# platform/super-admin seed (auto-applied on first boot).
+# in this folder: source, RSA keys, infra/field.env, TLS cert, DB migrations +
+# the seed (auto-applied on first boot).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -17,7 +17,19 @@ warn(){ echo -e "${YELLOW}[setup]${NC} $*"; }
 if docker compose version >/dev/null 2>&1; then COMPOSE="docker compose";
 elif command -v docker-compose >/dev/null 2>&1; then COMPOSE="docker-compose";
 else echo "ERROR: Docker Compose not found. Install Docker + Compose first."; exit 1; fi
-COMPOSE="$COMPOSE -f infra/docker-compose.yml"
+# The env file is named EXPLICITLY. It used to be infra/.env, which compose loaded
+# on its own — and which therefore also attached itself to any other compose command
+# run against this file, handing a locally-initialised database credentials it had
+# never had. Naming it here means this script says which environment it means, and
+# nothing else silently inherits that answer.
+ENV_FILE="infra/field.env"
+if [ ! -r "$ENV_FILE" ]; then
+  echo "ERROR: $ENV_FILE is missing. It ships with this folder and holds the"
+  echo "       database/Redis passwords for this deployment. Without it the stack"
+  echo "       cannot start. (The repo root .env is the LOCAL dev config, not this.)"
+  exit 1
+fi
+COMPOSE="$COMPOSE -f infra/docker-compose.yml --env-file $ENV_FILE"
 say "Using: $COMPOSE"
 
 # 2) Ensure the auth-service RSA keys exist (generated once; they travel with the folder).
@@ -63,15 +75,17 @@ ${GREEN}=========================================================${NC}
  QAAT is running on this laptop.
 
  Dashboards (on this laptop):
-   Coordinator : https://localhost:3000
-   Admin       : https://localhost:3001
-   Super-Admin : https://localhost:3002
-   Student     : https://localhost:3003
-   API health  : https://localhost:8443/health
+   Admin / staff : https://localhost:3001
+   Student       : https://localhost:3003
+   API health    : https://localhost:8443/health
+   (Coordinators use the Android app, not a browser. Ports 3000 and 3002 were
+    the coordinator PWA and the Super-Admin console; neither is served now.)
 
- Default Super-Admin login (change it after first login):
-   email: superadmin@qaat.platform    password: Super1234!
-   (Super-Admin → register your institution/tenant + its admin.)
+ FIRST LOGIN on a brand-new database: there is none yet. Migration 038 seeds a
+ platform-owner account and migration 064 deletes it again, because that role
+ was removed when QAAT became single-institution. Insert the institution's first
+ ADMIN into "users" directly (password_hash = bcrypt cost 12), then create every
+ other account from the Admin dashboard.
 
  To use it from PHONES, fully offline, run the hotspot:
    echo 'address=/qaat.local/10.42.0.1' | sudo tee /etc/NetworkManager/dnsmasq-shared.d/qaat.conf

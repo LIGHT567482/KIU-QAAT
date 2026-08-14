@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 
-// Rooms & room codes. The room code (LR-101, LAB2) is the key the timetable, the patroller app and
+// Rooms & room codes. The room code (LR-101, LAB2) is the key the timetable, the monitor app and
 // every past session point at, so it is chosen once and never edited — everything else about a room
 // is. Retiring a room deactivates it rather than deleting it, which is why a room still carrying
 // timetable slots refuses to delete.
@@ -28,9 +28,9 @@ const blankForm = {
 
 export default function AdminRooms() {
   const { tenantId } = useParams<{ tenantId: string }>()
-  const rooms = useQuery<Room[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/rooms`), [tenantId])
-  const schools = useQuery<School[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
-  const depts = useQuery<Department[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/departments`), [tenantId])
+  const rooms = useQuery<Room[]>(() => api.get(`/api/v1/admin/rooms`), [tenantId])
+  const schools = useQuery<School[]>(() => api.get(`/api/v1/admin/schools`), [tenantId])
+  const depts = useQuery<Department[]>(() => api.get(`/api/v1/admin/departments`), [tenantId])
 
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(blankForm)
@@ -45,7 +45,7 @@ export default function AdminRooms() {
   async function create() {
     setSaving(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/rooms`, {
+      await api.post(`/api/v1/admin/rooms`, {
         room_code: form.room_code,
         name: form.name,
         building: form.building,
@@ -61,13 +61,13 @@ export default function AdminRooms() {
   }
 
   async function setActive(r: Room, is_active: boolean) {
-    await api.patch(`/api/v1/admin/tenants/${tenantId}/rooms/${encodeURIComponent(r.room_code)}`, { is_active })
+    await api.patch(`/api/v1/admin/rooms/${encodeURIComponent(r.room_code)}`, { is_active })
     rooms.refetch()
   }
 
   async function remove(r: Room) {
     if (!confirm(`Delete room ${r.room_code}?`)) return
-    try { await api.delete(`/api/v1/admin/tenants/${tenantId}/rooms/${encodeURIComponent(r.room_code)}`); rooms.refetch() }
+    try { await api.delete(`/api/v1/admin/rooms/${encodeURIComponent(r.room_code)}`); rooms.refetch() }
     catch (e) { alert(e instanceof Error ? e.message : 'Delete failed') }
   }
 
@@ -85,15 +85,15 @@ export default function AdminRooms() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <a href="/admin/tenants" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
+          <a href="/admin" style={{ color: 'var(--muted)', fontSize: 13, textDecoration: 'none' }}>← Home</a>
           <h2 style={{ margin: '4px 0 0' }}>Rooms &amp; Room Codes</h2>
           <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: 13 }}>
             The room code is what the timetable and the QA monitor app point at — pick it once, then keep it.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/rooms/export.xlsx`, 'rooms.xlsx')} style={btnGhost}>⭳ Export</button>
-          <ImportButton tenantId={tenantId!} onDone={rooms.refetch} />
+          <button onClick={() => api.download(`/api/v1/admin/rooms/export.xlsx`, 'rooms.xlsx')} style={btnGhost}>⭳ Export</button>
+          <ImportButton onDone={rooms.refetch} />
           <button onClick={() => setCreating(c => !c)} style={btnPrimary}>{creating ? 'Cancel' : '+ New Room'}</button>
         </div>
       </div>
@@ -182,7 +182,7 @@ export default function AdminRooms() {
 
       {editing && (
         <EditRoomModal
-          tenantId={tenantId!} room={editing}
+          room={editing}
           schools={schools.data ?? []} departments={depts.data ?? []}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); rooms.refetch() }}
@@ -192,8 +192,8 @@ export default function AdminRooms() {
   )
 }
 
-function EditRoomModal({ tenantId, room, schools, departments, onClose, onSaved }: {
-  tenantId: string; room: Room; schools: School[]; departments: Department[]
+function EditRoomModal({ room, schools, departments, onClose, onSaved }: {
+  room: Room; schools: School[]; departments: Department[]
   onClose: () => void; onSaved: () => void
 }) {
   const [f, setF] = useState({
@@ -209,7 +209,7 @@ function EditRoomModal({ tenantId, room, schools, departments, onClose, onSaved 
   async function save() {
     setBusy(true); setErr(null)
     try {
-      await api.patch(`/api/v1/admin/tenants/${tenantId}/rooms/${encodeURIComponent(room.room_code)}`, {
+      await api.patch(`/api/v1/admin/rooms/${encodeURIComponent(room.room_code)}`, {
         name: f.name, building: f.building,
         floor: f.floor === '' ? 0 : Number(f.floor),
         capacity: f.capacity === '' ? 0 : Number(f.capacity),
@@ -250,7 +250,7 @@ function EditRoomModal({ tenantId, room, schools, departments, onClose, onSaved 
   )
 }
 
-function ImportButton({ tenantId, onDone }: { tenantId: string; onDone: () => void }) {
+function ImportButton({ onDone }: { onDone: () => void }) {
   const ref = useRef<HTMLInputElement>(null)
   const [res, setRes] = useState<ImportResult | null>(null)
   const [busy, setBusy] = useState(false)
@@ -260,7 +260,7 @@ function ImportButton({ tenantId, onDone }: { tenantId: string; onDone: () => vo
     try {
       const form = new FormData()
       form.append('roster', file)
-      setRes(await api.upload<ImportResult>(`/api/v1/admin/tenants/${tenantId}/rooms/import`, form))
+      setRes(await api.upload<ImportResult>(`/api/v1/admin/rooms/import`, form))
       onDone()
     } catch (e) { alert(e instanceof Error ? e.message : 'Import failed') }
     finally { setBusy(false); if (ref.current) ref.current.value = '' }

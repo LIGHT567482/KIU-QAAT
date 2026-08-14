@@ -51,8 +51,8 @@ func StudentHome(adminPool *pgxpool.Pool) http.HandlerFunc {
 			       COALESCE(o.session_type,''), COALESCE(se.academic_year,''),
 			       COALESCE(se.current_year,0), COALESCE(se.semester,0), se.offering_id::text
 			FROM users u
-			JOIN students_extended se ON se.email = u.email AND se.tenant_id = u.tenant_id
-			LEFT JOIN courses c           ON c.course_id  = se.course_id  AND c.tenant_id = se.tenant_id
+			JOIN students_extended se ON se.email = u.email
+			LEFT JOIN courses c           ON c.course_id  = se.course_id 
 			LEFT JOIN course_offerings o  ON o.offering_id = se.offering_id
 			WHERE u.user_id = $1::uuid AND u.tenant_id = $2`, userID, tenantID).
 			Scan(&studentID, &fullName, &email, &course, &level, &intake, &sessionType,
@@ -76,8 +76,8 @@ func StudentHome(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SELECT DISTINCT cu.unit_id, cu.name, COALESCE(l.full_name,''),
 			       COALESCE(cu.year,0), COALESCE(cu.semester,0)
 			FROM course_units cu
-			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = cu.tenant_id
-			LEFT JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+			LEFT JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
+			LEFT JOIN lecturers l ON l.lecturer_id = la.lecturer_id
 			WHERE cu.tenant_id = $1
 			  AND cu.course_id = (SELECT course_id FROM students_extended WHERE student_id = $2 AND tenant_id = $1)
 			ORDER BY 4, 5, cu.name`, tenantID, studentID)
@@ -110,15 +110,14 @@ func StudentHome(adminPool *pgxpool.Pool) http.HandlerFunc {
 				       COALESCE(NULLIF(ts.room,''), COALESCE(ts.venue_id,'')),
 				       COALESCE(lec.full_name,'')
 				FROM timetable_slots ts
-				LEFT JOIN course_units cu ON cu.unit_id = ts.unit_id AND cu.tenant_id = ts.tenant_id
+				LEFT JOIN course_units cu ON cu.unit_id = ts.unit_id
 				LEFT JOIN LATERAL (
 				    SELECT l.full_name
 				    FROM lecturers l
-				    WHERE l.tenant_id = ts.tenant_id
-				      AND ( l.lecturer_id = ts.lecturer_id
+				    WHERE ( l.lecturer_id = ts.lecturer_id
 				         OR ( ts.lecturer_id IS NULL AND l.lecturer_id = (
 				               SELECT la.lecturer_id FROM lecturer_assignments la
-				               WHERE la.unit_id = ts.unit_id AND la.tenant_id = ts.tenant_id
+				               WHERE la.unit_id = ts.unit_id
 				               ORDER BY la.academic_year DESC LIMIT 1) ) )
 				    LIMIT 1
 				) lec ON true

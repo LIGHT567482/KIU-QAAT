@@ -249,11 +249,11 @@ func (s *Scheduler) record(ctx context.Context, name string, at time.Time, statu
 func AlreadySent(ctx context.Context, pool *pgxpool.Pool, tenantID, kind, subjectKey string, subjectDate time.Time, recipient string, channels string) (bool, error) {
 	var inserted bool
 	err := pool.QueryRow(ctx, `
-		INSERT INTO notification_log (tenant_id, kind, subject_key, subject_date, recipient_user_id, channels)
-		VALUES ($1, $2, $3, $4::date, NULLIF($5,'')::uuid, $6)
-		ON CONFLICT (tenant_id, kind, subject_key, subject_date) DO NOTHING
+		INSERT INTO notification_log (kind, subject_key, subject_date, recipient_user_id, channels)
+		VALUES ($1, $2, $3::date, NULLIF($4,'')::uuid, $5)
+		ON CONFLICT (kind, subject_key, subject_date) DO NOTHING
 		RETURNING true`,
-		tenantID, kind, subjectKey, subjectDate.Format("2006-01-02"), recipient, channels).Scan(&inserted)
+		kind, subjectKey, subjectDate.Format("2006-01-02"), recipient, channels).Scan(&inserted)
 	if err != nil {
 		// No row returned means the ON CONFLICT fired — already sent.
 		if err.Error() == "no rows in result set" {

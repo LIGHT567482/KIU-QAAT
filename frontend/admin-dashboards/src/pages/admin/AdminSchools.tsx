@@ -33,8 +33,8 @@ interface Dept { department_id: string; school_id: string; name: string; kind: s
 
 export default function AdminSchools() {
   const { tenantId } = useParams<{ tenantId: string }>()
-  const schoolsQ = useQuery<School[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
-  const deptsQ = useQuery<Dept[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/departments`), [tenantId])
+  const schoolsQ = useQuery<School[]>(() => api.get(`/api/v1/admin/schools`), [tenantId])
+  const deptsQ = useQuery<Dept[]>(() => api.get(`/api/v1/admin/departments`), [tenantId])
   const schools = schoolsQ.data ?? []
   const depts = deptsQ.data ?? []
 
@@ -72,7 +72,7 @@ export default function AdminSchools() {
     try {
       const fd = new FormData(); fd.append('roster', file)
       const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/org/import`, fd)
+        `/api/v1/admin/org/import`, fd)
       setImportMsg(
         `Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped` +
         (res.errors?.length ? ` · ${res.errors.length} problem(s): ${res.errors.slice(0, 3).join('; ')}` : ''))
@@ -86,7 +86,7 @@ export default function AdminSchools() {
     if (!newSchool.trim() || !newAbbr.trim()) return
     setBusy(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/schools`,
+      await api.post(`/api/v1/admin/schools`,
         { name: newSchool.trim(), abbreviation: newAbbr.trim() })
       setNewSchool(''); setNewAbbr(''); reload()
     }
@@ -102,7 +102,7 @@ export default function AdminSchools() {
     if (!e || !e.name.trim() || !e.abbreviation.trim()) return
     setBusy(true); setError(null)
     try {
-      await api.patch(`/api/v1/admin/tenants/${tenantId}/schools/${id}`,
+      await api.patch(`/api/v1/admin/schools/${id}`,
         { name: e.name.trim(), abbreviation: e.abbreviation.trim() })
       setEdit(p => { const n = { ...p }; delete n[id]; return n })
       reload()
@@ -112,7 +112,7 @@ export default function AdminSchools() {
   }
   async function delSchool(id: string) {
     if (!confirm('Delete this school and its departments?')) return
-    try { await api.delete(`/api/v1/admin/tenants/${tenantId}/schools/${id}`); reload() }
+    try { await api.delete(`/api/v1/admin/schools/${id}`); reload() }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to delete') }
   }
   async function addDept(schoolId: string) {
@@ -120,7 +120,7 @@ export default function AdminSchools() {
     if (!name) return
     setBusy(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/departments`, { school_id: schoolId, name, kind: 'ACADEMIC' })
+      await api.post(`/api/v1/admin/departments`, { school_id: schoolId, name, kind: 'ACADEMIC' })
       setDeptName(m => ({ ...m, [schoolId]: '' })); reload()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to add department') }
     finally { setBusy(false) }
@@ -132,14 +132,14 @@ export default function AdminSchools() {
     if (!name) return
     setBusy(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/departments`, { name, kind: 'SUPPORT' })
+      await api.post(`/api/v1/admin/departments`, { name, kind: 'SUPPORT' })
       setSupportName(''); reload()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed to add department') }
     finally { setBusy(false) }
   }
   async function delDept(id: string) {
     if (!confirm('Delete this department?')) return
-    try { await api.delete(`/api/v1/admin/tenants/${tenantId}/departments/${id}`); reload() }
+    try { await api.delete(`/api/v1/admin/departments/${id}`); reload() }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to delete') }
   }
 

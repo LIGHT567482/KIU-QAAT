@@ -32,7 +32,7 @@ const BLANK = { staff_id: '', title: '', full_name: '', department: '', job_titl
 
 export default function AdminEmployees() {
   const { tenantId } = useParams<{ tenantId: string }>()
-  const { status, data, refetch } = useQuery<Employee[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/employees`))
+  const { status, data, refetch } = useQuery<Employee[]>(() => api.get(`/api/v1/admin/employees`))
   const [creating, setCreating] = useState(false)
   const org = useOrg(tenantId ?? '')
   const [form, setForm] = useState({ ...BLANK })
@@ -56,7 +56,7 @@ export default function AdminEmployees() {
   async function handleCreate() {
     setSaving(true); setError(null)
     try {
-      await api.post(`/api/v1/admin/tenants/${tenantId}/employees`, form)
+      await api.post(`/api/v1/admin/employees`, form)
       setCreating(false); setForm({ ...BLANK }); refetch()
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setSaving(false) }
@@ -84,7 +84,7 @@ export default function AdminEmployees() {
     try {
       const fd = new FormData(); fd.append('roster', file)
       const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/employees/import`, fd)
+        `/api/v1/admin/employees/import`, fd)
       setImportMsg(`Imported: ${res.inserted} new, ${res.updated} updated, ${res.skipped} skipped${res.errors?.length ? ` · ${res.errors.length} error(s): ${res.errors.slice(0, 3).join('; ')}` : ''}`)
       refetch()
     } catch (e) { setImportMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed') }
@@ -109,7 +109,7 @@ export default function AdminEmployees() {
         <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnSmall}>{importing ? 'Importing…' : 'Import CSV/Excel'}</button>
         <input ref={fileRef} type="file" accept=".csv,.xlsx" onChange={handleImport} style={{ display: 'none' }} />
         <button onClick={() => downloadText('employees_template.csv', EMP_COLS.join(',') + '\n')} style={btnSmall} title="Blank template with the employee columns">Template</button>
-        <button onClick={() => api.download(`/api/v1/admin/tenants/${tenantId}/employees/export.xlsx`, 'employees.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall}>Export Excel</button>
+        <button onClick={() => api.download(`/api/v1/admin/employees/export.xlsx`, 'employees.xlsx').catch(e => alert(e instanceof Error ? e.message : 'Export failed'))} style={btnSmall}>Export Excel</button>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, ID, department…" style={{ ...inp, flex: 1, minWidth: 200 }} />
       </div>
       {importMsg && <div style={{ background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>{importMsg}</div>}

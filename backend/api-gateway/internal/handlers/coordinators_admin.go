@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -47,8 +46,8 @@ func queryCoordinators(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 		       COALESCE(o.study_year, 0), COALESCE(o.semester, 0), COALESCE(o.intake,''),
 		       u.is_active
 		FROM users u
-		LEFT JOIN course_offerings o ON o.coordinator_id = u.user_id::text AND o.tenant_id = u.tenant_id
-		LEFT JOIN courses c ON c.course_id = o.course_id AND c.tenant_id = u.tenant_id
+		LEFT JOIN course_offerings o ON o.coordinator_id = u.user_id::text
+		LEFT JOIN courses c ON c.course_id = o.course_id
 		WHERE u.tenant_id = $1 AND u.role = 'COORDINATOR'
 		ORDER BY u.full_name`, tenantID)
 	if err != nil {
@@ -76,7 +75,7 @@ func yearSemLabel(c coordinatorRow) string {
 // GET /api/v1/admin/tenants/{tenant_id}/coordinators
 func ListCoordinators(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		list, err := queryCoordinators(r.Context(), adminPool, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -94,7 +93,7 @@ var coordinatorExportCols = []string{
 // GET /api/v1/admin/tenants/{tenant_id}/coordinators/export.xlsx
 func ExportCoordinatorsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		list, err := queryCoordinators(r.Context(), adminPool, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -123,7 +122,7 @@ func ExportCoordinatorsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 // registration_number].
 func ImportCoordinators(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(16 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return

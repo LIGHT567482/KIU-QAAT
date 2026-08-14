@@ -1,10 +1,8 @@
 package ug.qaat.coordinator.student
 
 import android.content.Context
-import android.net.ConnectivityManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.net.wifi.WifiManager
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -21,7 +19,7 @@ import kotlin.coroutines.resume
 class Discovery(context: Context) {
     private val appContext = context.applicationContext
     private val nsd = appContext.getSystemService(Context.NSD_SERVICE) as NsdManager
-    private val lan = StudentNet.lanClient()
+    private val lan = StudentNet.lanClient(appContext)
 
     suspend fun find(timeoutMs: Long = 6000): String? {
         // 1) The real gateway of the network this phone joined = the coordinator's phone. Direct,
@@ -41,34 +39,12 @@ class Discovery(context: Context) {
         return null
     }
 
-    /** Candidate gateway IPs for the Wi-Fi this phone is currently joined to, derived from DHCP.
-     *  Ordered best-first and de-duplicated; invalid/zero addresses are dropped. */
-    private fun gatewayCandidates(): List<String> {
-        val out = LinkedHashSet<String>()
-        // Modern path: the default route's gateway on the active network.
-        runCatching {
-            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            cm.activeNetwork?.let { cm.getLinkProperties(it) }?.routes?.forEach { r ->
-                if (r.isDefaultRoute) r.gateway?.hostAddress?.let { if (it.contains('.')) out.add(it) }
-            }
-        }
-        // Legacy path (works even when the active-network default route is hidden): Wi-Fi DHCP info.
-        runCatching {
-            val wifi = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            @Suppress("DEPRECATION") val dhcp = wifi.dhcpInfo
-            if (dhcp != null) {
-                intToIp(dhcp.gateway)?.let { out.add(it) }
-                intToIp(dhcp.serverAddress)?.let { out.add(it) }   // on a phone hotspot, usually == gateway
-                // The gateway is almost always .1 of this phone's own subnet — a solid backstop.
-                intToIp(dhcp.ipAddress)?.substringBeforeLast('.', "")?.takeIf { it.isNotBlank() }?.let { out.add("$it.1") }
-            }
-        }
-        return out.filter { it != "0.0.0.0" && !it.startsWith("0.") }
-    }
-
-    // DhcpInfo stores addresses as little-endian ints (low byte = first octet). Returns null for 0.
-    private fun intToIp(a: Int): String? =
-        if (a == 0) null else "${a and 0xff}.${a shr 8 and 0xff}.${a shr 16 and 0xff}.${a shr 24 and 0xff}"
+    /** Candidate gateway IPs for the Wi-Fi this phone is currently joined to.
+     *
+     *  Delegated to [LanNetwork], which reads the WI-FI network's LinkProperties rather than the
+     *  ACTIVE network's. On an internet-less hotspot the active network is cellular, so the old
+     *  code collected the mobile gateway and the hotspot was never probed at all. */
+    private fun gatewayCandidates(): List<String> = LanNetwork.gateways(appContext)
 
     private suspend fun probe(baseUrl: String): Boolean = runCatching {
         lan.get("$baseUrl/session").status.value in 200..299

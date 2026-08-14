@@ -117,9 +117,14 @@ func TestRLS_AllTenantTables_WildcardSelectIsolated(t *testing.T) {
 	pool := getPool(t)
 	ctx := context.Background()
 
+	// Only tables that STILL carry a tenant_id. hardware_vault and admin_audit_log were in this
+	// list and have since been de-tenanted: countOwn() filters on `WHERE tenant_id = $1`, so
+	// against a table without that column it errors, the error is discarded, and the count stays
+	// 0 while countAll() returns the real row count — failing the assertion for a reason that has
+	// nothing to do with row-level security. A table with no tenant_id has no tenant to isolate.
 	tables := []string{
 		"users", "sessions", "attendance_logs", "students_extended",
-		"courses", "course_units", "venues", "hardware_vault", "admin_audit_log",
+		"courses", "course_units", "venues",
 	}
 
 	for _, tbl := range tables {

@@ -41,21 +41,61 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 			args = append(args, unitID)
 			unitClause = " AND cu.unit_id = $3"
 		}
+		// EVERY branch below carries lecturerNiche (see lecturer_recipients.go). Without it these
+		// joined offerings on the COURSE, so a lecturer reached the students and coordinators of
+		// cohorts they do not teach — the Evening and Weekend runs of a course they only take the
+		// Day class for. A message is not harmless when it goes to the wrong people: it tells three
+		// coordinators a room they do not run has no projector, and the one who should act assumes
+		// somebody else will.
 		switch audience {
 		case "STUDENTS":
 			sql = `SELECT DISTINCT u.user_id::text
 				FROM lecturer_assignments la
-				JOIN course_units cu     ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-				JOIN course_offerings o  ON o.course_id = cu.course_id AND o.tenant_id = cu.tenant_id
-				JOIN students_extended s ON s.offering_id = o.offering_id AND s.tenant_id = o.tenant_id AND s.enrollment_status='ACTIVE'
-				JOIN users u ON lower(u.email) = lower(s.email) AND u.tenant_id = s.tenant_id
-				WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid` + unitClause
-		case "COORDINATOR":
+				JOIN course_units cu     ON cu.unit_id = la.unit_id
+				JOIN course_offerings o  ON o.course_id = cu.course_id
+				JOIN students_extended s ON s.offering_id = o.offering_id AND s.enrollment_status='ACTIVE'
+				JOIN users u ON lower(u.email) = lower(s.email)
+				WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid` + unitClause + lecturerNiche
+
+		case "STUDENT":
+			// ONE student, addressed by registration number. The lecturer must actually teach them:
+			// the roster this is picked from is already scoped, but the target arrives from a
+			// client and a client is the least trusted thing here.
+			//
+			// unitClause is carried here for the same reason its siblings carry it, and its absence
+			// was a live tripwire rather than a missing feature: when unit_id was supplied, $3 was
+			// BOUND and referenced nowhere, and Postgres cannot infer a type for a parameter that
+			// never appears — the send would have failed outright with "could not determine data
+			// type of parameter $3". No shipping client sends unit_id, so nobody had hit it; the
+			// first person to wire up the per-unit filter would have.
+			args = append(args, targetID)
+			sql = `SELECT DISTINCT u.user_id::text
+				FROM lecturer_assignments la
+				JOIN course_units cu     ON cu.unit_id = la.unit_id
+				JOIN course_offerings o  ON o.course_id = cu.course_id
+				JOIN students_extended s ON s.offering_id = o.offering_id AND s.enrollment_status='ACTIVE'
+				JOIN users u ON lower(u.email) = lower(s.email)
+				WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
+				  AND btrim(lower(s.student_id)) = btrim(lower($` + itoa(len(args)) + `))` + unitClause + lecturerNiche
+
+		case "COORDINATOR", "COORDINATORS":
+			// ONE coordinator when a target is given, all of the lecturer's coordinators when it is
+			// not. A lecturer teaching one unit to four cohorts has four coordinators, and the
+			// message they have in mind is almost always for exactly one of them — but "tell all my
+			// coordinators" is a real thing to want too, and it is what this endpoint has always
+			// done, so a handset that has not been updated keeps working rather than being told to
+			// pick from a list its build has no screen for.
+			target := ""
+			if targetID != "" {
+				args = append(args, targetID)
+				target = ` AND o.coordinator_id = $` + itoa(len(args))
+			}
 			sql = `SELECT DISTINCT o.coordinator_id
 				FROM lecturer_assignments la
-				JOIN course_units cu    ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-				JOIN course_offerings o ON o.course_id = cu.course_id AND o.tenant_id = cu.tenant_id
-				WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid AND COALESCE(o.coordinator_id,'') <> ''` + unitClause
+				JOIN course_units cu    ON cu.unit_id = la.unit_id
+				JOIN course_offerings o ON o.course_id = cu.course_id
+				WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
+				  AND COALESCE(o.coordinator_id,'') <> ''` + unitClause + target + lecturerNiche
 		default:
 			return nil, nil
 		}
@@ -71,32 +111,32 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		case "STUDENTS":
 			sql = `SELECT DISTINCT u.user_id::text
 				FROM course_offerings o
-				JOIN students_extended s ON s.offering_id = o.offering_id AND s.tenant_id = o.tenant_id AND s.enrollment_status='ACTIVE'
-				JOIN users u ON lower(u.email) = lower(s.email) AND u.tenant_id = s.tenant_id
+				JOIN students_extended s ON s.offering_id = o.offering_id AND s.enrollment_status='ACTIVE'
+				JOIN users u ON lower(u.email) = lower(s.email)
 				WHERE o.tenant_id = $1 AND o.coordinator_id = $2`
 		case "LECTURERS":
 			sql = `SELECT DISTINCT l.user_id::text
 				FROM course_offerings o
-				JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
-				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-				JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+				JOIN course_units cu ON cu.course_id = o.course_id
+				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
+				JOIN lecturers l ON l.lecturer_id = la.lecturer_id
 				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL` + unitClause
 		case "STUDENT":
 			// One specific student, but ONLY if they belong to this coordinator's cohort.
 			args = append(args, targetID)
 			sql = fmt.Sprintf(`SELECT u.user_id::text
 				FROM course_offerings o
-				JOIN students_extended s ON s.offering_id = o.offering_id AND s.tenant_id = o.tenant_id AND s.enrollment_status='ACTIVE'
-				JOIN users u ON lower(u.email) = lower(s.email) AND u.tenant_id = s.tenant_id
+				JOIN students_extended s ON s.offering_id = o.offering_id AND s.enrollment_status='ACTIVE'
+				JOIN users u ON lower(u.email) = lower(s.email)
 				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND s.student_id = $%d`, len(args))
 		case "LECTURER":
 			// One specific lecturer, but ONLY if they teach a unit of this coordinator's course.
 			args = append(args, targetID)
 			sql = fmt.Sprintf(`SELECT DISTINCT l.user_id::text
 				FROM course_offerings o
-				JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
-				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-				JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+				JOIN course_units cu ON cu.course_id = o.course_id
+				JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
+				JOIN lecturers l ON l.lecturer_id = la.lecturer_id
 				WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL AND l.lecturer_id::text = $%d`, len(args))
 		default:
 			return nil, nil
@@ -130,9 +170,9 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		}
 		lecturersInScope := `
 			FROM lecturers l
-			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			WHERE l.tenant_id = $1 AND l.user_id IS NOT NULL AND btrim(lower(` + scopeCol + `)) = ANY($2)`
 		switch audience {
 		case "LECTURERS": // bulk — every lecturer in scope
@@ -155,16 +195,16 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 			args = append(args, scopeVals)
 			sql = `SELECT u.user_id::text
 				FROM users u
-				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
-				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department))
+				JOIN schools s ON s.school_id = d.school_id
 				WHERE u.tenant_id = $1 AND u.role = 'HOD'
 				  AND (btrim(lower(s.name)) = ANY($2) OR btrim(lower(COALESCE(s.abbreviation,''))) = ANY($2))`
 		case "HOD": // one specific head of department, if they run a department of this school
 			args = append(args, scopeVals, targetID)
 			sql = `SELECT u.user_id::text
 				FROM users u
-				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department)) AND d.tenant_id = u.tenant_id
-				JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				JOIN departments d ON btrim(lower(d.name)) = btrim(lower(u.department))
+				JOIN schools s ON s.school_id = d.school_id
 				WHERE u.tenant_id = $1 AND u.role = 'HOD'
 				  AND (btrim(lower(s.name)) = ANY($2) OR btrim(lower(COALESCE(s.abbreviation,''))) = ANY($2))
 				  AND u.user_id::text = $3`
@@ -182,7 +222,7 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 				      SELECT unnest(ARRAY[btrim(lower(COALESCE(s.name,''))),
 				                          btrim(lower(COALESCE(s.abbreviation,'')))])
 				      FROM departments d
-				      LEFT JOIN schools s ON s.school_id = d.school_id AND s.tenant_id = d.tenant_id
+				      LEFT JOIN schools s ON s.school_id = d.school_id
 				      WHERE d.tenant_id = $1 AND btrim(lower(d.name)) = btrim(lower($2)))`
 		default:
 			return nil, nil
@@ -201,13 +241,17 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 	// whose remit is the whole institution, so the scope is the tenant.
 	case middleware.RoleQAOfficer, middleware.RoleDQADirector:
 		switch audience {
-		case "PATROLLERS": // every patroller in the institution
+		// MONITORS/MONITOR are what the dashboards send now that the role is called QA Monitor.
+		// The old spellings are still accepted because a handset or a browser tab that has not
+		// been reloaded since the rename would otherwise fail to send a briefing, and the failure
+		// would look like the messaging feature being broken rather than a stale client.
+		case "MONITORS", "PATROLLERS": // every monitor in the institution
 			// is_active, because a suspended or departed patroller must not receive a round
 			// briefing — and because a message that reports "sent to 9" when 3 of them cannot
 			// sign in is worse than no number at all.
 			sql = `SELECT user_id::text FROM users
 				WHERE tenant_id = $1 AND role = 'QA_PATROLLER' AND COALESCE(is_active, true)`
-		case "PATROLLER": // one patroller, addressed by their staff id
+		case "MONITOR", "PATROLLER": // one monitor, addressed by their staff id
 			args = append(args, targetID)
 			sql = `SELECT user_id::text FROM users
 				WHERE tenant_id = $1 AND role = 'QA_PATROLLER' AND COALESCE(is_active, true)
@@ -232,6 +276,26 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 		return nil, nil
 	}
 
+	// EVERY BOUND PARAMETER MUST BE REFERENCED, checked before the query is ever sent.
+	//
+	// The SQL above is assembled from fragments whose placeholder numbers are computed from the
+	// length of `args` as it grows, and the fragments are appended CONDITIONALLY. That is a shape
+	// where one missing `+ unitClause` silently leaves a hole in the numbering — which is exactly
+	// what happened in the lecturer→STUDENT branch, and Postgres answers such a query with "could
+	// not determine data type of parameter $3": a message that names no audience, no role and no
+	// feature, and sends whoever reads it to the wrong place entirely.
+	//
+	// Catching it here costs one pass over a short string and turns the whole class of mistake
+	// into a named, greppable failure. It is deliberately an ERROR and not a repair: a query with
+	// a dangling parameter is one whose author meant something we cannot infer, and quietly
+	// dropping the filter could send a message to a wider audience than intended.
+	if gaps := danglingParams(sql, len(args)); len(gaps) > 0 {
+		return nil, fmt.Errorf(
+			"notification audience %q for role %s built a query binding %d parameters but never "+
+				"referencing %v — this is a bug in resolveRecipients, not a bad request",
+			audience, senderRole, len(args), gaps)
+	}
+
 	rows, err := pool.Query(r.Context(), sql, args...)
 	if err != nil {
 		return nil, err
@@ -247,6 +311,37 @@ func resolveRecipients(pool *pgxpool.Pool, r *http.Request, tenantID, senderID, 
 	return ids, nil
 }
 
+// danglingParams reports which of the argc bound parameters ($1…$argc) never appear in sql.
+//
+// Pure and dependency-free so the rule can be tested exhaustively without a database — see
+// app_notifications_test.go. Scanning for "$<digits>" is sufficient here because these queries are
+// built from our own fragments: there are no dollar-quoted string literals and no user text is
+// concatenated in, only placeholders.
+func danglingParams(sql string, argc int) []int {
+	seen := make([]bool, argc+1)
+	for i := 0; i < len(sql); i++ {
+		if sql[i] != '$' {
+			continue
+		}
+		n, j := 0, i+1
+		for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
+			n = n*10 + int(sql[j]-'0')
+			j++
+		}
+		if j > i+1 && n >= 1 && n <= argc {
+			seen[n] = true
+		}
+		i = j - 1
+	}
+	var missing []int
+	for n := 1; n <= argc; n++ {
+		if !seen[n] {
+			missing = append(missing, n)
+		}
+	}
+	return missing
+}
+
 // CoordinatorLecturers — GET /api/v1/coordinator/lecturers → the lecturers who teach this
 // coordinator's course units (id + name), so the composer can target one specifically.
 func CoordinatorLecturers(pool *pgxpool.Pool) http.HandlerFunc {
@@ -256,9 +351,9 @@ func CoordinatorLecturers(pool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := pool.Query(r.Context(), `
 			SELECT DISTINCT l.lecturer_id::text, l.full_name, COALESCE(l.staff_id,'')
 			FROM course_offerings o
-			JOIN course_units cu ON cu.course_id = o.course_id AND cu.tenant_id = o.tenant_id
-			JOIN lecturer_assignments la ON la.unit_id = cu.unit_id AND la.tenant_id = o.tenant_id
-			JOIN lecturers l ON l.lecturer_id = la.lecturer_id AND l.tenant_id = la.tenant_id
+			JOIN course_units cu ON cu.course_id = o.course_id
+			JOIN lecturer_assignments la ON la.unit_id = cu.unit_id
+			JOIN lecturers l ON l.lecturer_id = la.lecturer_id
 			WHERE o.tenant_id = $1 AND o.coordinator_id = $2 AND l.user_id IS NOT NULL
 			ORDER BY l.full_name`, tenantID, coordID)
 		if err != nil {
@@ -318,7 +413,10 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 		// chain is a channel in both directions instead of a gap everyone routed around by
 		// notifying every lecturer at once.
 		valid := map[string]map[string]bool{
-			middleware.RoleLecturer:    {"STUDENTS": true, "COORDINATOR": true},
+			// A lecturer addresses their whole class, one student, all of their coordinators, or —
+			// the case this was missing — ONE coordinator, because one unit is routinely taught to
+			// four cohorts with four different coordinators.
+			middleware.RoleLecturer:    {"STUDENTS": true, "STUDENT": true, "COORDINATOR": true, "COORDINATORS": true},
 			middleware.RoleCoordinator: {"STUDENTS": true, "LECTURERS": true, "STUDENT": true, "LECTURER": true},
 			middleware.RoleHOD:         {"LECTURERS": true, "LECTURER": true, "DEAN": true, "DQA": true, "ADMIN": true},
 			middleware.RoleDean:        {"LECTURERS": true, "LECTURER": true, "HODS": true, "HOD": true, "DQA": true, "ADMIN": true},
@@ -327,15 +425,15 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			// Quality Assurance reaches its own field staff. PATROLLERS is the round briefing —
 			// institution-wide, because that is the scope patrollers work at; PATROLLER is one
 			// person, by staff id.
-			middleware.RoleQAOfficer:   {"PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
-			middleware.RoleDQADirector: {"PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
+			middleware.RoleQAOfficer:   {"MONITORS": true, "MONITOR": true, "PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
+			middleware.RoleDQADirector: {"MONITORS": true, "MONITOR": true, "PATROLLERS": true, "PATROLLER": true, "LECTURERS": true, "LECTURER": true, "COORDINATORS": true},
 		}
 		if !valid[role][req.Audience] {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "invalid audience for your role"))
 			return
 		}
 		if (req.Audience == "STUDENT" || req.Audience == "LECTURER" || req.Audience == "HOD" ||
-			req.Audience == "PATROLLER") && req.TargetID == "" {
+			req.Audience == "PATROLLER" || req.Audience == "MONITOR") && req.TargetID == "" {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "pick a recipient"))
 			return
 		}
@@ -353,8 +451,18 @@ func SendAppNotification(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 		}
 		recipients = filtered
+		// NOBODY TO SEND TO IS NOT A SEND.
+		//
+		// This answered "SENT, recipients: 0" — a success the app shows as a success, for a message
+		// that went nowhere. It was always wrong (a QA officer briefing a team that has no members
+		// believes they briefed it), and targeting made it dangerous: a lecturer picking a
+		// particular coordinator whose id no longer resolves — stale list, cohort reassigned, the
+		// target simply not theirs to write to — gets a tick and never learns the message was
+		// discarded. The one thing they cannot afford is to think it arrived.
 		if len(recipients) == 0 {
-			writeJSON(w, http.StatusOK, map[string]interface{}{"status": "SENT", "recipients": 0})
+			writeJSON(w, http.StatusUnprocessableEntity, errBody("NO_RECIPIENTS",
+				"nobody could be found to send this to — the person or group you chose is not one "+
+					"you can write to, or has no active accounts. Nothing was sent."))
 			return
 		}
 
@@ -410,11 +518,15 @@ func ListAppNotifications(pool *pgxpool.Pool) http.HandlerFunc {
 		rows, err := pool.Query(r.Context(), `
 			SELECT n.notification_id::text, n.sender_name, COALESCE(u.title,''), n.sender_role,
 			       COALESCE(n.unit_id,''),
-			       n.subject, n.body, n.created_at, (nr.read_at IS NOT NULL)
+			       n.subject, n.body, n.created_at, (nr.read_at IS NOT NULL),
+			       -- What the reader can DO about it (migration 090). A "not taught" finding
+			       -- travels with the reply to it, so the lecturer answers the accusation from the
+			       -- message rather than having to know which other screen the answer lives on.
+			       COALESCE(n.action,''), COALESCE(n.action_ref,'')
 			FROM notification_recipients nr
 			JOIN app_notifications n ON n.notification_id = nr.notification_id
 			-- Rows written before titles were stored still get one, via the sender's account.
-			LEFT JOIN users u ON u.user_id = n.sender_id AND u.tenant_id = n.tenant_id
+			LEFT JOIN users u ON u.user_id = n.sender_id
 			WHERE nr.tenant_id = $1 AND nr.recipient_user_id = $2::uuid
 			  AND nr.dismissed_at IS NULL
 			ORDER BY n.created_at DESC LIMIT 300`, tenantID, userID)
@@ -432,6 +544,8 @@ func ListAppNotifications(pool *pgxpool.Pool) http.HandlerFunc {
 			Body           string `json:"body"`
 			CreatedAt      string `json:"created_at"`
 			Read           bool   `json:"read"`
+			Action         string `json:"action"`     // "" | APPEAL_NOT_TAUGHT
+			ActionRef      string `json:"action_ref"` // unit|YYYY-MM-DD|HH:MM
 		}
 		out := []notif{}
 		for rows.Next() {
@@ -439,7 +553,7 @@ func ListAppNotifications(pool *pgxpool.Pool) http.HandlerFunc {
 			var created time.Time
 			var title string
 			if rows.Scan(&n.NotificationID, &n.SenderName, &title, &n.SenderRole, &n.UnitID,
-				&n.Subject, &n.Body, &created, &n.Read) != nil {
+				&n.Subject, &n.Body, &created, &n.Read, &n.Action, &n.ActionRef) != nil {
 				continue
 			}
 			n.SenderName = withTitle(title, n.SenderName)

@@ -93,12 +93,12 @@ func RegisterDevice(adminPool *pgxpool.Pool) http.HandlerFunc {
 
 		// Upsert. On a rebind we set the 12h attendance cooldown; a same-device re-onboard clears it.
 		if _, err := adminPool.Exec(ctx,
-			`INSERT INTO student_device_bindings (student_id, tenant_id, device_fingerprint_hash, attend_block_until)
-			 VALUES ($1, $2, $3, $4)
+			`INSERT INTO student_device_bindings (student_id, device_fingerprint_hash, attend_block_until)
+			 VALUES ($1, $2, $3)
 			 ON CONFLICT (student_id)
 			 DO UPDATE SET device_fingerprint_hash = EXCLUDED.device_fingerprint_hash,
 			               attend_block_until = EXCLUDED.attend_block_until, updated_at = now()`,
-			reg, tenantID, fp, blockUntil); err != nil {
+			reg, fp, blockUntil); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "could not register this device"))
 			return
 		}

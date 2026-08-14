@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -80,7 +79,7 @@ func parsePunchTime(dt, dateOnly, timeOnly string) (time.Time, bool) {
 // POST /api/v1/admin/tenants/{tenant_id}/employee-attendance/import  (field "punches")
 func ImportEmployeePunches(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return
@@ -144,10 +143,10 @@ func ImportEmployeePunches(adminPool *pgxpool.Pool) http.HandlerFunc {
 				tenantID, staffID, title, name)
 
 			ct, e := adminPool.Exec(r.Context(), `
-				INSERT INTO employee_attendance_logs (tenant_id, staff_id, event_time, event_type, source, comment)
-				VALUES ($1,$2,$3,$4,'TABLET',NULLIF($5,''))
-				ON CONFLICT (tenant_id, staff_id, event_time, event_type) DO NOTHING`,
-				tenantID, staffID, evtTime.UTC(), evtType, comment)
+				INSERT INTO employee_attendance_logs (staff_id, event_time, event_type, source, comment)
+				VALUES ($1,$2,$3,'TABLET',NULLIF($4,''))
+				ON CONFLICT (staff_id, event_time, event_type) DO NOTHING`,
+				staffID, evtTime.UTC(), evtType, comment)
 			if e != nil {
 				res.Skipped++
 				res.Errors = append(res.Errors, fmt.Sprintf("line %d: %s", ln, e.Error()))
@@ -180,7 +179,7 @@ type punch struct {
 // GET /api/v1/admin/tenants/{tenant_id}/employee-attendance?from=YYYY-MM-DD&to=YYYY-MM-DD&department=
 func EmployeeAttendanceReport(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		from, to := dateRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 		dept := strings.TrimSpace(r.URL.Query().Get("department"))
 
@@ -215,8 +214,8 @@ func EmployeeAttendanceReport(adminPool *pgxpool.Pool) http.HandlerFunc {
 		punchRows, err := adminPool.Query(r.Context(), `
 			SELECT staff_id, event_time, event_type
 			FROM employee_attendance_logs
-			WHERE tenant_id = $1 AND event_time >= $2 AND event_time < $3
-			ORDER BY staff_id, event_time`, tenantID, from, to)
+			WHERE event_time >= $1 AND event_time < $2
+			ORDER BY staff_id, event_time`, from, to)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

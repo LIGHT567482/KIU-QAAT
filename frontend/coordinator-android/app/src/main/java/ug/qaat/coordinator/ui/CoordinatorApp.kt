@@ -128,7 +128,7 @@ private suspend fun refreshAll() {
  * decides which experience the user sees, and an unrecognised role gets none of them.
  *
  * The final branch matters. It used to be `else -> CoordinatorApp()`, which meant ANY role the app
- * did not recognise was handed the coordinator's in-room hub: a QA patroller, a dean, a QA
+ * did not recognise was handed the coordinator's in-room hub: a QA monitor, a dean, a QA
  * department rep signing in got the screen that opens sessions, runs the class hotspot and holds
  * the roster. Their token was correctly scoped so the server refused the calls — but the app put
  * the controls in front of them and let them try. Unknown now means no role UI at all, rather than
@@ -418,7 +418,7 @@ private fun CoordinatorComposer(onSent: () -> Unit) {
 private fun defaultPasswordForRole(role: String?): String = when (role) {
     "STUDENT" -> "student"
     "LECTURER" -> "lecturer"
-    "QA_PATROLLER" -> "patroller"
+    "QA_PATROLLER" -> "monitor"
     else -> ""
 }
 
@@ -426,8 +426,8 @@ private fun defaultPasswordForRole(role: String?): String = when (role) {
  * The thing the user typed into the sign-in screen — a staff email, a registration number or a
  * staff id. Needed to sign them back in with their NEW password the moment they set one.
  *
- * Two sources because a QA patroller has only the second: their saved credentials are erased the
- * instant their role is known (a lost handset must not resume a patrol round), so by the time they
+ * Two sources because a QA monitor has only the second: their saved credentials are erased the
+ * instant their role is known (a lost handset must not resume a monitor round), so by the time they
  * change a password from the profile there is nothing under `cred_id`. The session's own record of
  * who signed in survives that erasure, because it is not a password.
  */
@@ -440,7 +440,7 @@ private fun signInIdentifier(): String? =
  * new token rather than the one it replaced.
  *
  * [keepCredentials] is false for anyone whose saved password was deliberately erased — writing it
- * back here would quietly undo the patroller rule that a handset can never walk back into a round.
+ * back here would quietly undo the monitor rule that a handset can never walk back into a round.
  */
 private fun adoptSession(res: AuthClient.Result, identifier: String, password: String, keepCredentials: Boolean) {
     AppState.token = res.token
@@ -468,7 +468,7 @@ private fun adoptSession(res: AuthClient.Result, identifier: String, password: S
 internal fun ChangePasswordDialog(onClose: () -> Unit, mandatory: Boolean = false) {
     // Pre-fill the CURRENT field with this ROLE's seeded default, not with the word "Student".
     //
-    // It was hardcoded to "Student" for everyone. A lecturer or a patroller was therefore shown
+    // It was hardcoded to "Student" for everyone. A lecturer or a monitor was therefore shown
     // somebody else's password, tapped "Save & proceed", and was told their existing password was
     // wrong — on the one screen with no way forward and no way around. Even a student was shown
     // the wrong casing of their own. The defaults are public (they are the role's own name), so

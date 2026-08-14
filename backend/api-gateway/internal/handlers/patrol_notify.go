@@ -39,7 +39,7 @@ import (
 // Nothing is lost to accountability: lecturer_patrol_logs still stores patroller_id,
 // patroller_name and patroller_staff_id on every row, and the QA patrol reports read them. The
 // name is simply not what a lecturer is shown.
-const patrolSenderName = "QA Patrol"
+const patrolSenderName = "QA Monitor"
 
 // lectureWhen renders a slot the way the timetable says it — "Wed 6 Aug at 14:00" — from the
 // date and start time carried on the tick.
@@ -95,7 +95,7 @@ func venueChangeRecipients(ctx context.Context, conn interface {
 		    SELECT COALESCE(c.department, '') AS department,
 		           COALESCE(c.school, '')     AS school
 		      FROM course_units cu
-		      JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+		      JOIN courses c ON c.course_id = cu.course_id
 		     WHERE cu.unit_id = $2 AND cu.tenant_id = $1
 		     LIMIT 1
 		)
@@ -118,7 +118,7 @@ func venueChangeRecipients(ctx context.Context, conn interface {
 		     -- a QA handler covering several colleges (migration 075)
 		     OR (u.role = 'QA_SCHOOL_HANDLER' AND o.school <> '' AND EXISTS (
 		           SELECT 1 FROM user_schools us
-		             JOIN schools s ON s.school_id = us.school_id AND s.tenant_id = us.tenant_id
+		             JOIN schools s ON s.school_id = us.school_id
 		            WHERE us.user_id = u.user_id
 		              AND btrim(lower(s.name)) = btrim(lower(o.school))))
 		     -- quality assurance sees every informal change, institution-wide

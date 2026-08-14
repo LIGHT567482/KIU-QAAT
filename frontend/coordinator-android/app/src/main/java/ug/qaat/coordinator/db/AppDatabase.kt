@@ -84,14 +84,28 @@ data class TimetableSlotEntity(
     val room: String = "",
     val lecturerName: String = "",
     val lecturerPhone: String = "",
+    /**
+     * WHO IS TEACHING, AND WHICH COMBINED LECTURE THIS IS — the two things a phone needs to derive
+     * the three digits a lecturer reads across the room. See CombinedClassCode.
+     *
+     * [lecturerId] is the lecturers UUID, not the KIU-XXXXX staff id: it is what the server hashes,
+     * and a phone that hashed the staff id instead would derive a number nobody else agrees with.
+     *
+     * [combinedClassKey] is blank on ordinary lectures and set ONLY when this slot really does share
+     * its room and hour with another cohort — the server decides that, because a phone's manifest
+     * holds only its own offering's slots and it cannot see the cohort next door. So "this slot has
+     * a key" reads as "this lecture is shared", which is what puts the code field on screen.
+     */
+    val lecturerId: String = "",
+    val combinedClassKey: String = "",
 )
 
 /**
- * One timetabled slot, cached so the QA patroller works with no signal.
+ * One timetabled slot, cached so the QA monitor works with no signal.
  *
- * The patroller used to be a separate app with its own plain-SQLite database. It now lives in
+ * The monitor used to be a separate app with its own plain-SQLite database. It now lives in
  * this one, which means its cached timetable and its queued observations are encrypted at rest
- * by the same SQLCipher key as everything else — a patrol round is a record of who was and
+ * by the same SQLCipher key as everything else — a monitor round is a record of who was and
  * wasn't teaching, and that is not something to leave in the clear on a phone.
  */
 // The key is (unit, OFFERING, day, start), and every part of it earns its place.
@@ -102,7 +116,7 @@ data class TimetableSlotEntity(
 // offeringId, because two cohorts — Day and Evening, or two intakes — can run the SAME unit at the
 // SAME hour in different rooms with different lecturers. That is what the field below already
 // exists to distinguish, and leaving it out of the key meant one of those two lectures silently
-// replaced the other in the cache: the patroller could only ever find one of them, and the tick
+// replaced the other in the cache: the monitor could only ever find one of them, and the tick
 // they filed carried the surviving row's offering. The server's own uniqueness key
 // (ux_patrol_logs_slot) includes offering_id, so that tick landed against the wrong cohort.
 @Entity(tableName = "patrol_slots", primaryKeys = ["unitId", "offeringId", "dayOfWeek", "startTime"])
@@ -119,9 +133,20 @@ data class PatrolSlotEntity(
     /** Which cohort's session. Part of the primary key — see the note above. */
     val offeringId: String = "",
     val cohort: String = "",
+    /**
+     * The OTHER unit codes being delivered in this same hour, room and lecturer, as
+     * "CODE — Name · Cohort" joined by " | ".
+     *
+     * One hour in one room in front of one class routinely satisfies several unit codes, because
+     * each programme codes the same content differently. Cached with the slot rather than fetched,
+     * because the monitor who most needs to know what else is in the room is the one with no
+     * signal — and a round that names one unit when three are being delivered produces a record
+     * that understates the lecture.
+     */
+    val alsoHere: String = "",
 )
 
-/** A patrol observation captured in the field; uploaded when the phone is back online. */
+/** A monitor observation captured in the field; uploaded when the phone is back online. */
 @Entity(tableName = "patrol_logs", indices = [Index("sessionDate")])
 data class PatrolLogEntity(
     @PrimaryKey val id: String,
@@ -164,8 +189,8 @@ data class PatrolLogEntity(
 /**
  * A lecturer's own record of standing in the room, filed offline.
  *
- * A patrol tick is one person's account of a moment and it is the only one on file — so a lecturer
- * marked NOT TAUGHT in a room the patroller never reached has nothing to answer with but their
+ * A monitor tick is one person's account of a moment and it is the only one on file — so a lecturer
+ * marked NOT TAUGHT in a room the monitor never reached has nothing to answer with but their
  * word, offered days later against a record made at the time. This is a record made at the time by
  * the other party: one press of a button captures where the phone is, when, and which timetabled
  * slot that lands in.
@@ -205,7 +230,7 @@ data class PresenceClaimEntity(
      *  weigh it rather than take it. */
     val matchKind: String = "NONE",
     /** Signed minutes from the slot's start: negative = filed early, positive = late. The number
-     *  a reviewer wants when the patrol log says 14:00 and this says 14:07. */
+     *  a reviewer wants when the monitor log says 14:00 and this says 14:07. */
     val minutesFromStart: Int? = null,
     val note: String = "",
     val synced: Boolean = false,
@@ -302,7 +327,7 @@ interface AppDao {
     fun timetable(): List<TimetableSlotEntity>
 
     /** The cached week narrowed to one weekday. Slots with no day recorded (0) are included for
-     *  the same reason the patrol round includes them: an unscheduled slot is not evidence of the
+     *  the same reason the monitor round includes them: an unscheduled slot is not evidence of the
      *  wrong day, and dropping it would hide a real lecture. */
     @Query("SELECT * FROM timetable_slots WHERE dayOfWeek = :dow OR dayOfWeek = 0 ORDER BY startTime")
     fun timetableForDay(dow: Int): List<TimetableSlotEntity>
@@ -328,7 +353,7 @@ interface AppDao {
     /** Signing out must not leave one lecturer's claims on a handset the next one picks up. */
     @Query("DELETE FROM presence_claims") fun clearPresenceClaims()
 
-    // ── QA patrol (offline round) ───────────────────────────────────────────────
+    // ── QA monitor (offline round) ───────────────────────────────────────────────
     @Query("DELETE FROM patrol_slots") fun clearPatrolSlots()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -341,7 +366,7 @@ interface AppDao {
     @Query("SELECT * FROM patrol_slots ORDER BY dayOfWeek, startTime")
     fun patrolSlots(): List<PatrolSlotEntity>
 
-    /** The cached week narrowed to one weekday — what the patroller is actually walking today.
+    /** The cached week narrowed to one weekday — what the monitor is actually walking today.
      *  Slots with no day recorded (0) are included: an unscheduled slot is not evidence of the
      *  wrong day, and dropping it would hide a real lecture from the round. */
     @Query("SELECT * FROM patrol_slots WHERE dayOfWeek = :dow OR dayOfWeek = 0 ORDER BY startTime")
@@ -362,12 +387,12 @@ interface AppDao {
     @Query("SELECT COUNT(*) FROM patrol_logs WHERE synced = 0")
     fun pendingPatrolCount(): Int
 
-    /** Signing out of a patroller account must not leave their round on the handset. */
+    /** Signing out of a monitor account must not leave their round on the handset. */
     @Query("DELETE FROM patrol_logs") fun clearPatrolLogs()
 
     // ── Sign-out wipe ───────────────────────────────────────────────────────────
     // Everything cached here belongs to the ACCOUNT that was signed in: a cohort roster, that
-    // cohort's check-ins, the session history, the patrol round. One handset is shared between
+    // cohort's check-ins, the session history, the monitor round. One handset is shared between
     // coordinators and lent to students, so leaving it behind means the next person signs in and
     // sees the previous one's cohort — and their check-ins would validate against a stale roster.
     //
@@ -395,7 +420,7 @@ data class SessionStudent(val sessionId: String, val studentIdHash: String)
         SessionEntity::class, PresentDisplayEntity::class,
         PatrolSlotEntity::class, PatrolLogEntity::class, TimetableSlotEntity::class,
         PresenceClaimEntity::class],
-    version = 8,
+    version = 10,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): AppDao
@@ -417,7 +442,7 @@ val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
     }
 }
 
-/** v3→v4: the QA patrol tables, moved in from the retired standalone patroller app. Additive —
+/** v3→v4: the QA monitor tables, moved in from the retired standalone monitor app. Additive —
  *  a coordinator upgrading keeps every pending session; the new tables simply start empty. */
 val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -440,12 +465,12 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     }
 }
 
-/** v4→v5: the patroller records WHERE they found the lecture, not just whether it happened.
+/** v4→v5: the monitor records WHERE they found the lecture, not just whether it happened.
  *
  *  Lecturers move rooms informally. A tick that could only say taught/not-taught against the
  *  timetabled slot either lost the move entirely or turned it into a false accusation — the
- *  patroller found nothing in A02 and had to mark "not taught" for a lecture that was running
- *  perfectly well in B04. Additive, with defaults, so a patroller mid-round upgrading the app
+ *  monitor found nothing in A02 and had to mark "not taught" for a lecture that was running
+ *  perfectly well in B04. Additive, with defaults, so a monitor mid-round upgrading the app
  *  keeps every queued tick. */
 val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -461,22 +486,22 @@ val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
 }
 
 /**
- * v5→v6: the coordinator's weekly timetable grid is cached, and the patroller caches the WHOLE
+ * v5→v6: the coordinator's weekly timetable grid is cached, and the monitor caches the WHOLE
  * WEEK rather than one day.
  *
  * Both are offline-completeness fixes. The grid previously had to be rebuilt from the manifest's
- * one-slot-per-unit summary, so with no signal a unit taught twice a week showed once. The patrol
- * cache held whatever day it was last refreshed on, so a patroller who last had signal on Monday
+ * one-slot-per-unit summary, so with no signal a unit taught twice a week showed once. The monitor
+ * cache held whatever day it was last refreshed on, so a monitor who last had signal on Monday
  * searched Monday's timetable on Tuesday and was told, with no hint of trouble, that lectures were
  * where they had been the day before.
  *
  * patrol_slots is REBUILT rather than altered: its primary key gains dayOfWeek AND offeringId,
  * which SQLite cannot add in place. The offering matters for a second, independent reason — two
  * cohorts can run the same unit at the same hour in different rooms, and without it in the key one
- * of those lectures overwrote the other, so the patroller could never find it. The rows are
+ * of those lectures overwrote the other, so the monitor could never find it. The rows are
  * dropped, not copied: they are a cache of one stale day, the next refresh replaces them
  * wholesale, and copying them would carry that stale day across the very upgrade meant to end it.
- * Nothing the patroller RECORDED lives here; patrol_logs, the queue of unsynced ticks, is
+ * Nothing the monitor RECORDED lives here; patrol_logs, the queue of unsynced ticks, is
  * untouched.
  */
 val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
@@ -501,12 +526,12 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
     }
 }
 
-/** v6→v7: the lecturer's presence claims — their own contemporaneous answer to a patrol tick.
+/** v6→v7: the lecturer's presence claims — their own contemporaneous answer to a monitor tick.
  *
  *  Purely additive: one new table, nothing dropped and nothing rewritten. That matters more here
  *  than usual. A lecturer disputing a tick is going to update the app to get this button, and a
  *  migration that took the opportunity to rebuild anything would be discarding a coordinator's
- *  queued sessions or a patroller's queued round on the same handset. */
+ *  queued sessions or a monitor's queued round on the same handset. */
 val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL(
@@ -537,5 +562,34 @@ val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
     override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE patrol_logs ADD COLUMN isCompensation INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE patrol_logs ADD COLUMN compensationFor TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
+ * 8 → 9: the other unit codes in the same room and hour.
+ *
+ * A plain column addition with a default, for the same reason as 7 → 8: the offline round may be
+ * holding real observations that have not synced, and recreating the table to add a column would
+ * lose them.
+ */
+val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE patrol_slots ADD COLUMN alsoHere TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
+ * 9 → 10: who teaches each timetabled slot, and which combined lecture it belongs to.
+ *
+ * Both default to '', which is the correct reading of an old row rather than a placeholder: a phone
+ * that upgrades mid-week has slots cached from a manifest that never carried these fields, and a
+ * blank key means "not a shared lecture", so no code is derived and no code field appears until the
+ * next manifest fetch fills them in. Guessing a key from the cached room and time instead would be
+ * worse than blank — it would put a code field in front of coordinators whose lecture is not shared.
+ */
+val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+    override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE timetable_slots ADD COLUMN lecturerId TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE timetable_slots ADD COLUMN combinedClassKey TEXT NOT NULL DEFAULT ''")
     }
 }

@@ -82,8 +82,8 @@ object SessionStore {
 
     /**
      * Forget the saved password so this account can never resume without one being typed again.
-     * The QA patroller calls this on every launch: their ticks decide whether a lecturer is
-     * recorded as absent, so a handset left unlocked must not be a way into a live patrol round.
+     * The QA monitor calls this on every launch: their ticks decide whether a lecturer is
+     * recorded as absent, so a handset left unlocked must not be a way into a live monitor round.
      * The token itself is left alone — the current session keeps working until it is signed out.
      */
     fun clearAppCredentials() {
@@ -123,6 +123,22 @@ object SessionStore {
     }
     fun hasAttended(sessionId: String): Boolean =
         sessionId.isNotBlank() && attendedSet().contains(sessionId)
+
+    // The class Wi-Fi, as the STUDENT's phone needs it.
+    //
+    // Joining through WifiNetworkSpecifier (see SlotLease) is what lets the app hand the slot back
+    // when the student is done, and the price of it is that the app needs the credentials the
+    // student used to type into Wi-Fi settings. Remembered so that is a once-per-session chore
+    // rather than a once-per-tap one — and in system-hotspot mode, where the coordinator sets a name
+    // and password that do not change, a once-per-semester one.
+    fun saveClassWifi(ssid: String?, pass: String?) {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+            .putString("class_ssid", ssid?.trim()?.takeIf { it.isNotBlank() })
+            .putString("class_pass", pass?.takeIf { it.isNotBlank() }).apply()
+    }
+    fun classWifiSsid(): String = if (::prefs.isInitialized) prefs.getString("class_ssid", "") ?: "" else ""
+    fun classWifiPass(): String = if (::prefs.isInitialized) prefs.getString("class_pass", "") ?: "" else ""
 
     // Light/dark preference — persisted so the chosen theme survives restarts.
     fun saveTheme(dark: Boolean) { if (::prefs.isInitialized) prefs.edit().putBoolean("dark", dark).apply() }

@@ -27,7 +27,7 @@ func ensureLecturerLogin(ctx context.Context, pool *pgxpool.Pool, tenantID, lect
 	var userID, email, name, domain string
 	err := pool.QueryRow(ctx, `
 		SELECT COALESCE(l.user_id::text,''), COALESCE(l.email,''), l.full_name, COALESCE(t.domain,'')
-		FROM lecturers l JOIN tenants t ON t.tenant_id = l.tenant_id
+		FROM lecturers l CROSS JOIN tenants t
 		WHERE l.lecturer_id = $1::uuid AND l.tenant_id = $2`, lecturerID, tenantID).Scan(&userID, &email, &name, &domain)
 	if err != nil {
 		return "", fmt.Errorf("lecturer not found")

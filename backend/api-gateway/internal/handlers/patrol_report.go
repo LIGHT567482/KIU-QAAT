@@ -75,8 +75,8 @@ func LecturerTeachingReport(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(*) FILTER (WHERE p.taught) AS taught,
 			       COUNT(*) AS patrolled
 			FROM lecturer_patrol_logs p
-			LEFT JOIN course_units cu ON cu.unit_id = p.unit_id AND cu.tenant_id = p.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			LEFT JOIN course_units cu ON cu.unit_id = p.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE ` + strings.Join(where, " AND ") + `
 			GROUP BY p.lecturer_id
 			ORDER BY MAX(p.lecturer_name)`
@@ -109,7 +109,7 @@ func LecturerTeachingReport(pool *pgxpool.Pool) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"rows":            out,
 			"total_taught":    totTaught,
-			"total_patrolled": totPatrolled,
+			"total_monitored": totPatrolled,
 		})
 	}
 }

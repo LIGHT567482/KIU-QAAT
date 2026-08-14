@@ -243,4 +243,89 @@ class InRoomConcurrencyTest {
             runCatching { engine.stop(0, 0) }
         }
     }
+
+    // ── Wi-Fi slots ─────────────────────────────────────────────────────────────
+
+    /**
+     * THE WIRE CONTRACT FOR LETTING GO.
+     *
+     * The hub cannot disconnect anybody — no unprivileged Android app can — so a student's phone
+     * frees its Wi-Fi slot only because it is TOLD to and chooses to obey. That instruction is one
+     * field on one JSON response, which makes it exactly the kind of thing that gets silently
+     * dropped by a refactor and noticed a term later, when somebody wonders why the hall stopped
+     * draining. So it is asserted here, on a real server over a real socket.
+     *
+     * Also asserts the ordering that matters: the check-in must still SUCCEED on the response that
+     * carries the eviction. Being told to go is not being turned away — the student is marked
+     * present and then released, in that order, and a phone that read `evict` as a rejection would
+     * leave the room unrecorded.
+     */
+    @Test
+    fun a_successful_checkin_is_told_to_release_its_slot() {
+        val c = card("STU-EVICT", "Evicted Student", "SER-EVICT")
+        val (server, _, port) = hub(listOf(c))
+        val engine = server.start(port)
+        try {
+            val base = "http://127.0.0.1:$port"
+            awaitUp(base)
+
+            val (code, body) = post("$base/submit", form("qr" to c.rawQr, "fingerprint" to "fp-1"))
+            assertEquals(200, code)
+            assertTrue(body.contains("PRESENT"), "the student must be marked present: $body")
+            assertTrue(body.contains("\"evict\":\"true\""),
+                "a student who is now present must be told to free the slot, or the hall never drains: $body")
+            assertTrue(body.contains("EVICT_DONE"), "and told WHY, so the app knows not to come back: $body")
+
+            // The hub's own books agree: one student through, and the slot is still counted as
+            // occupied until the phone actually reports that it has gone.
+            assertEquals(1, server.warden.settledCount())
+            assertEquals(1, server.warden.occupancy(), "attended but not yet released is still on the radio")
+
+            val (leaveCode, _) = post("$base/leave", "")
+            assertEquals(200, leaveCode)
+            assertEquals(0, server.warden.occupancy(), "reporting the release frees the slot immediately")
+        } finally {
+            runCatching { engine.stop(0, 0) }
+        }
+    }
+
+    /**
+     * The warden's own read-modify-write, under the load it actually meets.
+     *
+     * `touch` reads a lease, decides, and writes back; `settle` does the same. That is the identical
+     * shape as the duplicate-scan race above, and a lecture hall runs it on forty Ktor threads at
+     * once. A lost update here does not corrupt attendance — the ledger is guarded separately — but
+     * it does corrupt the coordinator's count of who is holding a slot, which is the number the
+     * force-drop button is gated on. A jam that cannot be seen cannot be cleared.
+     *
+     * Driven directly rather than over HTTP because every request in this test file arrives from
+     * 127.0.0.1: on a real hotspot each phone holds its own DHCP address, and the point here is
+     * forty DISTINCT clients rather than forty requests.
+     */
+    @Test
+    fun forty_phones_touching_at_once_are_counted_exactly_once_each() {
+        val n = 40
+        val warden = ug.qaat.engine.SlotWarden()
+        val ready = CountDownLatch(1)
+        val done = CountDownLatch(n)
+        val pool = Executors.newFixedThreadPool(n)
+        repeat(n) { i ->
+            pool.submit {
+                ready.await()
+                warden.touch("10.0.0.$i", "STU-$i")
+                warden.settle("10.0.0.$i", "STU-$i")
+                done.countDown()
+            }
+        }
+        ready.countDown()
+        assertTrue(done.await(30, TimeUnit.SECONDS), "the warden deadlocked or lost threads")
+        pool.shutdown()
+
+        assertEquals(n, warden.seenCount(), "each distinct phone must be counted once")
+        assertEquals(n, warden.settledCount(), "each completion must be counted once")
+        assertEquals(n, warden.occupancy(), "nobody has reported leaving yet")
+
+        repeat(n) { i -> warden.release("10.0.0.$i") }
+        assertEquals(0, warden.occupancy())
+    }
 }

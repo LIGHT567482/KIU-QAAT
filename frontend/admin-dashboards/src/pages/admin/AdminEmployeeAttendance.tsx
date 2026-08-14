@@ -37,7 +37,7 @@ export default function AdminEmployeeAttendance() {
     try {
       const fd = new FormData(); fd.append('sheet', file)
       const res = await api.upload<{ inserted: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/employee-attendance/sheet`, fd)
+        `/api/v1/admin/employee-attendance/sheet`, fd)
       setImportMsg(`Imported ${res.inserted} day-record(s)` +
         (res.skipped ? `, ${res.skipped} skipped` : '') +
         (res.errors?.length ? ` · ${res.errors.slice(0, 3).join('; ')}` : ''))
@@ -58,7 +58,7 @@ export default function AdminEmployeeAttendance() {
       const qs = new URLSearchParams()
       if (from) qs.set('from', from)
       if (to) qs.set('to', to)
-      const res = await api.get<Report>(`/api/v1/admin/tenants/${tenantId}/employee-attendance?${qs.toString()}`)
+      const res = await api.get<Report>(`/api/v1/admin/employee-attendance?${qs.toString()}`)
       setRep(res)
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to load report') }
     finally { setLoading(false) }
@@ -73,7 +73,7 @@ export default function AdminEmployeeAttendance() {
     try {
       const fd = new FormData(); fd.append('punches', file)
       const res = await api.upload<{ inserted: number; updated: number; skipped: number; errors: string[] }>(
-        `/api/v1/admin/tenants/${tenantId}/employee-attendance/import`, fd)
+        `/api/v1/admin/employee-attendance/import`, fd)
       setImportMsg(`Imported: ${res.inserted} punches, ${res.updated} duplicates skipped, ${res.skipped} unreadable${res.errors?.length ? ` · ${res.errors.slice(0, 3).join('; ')}` : ''}`)
       load()
     } catch (e) { setImportMsg(e instanceof Error ? `Import failed: ${e.message}` : 'Import failed') }
@@ -112,7 +112,7 @@ export default function AdminEmployeeAttendance() {
         <Field label="From"><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} /></Field>
         <Field label="To"><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} /></Field>
         <button onClick={load} style={btnSmall}>Apply</button>
-        <ExportButtons base={`/api/v1/admin/tenants/${tenantId}/employee-attendance/export`}
+        <ExportButtons base={`/api/v1/admin/employee-attendance/export`}
           filename="employee-attendance" query={exportQuery} disabled={!rep?.rows.length} />
       </div>
       {importMsg && <div style={{ background: importMsg.startsWith('Import failed') ? '#fef2f2' : '#f0fdf4', color: importMsg.startsWith('Import failed') ? '#b91c1c' : '#166534', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13 }}>{importMsg}</div>}

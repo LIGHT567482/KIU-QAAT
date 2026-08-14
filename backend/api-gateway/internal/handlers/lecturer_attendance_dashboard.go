@@ -13,6 +13,26 @@ import (
 	"github.com/qaat/api-gateway/internal/middleware"
 )
 
+// lecturerLogScope renders the caller's own college/department as a SQL condition on the joined
+// `courses c`, appending its bind value to args. Institution-wide roles get "" and see everything.
+//
+// A BOUNDED ROLE WITH NO ORG UNIT SET MATCHES NOTHING, which is the whole reason this is a named
+// helper rather than an inline call. resolveOrgScope returns ok=false in that case, and the
+// tempting reading — "no scope, so no filter" — would hand a QA school handler whose account is
+// half-configured the entire institution's teaching record. The safe reading of "your scope is
+// unset" is an empty page, and it is the same choice made in qaFiltersScoped and resolveRecipients.
+func lecturerLogScope(r *http.Request, pool *pgxpool.Pool, tenantID string, args *[]interface{}) string {
+	s, ok := resolveOrgScope(r, pool, tenantID, middleware.GetUserID(r.Context()), middleware.GetRole(r.Context()))
+	if s.Unbounded {
+		return ""
+	}
+	if !ok {
+		*args = append(*args, []string{"\x00-unset-\x00"})
+		return " AND btrim(lower(" + s.Col + ")) = ANY($" + itoa(len(*args)) + ")"
+	}
+	return s.whereScope(args)
+}
+
 // GET /api/v1/dashboard/lecturer-attendance — detailed session logs.
 func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -25,6 +45,17 @@ func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
+		// ORG SCOPE. This page is read by the institution-wide offices (DQA, QA officer, VC) AND
+		// by roles bounded to one college or department (QA school handler, QA dept rep, dean,
+		// HOD). The bounded ones must see their own unit and no further — the same rule the
+		// student-attendance endpoint has always applied, and the reason this endpoint could not
+		// simply be opened to them: it had no scoping at all and returned the whole tenant.
+		//
+		// Resolved from the ACCOUNT, never from the request, so nobody can widen their own view by
+		// adding a query parameter.
+		args := []interface{}{tenantID}
+		scopeSQL := lecturerLogScope(r, pool, tenantID, &args)
+
 		// Department comes from the unit this log is FOR, not from the lecturer: they have none of
 		// their own, and each row is already about one unit, which names its department exactly.
 		rows, err := conn.Query(r.Context(), `
@@ -34,12 +65,12 @@ func LecturerAttendanceLogsForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 			       lal.gate_open_time, lal.gate_close_time, COALESCE(lal.contact_hours,0),
 			       COALESCE(s.session_status::text,'UNKNOWN'),`+lecturerLogColumns+`
 			FROM lecturer_attendance_logs lal
-			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id AND l.tenant_id = lal.tenant_id
+			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			LEFT JOIN sessions s ON s.session_id = lal.session_id`+lecturerLogMonitorJoin+`
-			WHERE lal.tenant_id = $1
-			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, tenantID)
+			WHERE lal.tenant_id = $1`+scopeSQL+`
+			ORDER BY lal.session_date DESC, lal.gate_open_time DESC`, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return
@@ -94,18 +125,23 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		defer conn.Release()
 		middleware.SetTenantConn(r.Context(), conn, tenantID) //nolint:errcheck
 
+		// Same org scope as the detail rows — they are two views of one dataset, and a summary
+		// counting lectures the detail list will not show is worse than either on its own.
+		args := []interface{}{tenantID}
+		scopeSQL := lecturerLogScope(r, pool, tenantID, &args)
+
 		rows, err := conn.Query(r.Context(), `
 			SELECT lal.lecturer_id, COALESCE(l.full_name, lal.lecturer_id),
 			       COALESCE(STRING_AGG(DISTINCT c.department, ', ') FILTER (WHERE COALESCE(c.department,'') <> ''), ''),
 			       COALESCE(l.email,''), COUNT(*), COALESCE(SUM(lal.contact_hours),0),
 			       COALESCE(AVG(lal.contact_hours),0), MAX(lal.session_date)
 			FROM lecturer_attendance_logs lal
-			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id AND l.tenant_id = lal.tenant_id
-			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id AND cu.tenant_id = lal.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = lal.tenant_id
-			WHERE lal.tenant_id = $1
+			LEFT JOIN lecturers l ON l.lecturer_id::text = lal.lecturer_id
+			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
+			WHERE lal.tenant_id = $1`+scopeSQL+`
 			GROUP BY lal.lecturer_id, l.full_name, l.email
-			ORDER BY COUNT(*) DESC`, tenantID)
+			ORDER BY COUNT(*) DESC`, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
 			return

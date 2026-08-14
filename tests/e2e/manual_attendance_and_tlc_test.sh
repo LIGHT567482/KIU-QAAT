@@ -45,7 +45,11 @@ trap cleanup EXIT; cleanup
 
 TEN=$(sql "SELECT tenant_id FROM tenants WHERE tenant_id <> '00000000-0000-0000-0000-000000000000' ORDER BY created_at LIMIT 1")
 OFFCS='aa333333-0000-4000-8000-0000000aa001'
-TODAY=$(date +%F); DOW=$(date +%u)
+# THE INSTITUTION'S DATE, not this machine's. The service stamps every record in Africa/Kampala
+# (internal/clock), so a host anywhere west of it is on yesterday for several hours each night and
+# every "today" assertion here silently looks for rows under the wrong date.
+TODAY=$(sql "SELECT (now() AT TIME ZONE 'Africa/Kampala')::date")
+DOW=$(sql "SELECT EXTRACT(ISODOW FROM (now() AT TIME ZONE 'Africa/Kampala'))::int")
 
 docker exec -i "$PG" psql -U qaat -d qaat -q -v ON_ERROR_STOP=1 >/dev/null <<SQL
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -177,6 +181,60 @@ body POST /api/v1/patrol/manual "$MON" \
   '{"unit_id":"MANT-UNIT","lecturer_staff_id":"MANT-L1","students_counted":8,"taught":true,"time_of_day":"16:45"}' >/dev/null
 check "two lectures an hour apart stay two records" \
   "$(sql "SELECT count(*) FROM lecturer_patrol_logs WHERE unit_id='MANT-UNIT' AND session_date='$TODAY'")" "2"
+
+echo; echo "── 3a. MANUAL IS A FALLBACK, not a peer of the round ──"
+# The round is search-first so a tick is anchored to a timetabled lecture everyone can see. Manual
+# entry has no such anchor, and offered as an equal it would become the default — it is fewer taps
+# than searching and never comes back empty. The app hides it until a search fails, but a UI rule is
+# a suggestion; the endpoint is reachable directly. So the rule is enforced here.
+DOWNOW=$(sql "SELECT EXTRACT(ISODOW FROM (now() AT TIME ZONE 'Africa/Kampala'))::int")
+NOWT=$(sql "SELECT to_char(now() AT TIME ZONE 'Africa/Kampala','HH24:MI')")
+FROMT=$(sql "SELECT to_char((now() AT TIME ZONE 'Africa/Kampala') - interval '20 minutes','HH24:MI')")
+docker exec -i "$PG" psql -U qaat -d qaat -q -v ON_ERROR_STOP=1 >/dev/null <<SQL
+INSERT INTO timetable_slots (tenant_id, offering_id, unit_id, day_of_week, start_time, duration_minutes, room)
+ VALUES ('$TEN','$OFFCS','MANT-UNIT',$DOWNOW,'$FROMT'::time,90,'MANtest Lecture Room 9');
+SQL
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-UNIT\",\"lecturer_staff_id\":\"MANT-L1\",\"students_counted\":10,
+    \"taught\":true,\"time_of_day\":\"$NOWT\"}")
+echo "   $R"
+has "a lecture that IS on the round is refused" 'ON_THE_ROUND' "$R"
+has "…and the monitor is sent back to it by name" 'timetabled for' "$R"
+has "…told the room to go to"                    'MANtest Lecture Room 9' "$R"
+check "…and nothing was filed"  "$(sql "SELECT count(*) FROM lecturer_patrol_logs WHERE unit_id='MANT-UNIT' AND scheduled_time='$NOWT'")" "0"
+
+# The three cases the fallback exists FOR must still pass, or the rule has eaten the feature.
+LATER=$(sql "SELECT to_char((now() AT TIME ZONE 'Africa/Kampala') + interval '5 hours','HH24:MI')")
+COMPDAY=$(sql "SELECT ((now() AT TIME ZONE 'Africa/Kampala') - interval '7 days')::date")
+# A compensation must now say WHICH lecture it makes good, to the hour (migration 089). Without
+# that it is a claim rather than a record: a lecturer who missed a Tuesday with two timetabled
+# hours could otherwise "compensate for Tuesday" and nobody could say which of the two.
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-UNIT\",\"lecturer_staff_id\":\"MANT-L1\",\"students_counted\":9,\"taught\":true,
+    \"time_of_day\":\"$LATER\",\"is_compensation\":true}")
+has "a compensation with no lecture named is refused" 'COMPENSATION_FOR_REQUIRED' "$R"
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-UNIT\",\"lecturer_staff_id\":\"MANT-L1\",\"students_counted\":9,\"taught\":true,
+    \"time_of_day\":\"$LATER\",\"is_compensation\":true,\"compensation_for_at\":\"last week sometime\"}")
+has "…and so is free text where a date and time belong" 'COMPENSATION_FOR_REQUIRED' "$R"
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-UNIT\",\"lecturer_staff_id\":\"MANT-L1\",\"students_counted\":9,\"taught\":true,
+    \"time_of_day\":\"$LATER\",\"is_compensation\":true,\"compensation_for_at\":\"2099-01-01 10:00\"}")
+has "…and so is a lecture that has not happened yet" 'COMPENSATION_IN_FUTURE' "$R"
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-UNIT\",\"lecturer_staff_id\":\"MANT-L1\",\"students_counted\":9,\"taught\":true,
+    \"time_of_day\":\"$LATER\",\"is_compensation\":true,\"compensation_for_at\":\"$COMPDAY 14:00\"}")
+has "a COMPENSATION at an untimetabled hour is allowed" '"status":"RECORDED"' "$R"
+check "…and the hour it makes good is on the record" \
+  "$(sql "SELECT to_char(compensation_for_at AT TIME ZONE 'Africa/Kampala','YYYY-MM-DD HH24:MI') FROM lecturer_patrol_logs WHERE unit_id='MANT-UNIT' AND scheduled_time='$LATER'")" \
+  "$COMPDAY 14:00"
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  '{"unit_name":"Not In The Curriculum","lecturer_name":"Visiting","students_counted":5,"taught":true,"time_of_day":"07:05"}')
+has "a unit the curriculum does not have is allowed" '"status":"RECORDED"' "$R"
+R=$(body POST /api/v1/patrol/manual "$MON" \
+  "{\"unit_id\":\"MANT-NURUNIT\",\"lecturer_staff_id\":\"MANT-L2\",\"students_counted\":4,\"taught\":true,\"time_of_day\":\"07:10\"}")
+has "a known unit at an hour it is NOT timetabled is allowed" '"status":"RECORDED"' "$R"
+docker exec -i "$PG" psql -U qaat -d qaat -q -c "DELETE FROM timetable_slots WHERE unit_id='MANT-UNIT' AND start_time='$FROMT'::time" >/dev/null 2>&1
 
 echo; echo "── 3b. manual entries reach QA, named and distinguishable ──"
 V=$(body GET /api/v1/dashboard/lecturer-attendance/patrol "$QA")

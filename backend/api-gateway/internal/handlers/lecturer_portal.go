@@ -60,8 +60,8 @@ func LecturerPortalOverview(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SELECT DISTINCT cu.unit_id, cu.name, COALESCE(cu.year,1), COALESCE(cu.semester,1),
 			       COALESCE(c.course_id,''), COALESCE(c.name,'')
 			FROM lecturer_assignments la
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			LEFT JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
+			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE la.tenant_id = $1 AND la.lecturer_id = $2::uuid
 			ORDER BY COALESCE(c.name,''), COALESCE(cu.year,1), COALESCE(cu.semester,1), cu.name`, tenantID, lecturerID)
 		if err != nil {
@@ -143,7 +143,7 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 	cRows, _ := pool.Query(ctx, `
 		SELECT DISTINCT COALESCE(s.coordinator_id,''), COALESCE(u.full_name,'')
 		FROM sessions s
-		LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
+		LEFT JOIN users u ON u.user_id::text = s.coordinator_id
 		WHERE s.tenant_id = $1 AND s.unit_id = $2 AND COALESCE(s.coordinator_id,'') <> ''
 		ORDER BY 2`, tenantID, unitID)
 	if cRows != nil {
@@ -170,7 +170,7 @@ func buildUnitAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID, unit
 		SELECT s.session_id::text, s.session_date::text, COALESCE(u.full_name, ''),
 		       COALESCE(s.offering_id::text,'')
 		FROM sessions s
-		LEFT JOIN users u ON u.user_id::text = s.coordinator_id AND u.tenant_id = s.tenant_id
+		LEFT JOIN users u ON u.user_id::text = s.coordinator_id
 		WHERE s.tenant_id = $1 AND s.unit_id = $2`+sessWhere+`
 		ORDER BY s.session_date, s.gate_open_time`, sessArgs...)
 	if err != nil {

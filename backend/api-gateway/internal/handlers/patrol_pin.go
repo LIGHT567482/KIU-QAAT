@@ -105,8 +105,8 @@ func loadPatrolPIN(r *http.Request, conn *pgxpool.Conn, tenantID, userID string)
 	var attempts int
 	err = conn.QueryRow(r.Context(),
 		`SELECT pin_hash, failed_attempts, locked_until
-		   FROM patroller_pins WHERE tenant_id = $1 AND user_id = $2::uuid`,
-		tenantID, userID).Scan(&hash, &attempts, &locked)
+		   FROM patroller_pins WHERE user_id = $1::uuid`,
+		userID).Scan(&hash, &attempts, &locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", patrolPINState{Set: false, AttemptsLeft: patrolPINMaxAttempts}, nil
 	}
@@ -205,12 +205,12 @@ func SetPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		err = withPatrolConn(r, pool, tenantID, func(conn *pgxpool.Conn) error {
 			_, e := conn.Exec(r.Context(), `
-				INSERT INTO patroller_pins (user_id, tenant_id, pin_hash, set_at, failed_attempts, locked_until)
-				VALUES ($1::uuid, $2, $3, now(), 0, NULL)
+				INSERT INTO patroller_pins (user_id, pin_hash, set_at, failed_attempts, locked_until)
+				VALUES ($1::uuid, $2, now(), 0, NULL)
 				ON CONFLICT (user_id)
 				DO UPDATE SET pin_hash = EXCLUDED.pin_hash, set_at = now(),
 				              failed_attempts = 0, locked_until = NULL`,
-				userID, tenantID, string(hash))
+				userID, string(hash))
 			return e
 		})
 		if err != nil {
@@ -251,7 +251,7 @@ func VerifyPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		if !st.Set {
-			writeJSON(w, http.StatusConflict, errBody("PIN_NOT_SET", "set your patrol PIN first"))
+			writeJSON(w, http.StatusConflict, errBody("PIN_NOT_SET", "set your monitor PIN first"))
 			return
 		}
 		if st.Locked {
@@ -269,10 +269,10 @@ func VerifyPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 				return conn.QueryRow(r.Context(), `
 					UPDATE patroller_pins
 					   SET failed_attempts = failed_attempts + 1,
-					       locked_until = CASE WHEN failed_attempts + 1 >= $3 THEN now() + $4::interval ELSE locked_until END
-					 WHERE tenant_id = $1 AND user_id = $2::uuid
+					       locked_until = CASE WHEN failed_attempts + 1 >= $2 THEN now() + $3::interval ELSE locked_until END
+					 WHERE user_id = $1::uuid
 					 RETURNING failed_attempts, locked_until`,
-					tenantID, userID, patrolPINMaxAttempts, patrolPINLockout.String(),
+					userID, patrolPINMaxAttempts, patrolPINLockout.String(),
 				).Scan(&attempts, &lockedUntil)
 			})
 
@@ -300,7 +300,7 @@ func VerifyPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 		_ = withPatrolConn(r, pool, tenantID, func(conn *pgxpool.Conn) error {
 			_, e := conn.Exec(r.Context(), `
 				UPDATE patroller_pins SET last_verified_at = now(), failed_attempts = 0, locked_until = NULL
-				 WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, userID)
+				 WHERE user_id = $1::uuid`, userID)
 			return e
 		})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "VERIFIED"})
@@ -326,7 +326,7 @@ func ResetPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 		err := withPatrolConn(r, pool, tenantID, func(conn *pgxpool.Conn) error {
 			var e error
 			ct, e = conn.Exec(r.Context(),
-				`DELETE FROM patroller_pins WHERE tenant_id = $1 AND user_id = $2::uuid`, tenantID, targetID)
+				`DELETE FROM patroller_pins WHERE user_id = $1::uuid`, targetID)
 			return e
 		})
 		if err != nil {
@@ -334,7 +334,7 @@ func ResetPatrolPIN(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		if ct.RowsAffected() == 0 {
-			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "that patroller has no PIN set"))
+			writeJSON(w, http.StatusNotFound, errBody("NOT_FOUND", "that monitor has no PIN set"))
 			return
 		}
 		auditAdmin(r, pool, tenantID, actorID, "PATROL_PIN_RESET", "user", targetID,

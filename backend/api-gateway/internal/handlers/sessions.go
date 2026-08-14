@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,6 +29,17 @@ type openSessionRequest struct {
 	VenueID     string `json:"venue_id"`
 	LecturerID  string `json:"lecturer_id"`
 	SessionDate string `json:"session_date"` // optional ISO date; defaults to today
+	// A PROVISION ROOM: this lecture is running somewhere other than its timetabled room, in a
+	// room the coordinator picked from the free-room list because the planned one was unusable.
+	// Declared rather than inferred — see migration 085 — and it is what redirects the QA
+	// monitors' round before they walk to an empty room and record a lecture as not taught.
+	RoomIsProvision bool   `json:"room_is_provision"`
+	ProvisionNote   string `json:"provision_note"`
+	// The unit is not on today's timetable — a make-up class, a unit added after the schedule was
+	// locked, a visiting lecturer's slot. Students check in through the identical flow; this only
+	// records that the lecture was off-timetable (migration 086). Independent of the room flag:
+	// a make-up class squeezed into a free hall is both.
+	Unscheduled bool `json:"unscheduled"`
 }
 
 type openSessionResponse struct {
@@ -171,7 +183,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			    (tenant_id, coordinator_id, unit_id, venue_id, lecturer_id, session_date,
 			     gate_open_time, checkin_window_start, checkin_window_end,
 			     session_status, checkin_secret, offering_id, planned_start, planned_duration_minutes,
-			     coordinator_ip)
+			     coordinator_ip, room_is_provision, provision_note, unscheduled)
 			SELECT $1, $2, $3::text, NULLIF($4,''), NULLIF($5,''), $6, $7, $7, $8, 'ACTIVE', $9,
 			       NULLIF($10,'')::uuid,
 			       -- Prefer TODAY's imported timetable slot; fall back to the set-once schedule.
@@ -183,7 +195,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			                 WHERE ts.unit_id = cu.unit_id AND ts.offering_id = NULLIF($10,'')::uuid
 			                   AND ts.day_of_week = EXTRACT(ISODOW FROM now())::int
 			                 ORDER BY ts.start_time LIMIT 1), ous.session_duration_minutes),
-			       NULLIF($11,'')
+			       NULLIF($11,''), $12, NULLIF($13,''), $14
 			FROM course_units cu
 			LEFT JOIN offering_unit_schedules ous
 			       ON ous.unit_id = cu.unit_id AND ous.offering_id = NULLIF($10,'')::uuid
@@ -191,6 +203,7 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 			RETURNING session_id`,
 			tenantID, coordID, req.UnitID, req.VenueID, req.LecturerID, sessionDate,
 			now, windowEnd, secret, offeringID, coordIP,
+			req.RoomIsProvision, strings.TrimSpace(req.ProvisionNote), req.Unscheduled,
 		).Scan(&sessionID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -214,6 +227,17 @@ func OpenSession(pool *pgxpool.Pool) http.HandlerFunc {
 		if err := tx.Commit(r.Context()); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "INTERNAL_ERROR"})
 			return
+		}
+
+		// AFTER the commit, deliberately. The announcement is about a session that exists; sending
+		// it from inside the transaction would mean a rolled-back open still told every monitor in
+		// the institution to walk to a room where nothing is happening.
+		if req.RoomIsProvision && strings.TrimSpace(req.VenueID) != "" {
+			var coordName string
+			_ = conn.QueryRow(r.Context(),
+				`SELECT COALESCE(full_name,'') FROM users WHERE user_id = $1::uuid`, coordID).Scan(&coordName)
+			announceProvisionRoom(r.Context(), conn, tenantID, sessionID,
+				req.UnitID, strings.TrimSpace(req.VenueID), strings.TrimSpace(req.ProvisionNote), coordName)
 		}
 
 		writeJSON(w, http.StatusCreated, openSessionResponse{

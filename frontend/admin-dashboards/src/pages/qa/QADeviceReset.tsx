@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 const REASON_CODES = ['LOST_PHONE', 'DAMAGED_DEVICE', 'OTHER'] as const
 type ReasonCode = typeof REASON_CODES[number]
 
-interface PatrolBinding {
+interface MonitorBinding {
   user_id:      string
   full_name:    string
   email:        string
@@ -90,26 +90,26 @@ export default function QADeviceReset() {
       </form>
       </div>
 
-      <PatrollerHandsets />
+      <MonitorHandsets />
     </div>
   )
 }
 
 /**
- * The patroller's side of the same problem.
+ * The monitor's side of the same problem.
  *
- * A patrol account records itself against the first handset it is used from. When that phone is
- * lost, replaced, reinstalled, or simply reports a different fingerprint, the patroller can be
+ * A monitor account records itself against the first handset it is used from. When that phone is
+ * lost, replaced, reinstalled, or simply reports a different fingerprint, the monitor can be
  * refused mid-round and cannot free themselves — releasing a binding is deliberately not
  * self-service, or the lock would mean nothing. That made an institution administrator the only
  * way out of a QA field problem. This is the same release, on the desk of the officer whose
- * patrollers they are.
+ * monitors they are.
  *
  * The fingerprint itself is never shown: a QA officer needs to know that a handset is claimed and
  * when it was last used, never the value that would let them impersonate it.
  */
-function PatrollerHandsets() {
-  const [rows, setRows] = useState<PatrolBinding[] | null>(null)
+function MonitorHandsets() {
+  const [rows, setRows] = useState<MonitorBinding[] | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState('')
@@ -117,7 +117,7 @@ function PatrollerHandsets() {
   const load = useCallback(async () => {
     setErr('')
     try {
-      const r = await api.get<{ bindings: PatrolBinding[] }>('/api/v1/dashboard/qa/patrol-bindings')
+      const r = await api.get<{ bindings: MonitorBinding[] }>('/api/v1/dashboard/qa/patrol-bindings')
       setRows(r.bindings ?? [])
     } catch (e) {
       setRows([])
@@ -127,7 +127,7 @@ function PatrollerHandsets() {
 
   useEffect(() => { void load() }, [load])
 
-  async function release(b: PatrolBinding) {
+  async function release(b: MonitorBinding) {
     const who = b.full_name || b.staff_id || b.email || 'this monitor'
     if (!confirm(`Release ${who}'s handset?\n\nThey will claim whichever phone they next sign in on. This is recorded in the audit trail.`)) return
     setBusy(b.user_id); setNote(''); setErr('')

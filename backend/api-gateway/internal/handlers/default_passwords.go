@@ -17,12 +17,32 @@ package handlers
 const (
 	DefaultStudentPassword  = "student"
 	DefaultLecturerPassword = "lecturer"
-	// A QA patroller is created by an administrator, who previously had to invent a password
-	// and then get it to the patroller somehow — by message, or on paper. That is both a worse
+	// A QA monitor is created by an administrator, who previously had to invent a password
+	// and then get it to the monitor somehow — by message, or on paper. That is both a worse
 	// secret than a public default and a worse handover, since a forgotten one costs an admin
 	// round trip. Same treatment as the other two: a known first-login word, force_password_change
 	// set, replaced before the round will open.
-	DefaultPatrollerPassword = "patroller"
+	//
+	// The word follows the role's name, so it changed with it. Only accounts created FROM NOW ON
+	// get it — a monitor seeded earlier still holds a hash of the old word and can still sign in
+	// with it, which is the right outcome: renaming a role must not lock anybody out. Tell new
+	// monitors "monitor"; anyone still holding an unused older account needs the old one.
+	DefaultMonitorPassword = "monitor"
+
+	// The oversight roles — ADMIN, VC, DVC, DEAN, HOD, TLC, the QA offices — are normally created
+	// one at a time by an administrator who chooses a password on the spot. A BULK IMPORT has
+	// nobody to do that: a file of eighty deans and heads of department cannot carry eighty
+	// invented passwords, and it must not carry them in plaintext down a mailing list either.
+	//
+	// So imported accounts of those roles start on this one word, exactly as a student starts on
+	// "student", with force_password_change set so it gets the person in ONCE and is replaced
+	// before they reach any role UI.
+	//
+	// BE CLEAR ABOUT WHAT THIS COSTS. The word is public by design, so between the moment an
+	// account is imported and the moment its owner first signs in, anyone who knows it can sign in
+	// as them. That window is the price of bulk provisioning and it is why the import response
+	// says so in as many words. Import shortly before you hand the accounts out, not months ahead.
+	DefaultStaffPassword = "staff"
 )
 
 // DefaultPasswordFor returns the seeded first-login password for a role that is created FOR
@@ -34,7 +54,21 @@ func DefaultPasswordFor(role string) string {
 	case "LECTURER":
 		return DefaultLecturerPassword
 	case "QA_PATROLLER":
-		return DefaultPatrollerPassword
+		return DefaultMonitorPassword
 	}
 	return ""
+}
+
+// ImportedPasswordFor is [DefaultPasswordFor] with a floor: every role gets a seeded first-login
+// word, because a bulk import has no third option.
+//
+// The per-role word still WINS where there is one. A QA monitor arriving by import must be able to
+// sign in with the same "monitor" everybody is told, rather than a second word that exists only
+// because of how their account happened to be created — that difference would be invisible on
+// screen and impossible for the person on the phone to them to diagnose.
+func ImportedPasswordFor(role string) string {
+	if p := DefaultPasswordFor(role); p != "" {
+		return p
+	}
+	return DefaultStaffPassword
 }

@@ -175,7 +175,6 @@
 | Admin routes wired into dashboard app + sidebar nav | `App.tsx` | ✅ |
 | Notification service — SMTP + Web Push (sync overdue, QR reissued, warden data) | `services/notification-service/` | ✅ |
 | Playwright E2E tests — auth, dashboards, API security headers, cross-tenant isolation | `tests/e2e/specs/` (4 spec files) | ✅ |
-| `CLAUDE.md` — full codebase guide for future Claude sessions | `CLAUDE.md` | ✅ |
 
 ### Session 8 — Admin data management + auth fixes
 

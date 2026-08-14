@@ -78,7 +78,7 @@ func scanRooms(rows pgx.Rows) []room {
 // ListRooms — every room in the tenant, newest structure included. Optional ?school_id=, ?active=.
 func ListRooms(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		where := " WHERE v.tenant_id = $1"
 		args := []interface{}{tenantID}
 		if sid := r.URL.Query().Get("school_id"); sid != "" {
@@ -117,7 +117,7 @@ type roomInput struct {
 // one place it is minted — rather than left to whoever types it next.
 func CreateRoom(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		var in roomInput
 		if err := decodeJSON(r, &in); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "malformed body"))
@@ -151,7 +151,7 @@ func CreateRoom(adminPool *pgxpool.Pool) http.HandlerFunc {
 // immutable: it is the foreign key the timetable and every past session hang off.
 func UpdateRoom(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		code := chi.URLParam(r, "room_code")
 		var in roomInput
 		if err := decodeJSON(r, &in); err != nil {
@@ -211,7 +211,7 @@ func UpdateRoom(adminPool *pgxpool.Pool) http.HandlerFunc {
 // would either fail on the foreign key or orphan history.
 func DeleteRoom(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		code := chi.URLParam(r, "room_code")
 
 		var slots, sessions, units int
@@ -250,7 +250,7 @@ var roomExportHeader = []string{
 // name is reported rather than invented, so a typo cannot quietly create a new school.
 func ImportRooms(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, errBody("INVALID_REQUEST", "expected multipart/form-data"))
 			return
@@ -387,7 +387,7 @@ func processRoomsUpload(ctx context.Context, pool *pgxpool.Pool, tenantID string
 // an export can be edited and fed straight back in.
 func ExportRoomsXLSX(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 		rows, err := adminPool.Query(r.Context(), roomSelect+` WHERE v.tenant_id = $1 ORDER BY v.venue_id`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -428,11 +428,26 @@ func DashboardRooms(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", "db unavailable"))
 			return
 		}
+		// IN USE RIGHT NOW travels with the room, everywhere a room is listed. Every role that
+		// sees this list — coordinator, QA, DQA, HOD, dean, admin — was previously shown a room
+		// registry with no notion of occupancy, so "is LR7 free?" was answered by walking to LR7.
+		// A room taken by a PROVISION says so, because that is the case the timetable cannot
+		// explain and the one most likely to be doubted.
 		rows, err := conn.Query(r.Context(), `
 			SELECT v.venue_id, v.name, COALESCE(v.building,''), COALESCE(v.capacity,0)::int,
-			       COALESCE(v.room_type,'LECTURE_HALL'), COALESCE(s.name,'')
+			       COALESCE(v.room_type,'LECTURE_HALL'), COALESCE(s.name,''),
+			       COALESCE(live.label,''), COALESCE(live.is_provision,false)
 			FROM venues v
 			LEFT JOIN schools s ON s.school_id = v.school_id
+			LEFT JOIN LATERAL (
+			    SELECT COALESCE(NULLIF(cu.name,''), ses.unit_id) AS label, ses.room_is_provision AS is_provision
+			      FROM sessions ses
+			      LEFT JOIN course_units cu ON cu.unit_id = ses.unit_id
+			     WHERE ses.venue_id = v.venue_id
+			       AND ses.session_date = CURRENT_DATE
+			       AND ses.session_status IN ('ACTIVE','PENDING_LECTURER')
+			     ORDER BY ses.gate_open_time DESC LIMIT 1
+			) live ON true
 			WHERE v.tenant_id = $1 AND COALESCE(v.is_active,true)
 			ORDER BY v.venue_id`, tenantID)
 		if err != nil {
@@ -447,11 +462,15 @@ func DashboardRooms(pool *pgxpool.Pool) http.HandlerFunc {
 			Capacity int    `json:"capacity"`
 			RoomType string `json:"room_type"`
 			School   string `json:"school"`
+			// What is in it at this moment, "" when nothing is.
+			InUseBy        string `json:"in_use_by"`
+			InUseProvision bool   `json:"in_use_is_provision"`
 		}
 		out := []pick{}
 		for rows.Next() {
 			var p pick
-			if rows.Scan(&p.RoomCode, &p.Name, &p.Building, &p.Capacity, &p.RoomType, &p.School) == nil {
+			if rows.Scan(&p.RoomCode, &p.Name, &p.Building, &p.Capacity, &p.RoomType, &p.School,
+				&p.InUseBy, &p.InUseProvision) == nil {
 				out = append(out, p)
 			}
 		}

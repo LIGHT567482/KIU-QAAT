@@ -10,11 +10,13 @@ import org.json.JSONObject
 
 /** Lecturer-side LAN calls to the coordinator's in-room server: read the live rotating code
  *  (GET /status) and START/END the session (POST /gate). Fully offline over the hotspot. */
-class GateClient(private val baseUrl: String) {
-    private val http = StudentNet.lanClient()
+class GateClient(private val baseUrl: String, context: android.content.Context? = null) {
+    private val http = StudentNet.lanClient(context)
 
     data class Status(val active: Boolean, val roomCode: String)
-    data class GateResult(val status: String, val reason: String?)   // STARTED | ENDED | REJECTED
+    /** [combinedClassCode] is the three digits to read out to the other coordinators sharing this
+     *  lecture — present only on a successful START of a combined class, "" otherwise. */
+    data class GateResult(val status: String, val reason: String?, val combinedClassCode: String = "")
 
     suspend fun status(): Status? = withContext(Dispatchers.IO) {
         runCatching {
@@ -31,6 +33,10 @@ class GateClient(private val baseUrl: String) {
             append("fingerprint", fingerprint); append("biometric_verified", "false")
         })
         val j = JSONObject(r.bodyAsText())
-        GateResult(j.optString("status", "REJECTED"), j.optString("reason", "").ifBlank { null })
+        GateResult(
+            j.optString("status", "REJECTED"),
+            j.optString("reason", "").ifBlank { null },
+            j.optString("combined_class_code", ""),
+        )
     }
 }

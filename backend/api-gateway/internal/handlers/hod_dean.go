@@ -81,11 +81,11 @@ func hodDeanLecturers(pool *pgxpool.Pool, bySchool bool) http.HandlerFunc {
 			       COUNT(DISTINCT p.patrol_id) FILTER (WHERE p.taught) AS taught_count,
 			       COUNT(DISTINCT p.patrol_id) AS patrolled_count
 			FROM lecturers l
-			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id AND la.tenant_id = l.tenant_id
-			JOIN course_units cu ON cu.unit_id = la.unit_id AND cu.tenant_id = la.tenant_id
-			JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+			JOIN lecturer_assignments la ON la.lecturer_id = l.lecturer_id
+			JOIN course_units cu ON cu.unit_id = la.unit_id
+			JOIN courses c ON c.course_id = cu.course_id
 			LEFT JOIN lecturer_patrol_logs p
-			       ON p.lecturer_id = l.staff_id AND p.tenant_id = l.tenant_id
+			       ON p.lecturer_id = l.staff_id
 			WHERE l.tenant_id = $1 AND btrim(lower(`+scopeCol+`)) = ANY($2)
 			GROUP BY l.staff_id, l.full_name
 			ORDER BY l.full_name`, tenantID, scopeAliases)

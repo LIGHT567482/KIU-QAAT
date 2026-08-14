@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import { Kpi, KpiRow, Section } from '../../components/Kpi'
+import OverviewAnalytics from '../../components/OverviewAnalytics'
 
 /**
  * The header every org-scoped dashboard now opens with — HOD, dean, and both QA rep roles.
@@ -71,7 +72,7 @@ export default function OrgOverview({ level }: { level: 'hod' | 'dean' | 'qa-dep
           // A dean manages through their heads of department, so the first thing their overview
           // offers is the way in to them — not another flat list of lecturers.
           !isDept
-            ? <button style={linkBtn} onClick={() => nav(`/${level}/departments`)}>Departments &amp; HODs →</button>
+            ? <button style={linkBtn} onClick={() => nav(`/${level}/departments`)}>Departments &amp; Heads →</button>
             : <button style={linkBtn} onClick={() => nav(`/${level}/lecturers`)}>My lecturers →</button>
         }
       >
@@ -83,6 +84,11 @@ export default function OrgOverview({ level }: { level: 'hod' | 'dean' | 'qa-dep
         </KpiRow>
       </Section>
 
+      {/* The scalars above say what things are; these say which way they are going and where the
+          problem sits. Same endpoint scope as every tile on this page, so a dean's charts cover
+          exactly the college their numbers do. */}
+      <OverviewAnalytics />
+
       <Section title="Is teaching happening?" hint="sessions actually held against the timetable">
         <KpiRow>
           <Kpi
@@ -92,7 +98,7 @@ export default function OrgOverview({ level }: { level: 'hod' | 'dean' | 'qa-dep
           />
           <Kpi label="Sessions held" value={k.sessions_held} sub={`last ${data?.window_days ?? 90} days`} />
           {/* An unstaffed unit is invisible everywhere else: blank lecturer on the student's
-              timetable, nobody named on the patrol manifest. It is a gap only someone at this
+              timetable, nobody named on the monitor manifest. It is a gap only someone at this
               level will notice, so it is a tile rather than a footnote. */}
           <Kpi
             label="Units with no lecturer"

@@ -168,7 +168,7 @@ function ComposeDialog({ audience, target, who, onClose }: {
 
 interface DeptRow {
   department: string; school: string; lecturers: number
-  patrolled: number; taught: number; last_report?: string
+  monitored: number; taught: number; last_report?: string
 }
 interface DeptResp { scope: Scope; label: string; message?: string; departments: DeptRow[] }
 
@@ -201,7 +201,7 @@ export function QAOrgDepartments() {
               <tr key={d.department} style={tr}>
                 <td style={td}><b>{d.department}</b></td>
                 <td style={td}>{d.lecturers}</td>
-                <td style={td}><Ratio taught={d.taught} total={d.patrolled} /></td>
+                <td style={td}><Ratio taught={d.taught} total={d.monitored} /></td>
                 <td style={td}>
                   {d.last_report
                     ? d.last_report

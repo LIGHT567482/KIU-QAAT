@@ -313,12 +313,28 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Email == "" || req.Password == "" || req.TenantID == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "email, password, and tenant_id are required")
+	if req.Email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "email and password are required")
 		return
 	}
 
-	user, err := h.users.GetByEmailAndTenant(r.Context(), req.Email, req.TenantID)
+	// tenant_id is OPTIONAL. There is one institution, so asking the caller to name it made every
+	// sign-in a two-request dance: look the tenant up by email, then log in. That lookup was also
+	// an account-existence oracle — it answered "does this email have an account here" before any
+	// password was checked — and a hard failure point, because a hiccup on it rejected a correct
+	// password with "no account found". Callers that still send tenant_id (the shipped Android
+	// app, api-gateway's app-login) are unaffected: their value is used as before.
+	tenantID := req.TenantID
+	if tenantID == "" {
+		resolved, err := h.users.SoleTenantID(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "NO_TENANT", "institution not configured")
+			return
+		}
+		tenantID = resolved
+	}
+
+	user, err := h.users.GetByEmailAndTenant(r.Context(), req.Email, tenantID)
 	if errors.Is(err, store.ErrNotFound) {
 		// Constant-time rejection — don't reveal whether the account exists.
 		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(req.Password)) //nolint:errcheck
@@ -335,14 +351,39 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.IsLocked(time.Now()) {
+	// FAILED-ATTEMPT LOCKOUT APPLIES TO STUDENTS ONLY.
+	//
+	// Five wrong passwords used to lock ANY account for fifteen minutes. For a student that is the
+	// right trade: there are tens of thousands of them, they sign in from shared handsets, and a
+	// registration number is guessable by anyone holding a class list — so the count is the only
+	// thing standing between a guessable identifier and an account.
+	//
+	// For staff it cost more than it bought. A locked coordinator cannot open the session the hall
+	// is waiting for, a locked lecturer cannot answer a not-taught tick within the window they are
+	// given to answer it, and neither can wait fifteen minutes; the lockout was reached by people
+	// mistyping their own password far more often than by anyone attacking them. Worse, the lock is
+	// keyed on the ACCOUNT, so anybody who knows a staff email can lock that person out of the
+	// system at will by failing five times on purpose — a denial-of-service handed to the attacker
+	// rather than defence against them.
+	//
+	// This is a deliberate narrowing, and it is a real reduction in brute-force resistance on staff
+	// accounts, which are the highest-value ones here. What still stands in front of them: bcrypt
+	// cost 12, per-IP rate limiting on the login routes (which is NOT per-account and so cannot be
+	// weaponised against one person), and mandatory TOTP for VC and DQA_DIRECTOR.
+	lockoutApplies := user.Role == models.RoleStudent
+
+	if lockoutApplies && user.IsLocked(time.Now()) {
 		writeError(w, http.StatusTooManyRequests, "ACCOUNT_LOCKED", "account temporarily locked due to failed login attempts")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		if !matchesSeededDefault(user, req.Password) {
-			h.users.RecordLoginFailure(r.Context(), user.UserID) //nolint:errcheck
+			// Not counted for staff: a counter nothing reads is a column that only ever grows, and
+			// leaving it ticking would re-lock them the moment this policy were reverted.
+			if lockoutApplies {
+				h.users.RecordLoginFailure(r.Context(), user.UserID) //nolint:errcheck
+			}
 			writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 			return
 		}

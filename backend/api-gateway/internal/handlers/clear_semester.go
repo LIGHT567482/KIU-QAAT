@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -30,7 +29,7 @@ import (
 
 func ClearSemesterData(adminPool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tenantID := chi.URLParam(r, "tenant_id")
+		tenantID := tenantOf(r)
 
 		var body struct {
 			Password     string   `json:"password"`
@@ -131,11 +130,11 @@ func ClearSemesterData(adminPool *pgxpool.Pool) http.HandlerFunc {
 		var archiveID string
 		if err := tx.QueryRow(r.Context(), `
 			INSERT INTO semester_archives
-			  (tenant_id, label, intakes, academic_year, filename, content, size_bytes,
+			  (label, intakes, academic_year, filename, content, size_bytes,
 			   attendance_rows, session_rows, lecturer_rows, created_by)
-			VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11)
+			VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10)
 			RETURNING archive_id::text`,
-			tenantID, label, clean, ay, filename, zipBytes, len(zipBytes),
+			label, clean, ay, filename, zipBytes, len(zipBytes),
 			counts.Attendance, counts.Sessions, counts.Lecturer, adminName).Scan(&archiveID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("ARCHIVE_FAILED", "could not store the archive: "+err.Error()))
 			return
@@ -177,7 +176,7 @@ func ClearSemesterData(adminPool *pgxpool.Pool) http.HandlerFunc {
 				lecTag = t.RowsAffected()
 			}
 			if t, e := tx.Exec(r.Context(),
-				`DELETE FROM sync_uploads WHERE tenant_id = $1 AND session_ids <@ $2::uuid[]`, tenantID, emptied); e == nil {
+				`DELETE FROM sync_uploads WHERE session_ids <@ $1::uuid[]`, emptied); e == nil {
 				upTag = t.RowsAffected()
 			}
 			if t, e := tx.Exec(r.Context(),

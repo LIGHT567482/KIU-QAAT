@@ -91,12 +91,11 @@ func employeeExceptions(ctx context.Context, pool *pgxpool.Pool, w scheduler.Win
 		       COALESCE(d.clock_in,''), COALESCE(d.clock_out,''),
 		       d.checked_in_late, d.checked_out_early, d.absent
 		  FROM employee_attendance_days d
-		  JOIN tenants t ON t.tenant_id = d.tenant_id
+		  CROSS JOIN tenants t
 		  -- The registry carries the contact details; the sheet only carries the badge
 		  -- number. No email and no phone means nobody to tell, so those rows are skipped
 		  -- rather than counted as delivered.
-		  LEFT JOIN employees e ON e.tenant_id = d.tenant_id
-		                       AND btrim(lower(e.staff_id)) = btrim(lower(d.ac_no))
+		  LEFT JOIN employees e ON btrim(lower(e.staff_id)) = btrim(lower(d.ac_no))
 		 WHERE d.imported_at >= $1 AND d.imported_at < $2
 		   AND (d.checked_in_late OR d.checked_out_early OR d.absent)
 		   AND (COALESCE(e.email,'') <> '' OR COALESCE(e.phone,'') <> '')
@@ -166,9 +165,8 @@ func checkoutReminder(ctx context.Context, pool *pgxpool.Pool, w scheduler.Windo
 		       COALESCE(d.on_duty,''), COALESCE(d.off_duty,''),
 		       COALESCE(d.clock_in,''), COALESCE(d.clock_out,'')
 		  FROM employee_attendance_days d
-		  JOIN tenants t ON t.tenant_id = d.tenant_id
-		  LEFT JOIN employees e ON e.tenant_id = d.tenant_id
-		                       AND btrim(lower(e.staff_id)) = btrim(lower(d.ac_no))
+		  CROSS JOIN tenants t
+		  LEFT JOIN employees e ON btrim(lower(e.staff_id)) = btrim(lower(d.ac_no))
 		 WHERE d.work_date = CURRENT_DATE
 		   AND COALESCE(d.clock_in,'')  <> ''
 		   AND COALESCE(d.clock_out,'') =  ''

@@ -26,8 +26,8 @@ export interface OrgDepartment { department_id: string; school_id: string; name:
 
 /** Load the tenant's org lists once; every picker on a page shares the result. */
 export function useOrg(tenantId: string) {
-  const schools = useQuery<OrgSchool[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/schools`), [tenantId])
-  const departments = useQuery<OrgDepartment[]>(() => api.get(`/api/v1/admin/tenants/${tenantId}/departments`), [tenantId])
+  const schools = useQuery<OrgSchool[]>(() => api.get(`/api/v1/admin/schools`), [tenantId])
+  const departments = useQuery<OrgDepartment[]>(() => api.get(`/api/v1/admin/departments`), [tenantId])
   return {
     schools: schools.data ?? [],
     departments: departments.data ?? [],

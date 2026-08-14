@@ -63,7 +63,7 @@ func checkTimetableScope(ctx context.Context, q *pgxpool.Conn, tenantID, userID,
 	_ = q.QueryRow(ctx, `
 		SELECT COALESCE(c.department,'')
 		  FROM course_units cu
-		  JOIN courses c ON c.course_id = cu.course_id AND c.tenant_id = cu.tenant_id
+		  JOIN courses c ON c.course_id = cu.course_id
 		 WHERE cu.unit_id = $1 AND cu.tenant_id = $2`, unitID, tenantID).Scan(&unitDept)
 
 	// Compared case- and whitespace-insensitively: these are two names typed by an administrator

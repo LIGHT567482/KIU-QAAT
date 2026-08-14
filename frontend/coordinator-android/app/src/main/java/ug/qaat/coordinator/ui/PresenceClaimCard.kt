@@ -25,7 +25,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * "I am in the room" — the lecturer's side of the patrol record, in their Alerts tab.
+ * "I am in the room" — the lecturer's side of the monitor record, in their Alerts tab.
  *
  * It sits under Alerts because that is where a lecturer arrives after being told they were
  * recorded as NOT TAUGHT: the answer belongs next to the accusation, not three tabs away in a
@@ -82,7 +82,7 @@ fun PresenceClaimCard() {
             Text(
                 "Press this while you are in the room. It records where you are, the time, and " +
                     "which lecture that is on your timetable — and files it even with no network. " +
-                    "Quality Assurance reads it beside the patrol record for the same lecture.",
+                    "Quality Assurance reads it beside the monitor record for the same lecture.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
