@@ -45,9 +45,16 @@ services:
     maxmemoryPolicy: noeviction
 
   # ─── Shared secrets (identical across services that must agree) ────────────
-  # Defined once here and referenced with `fromGroup` so KEY_ENCRYPTION_KEY /
-  # INTERNAL_SVC_KEY are the SAME string everywhere (a mismatch breaks sealed
-  # packages + service-to-service token minting).
+  # Defined once in the `qaat-shared` group at the bottom and pulled in with a bare
+  # `- fromGroup: qaat-shared` entry, so KEY_ENCRYPTION_KEY / INTERNAL_SVC_KEY are the
+  # SAME string everywhere (a mismatch breaks sealed packages + service-to-service
+  # token minting).
+  #
+  # IT IS ALL OR NOTHING. `fromGroup` links the whole group; Render rejects the blueprint
+  # if it appears next to a `key:`, so there is no importing three of the six. Services
+  # therefore receive group variables they do not read — harmless, but it does mean
+  # KEY_ENCRYPTION_KEY is present in a container or two that never uses it. Anything that
+  # must NOT be shared belongs in the service's own envVars, not in the group.
 
   # ─── api-gateway (PUBLIC entry point) ──────────────────────────────────────
   - type: web
@@ -109,12 +116,10 @@ services:
         value: https://kiu-qaat-session.onrender.com
       - key: SYNC_RECEIVER_URL
         value: https://kiu-qaat-sync.onrender.com
-      - key: JWT_ISSUER
-        fromGroup: qaat-shared
-      - key: JWT_AUDIENCE
-        fromGroup: qaat-shared
-      - key: INTERNAL_SVC_KEY
-        fromGroup: qaat-shared
+      # JWT_ISSUER, JWT_AUDIENCE, KEY_ENCRYPTION_KEY, INTERNAL_SVC_KEY — see the group at the
+      # bottom of this file. `fromGroup` links the WHOLE group in one entry; it cannot be
+      # attached to an individual `key`, so there is no way to import only some of them.
+      - fromGroup: qaat-shared
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
       - key: WEBAUTHN_RP_ID
@@ -160,14 +165,7 @@ services:
           type: keyvalue
           name: qaat-redis
           property: connectionString
-      - key: KEY_ENCRYPTION_KEY
-        fromGroup: qaat-shared
-      - key: INTERNAL_SVC_KEY
-        fromGroup: qaat-shared
-      - key: JWT_ISSUER
-        fromGroup: qaat-shared
-      - key: JWT_AUDIENCE
-        fromGroup: qaat-shared
+      - fromGroup: qaat-shared
       - key: RSA_PRIVATE_KEY_PATH
         value: /etc/secrets/auth_private.pem
       - key: RSA_PUBLIC_KEY_PATH
@@ -197,10 +195,7 @@ services:
         value: Africa/Kampala
       - key: PORT
         value: "8082"
-      - key: JWT_ISSUER
-        fromGroup: qaat-shared
-      - key: JWT_AUDIENCE
-        fromGroup: qaat-shared
+      - fromGroup: qaat-shared
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
       - key: WARDEN_BASE_URL
@@ -235,14 +230,9 @@ services:
           type: keyvalue
           name: qaat-redis
           property: connectionString
-      - key: KEY_ENCRYPTION_KEY
-        fromGroup: qaat-shared
       - key: SYNC_SIGN_KEY
         sync: false
-      - key: JWT_ISSUER
-        fromGroup: qaat-shared
-      - key: JWT_AUDIENCE
-        fromGroup: qaat-shared
+      - fromGroup: qaat-shared
       - key: RSA_PUBLIC_KEY_PATH
         value: /etc/secrets/auth_public.pem
 
