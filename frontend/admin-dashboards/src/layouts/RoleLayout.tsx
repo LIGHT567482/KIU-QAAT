@@ -207,6 +207,7 @@ function adminNav(): NavLink[] {
     { label: 'Lecturers',           path: `${t}/lecturers` },
     { label: 'Assignments',         path: `${t}/lecturer-assignments` },
     { label: 'Lecturer Attendance', path: `${t}/lecturer-attendance` },
+    { label: 'Student Attendance',  path: `${t}/student-attendance` },
     { label: 'Employees',           path: `${t}/employees` },
     { label: 'At-risk Students',    path: '/admin/at-risk' },
     { label: 'Reports',             path: '/admin/reports' },

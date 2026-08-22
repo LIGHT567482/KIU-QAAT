@@ -1521,19 +1521,9 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type summaryRow struct {
-			LecturerID        string  `json:"lecturer_id"`
-			LecturerName      string  `json:"lecturer_name"`
-			Department        string  `json:"department"`
-			Email             string  `json:"email"`
-			TotalSessions     int     `json:"total_sessions"`
-			TotalContactHours float64 `json:"total_contact_hours"`
-			AvgContactHours   float64 `json:"avg_contact_hours"`
-			LastSessionDate   string  `json:"last_session_date"`
-		}
-		var list []summaryRow
+		var list []lecturerSummaryRow
 		for rows.Next() {
-			var sr summaryRow
+			var sr lecturerSummaryRow
 			var lastDate *time.Time
 			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.Department, &sr.Email,
 				&sr.TotalSessions, &sr.TotalContactHours, &sr.AvgContactHours, &lastDate) //nolint:errcheck
@@ -1543,8 +1533,9 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			list = append(list, sr)
 		}
 		if list == nil {
-			list = []summaryRow{}
+			list = []lecturerSummaryRow{}
 		}
+		list = appendUPanelLecturerSummary(r.Context(), adminPool, list)
 		writeJSON(w, http.StatusOK, list)
 	}
 }

@@ -83,6 +83,7 @@ export default function AtRisk() {
       <p style={{ color: 'var(--muted)', margin: '0 0 18px', fontSize: 13 }}>
         Below the {threshold}% attendance bar for exam eligibility{data?.scope ? <> in <b>{data.scope}</b></> : null}.
         “Needs” is how many more sessions of that unit the student must attend to recover.
+        Counts use QAAT session logs when they exist, otherwise the stored U-Panel roll.
       </p>
 
       <KpiRow>

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import ExportButtons from '../../components/ExportButtons'
+import RecordTabs from '../../components/RecordTabs'
+import UPanelRecords from './UPanelRecords'
 
 // Employee attendance from the check-in tablet. Admin uploads the tablet's export
 // (staff_id, title, full_name, datetime, in/out, comment) and reads the report:
@@ -19,6 +21,25 @@ interface Row {
 interface Report { from: string; to: string; rows: Row[] }
 
 export default function AdminEmployeeAttendance() {
+  return (
+    <RecordTabs title="Employee Attendance" tabs={[
+      {
+        id: 'tablet',
+        label: 'Tablet / punches',
+        hint: 'Biometric terminal sheet and raw punch import.',
+        render: () => <TabletEmployeeRecord />,
+      },
+      {
+        id: 'upanel',
+        label: 'U-Panel campus',
+        hint: 'Admin campus presence fetched from U-Panel. Also stored as employee punches (source UPANEL).',
+        render: () => <UPanelRecords kind="admin" />,
+      },
+    ]} />
+  )
+}
+
+function TabletEmployeeRecord() {
   const { tenantId } = useParams<{ tenantId: string }>()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -90,8 +111,7 @@ export default function AdminEmployeeAttendance() {
 
   return (
     <div>
-      <h2 style={{ margin: 0 }}>Employee Attendance</h2>
-      <p style={{ color: 'var(--muted)', margin: '4px 0 14px', fontSize: 13 }}>
+      <p style={{ color: 'var(--muted)', margin: '0 0 14px', fontSize: 13 }}>
         Upload the biometric terminal's <strong>daily sheet</strong> — the export with Emp No., AC-No., On duty,
         Clock In/Out and the overtime columns. Re-uploading the same period is safe: rows update in place
         rather than doubling. The filtered view, with per-column search and export, is under

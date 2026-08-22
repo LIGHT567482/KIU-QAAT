@@ -36,6 +36,13 @@ const LABEL: Record<string, string> = {
   STUDENT_DEVICE_RESET: 'Reset a student’s device binding',
   PATROL_DEVICE_RELEASED: 'Released a QA monitor’s handset',
   PATROL_PIN_RESET: 'Cleared a QA monitor’s PIN',
+  UPANEL_SYNC: 'Imported U-Panel attendance',
+  UPANEL_STUDENT_PRESENT: 'Student present (U-Panel)',
+  UPANEL_STUDENT_ABSENT: 'Student absent (U-Panel)',
+  UPANEL_LECTURE: 'Lecture sitting (U-Panel)',
+  UPANEL_STAFF_IN: 'Staff arrived on campus (U-Panel)',
+  UPANEL_STAFF_OUT: 'Staff left campus (U-Panel)',
+  UPANEL_EVENT: 'U-Panel attendance event',
 }
 
 // Which actions are worth a second glance in a list of hundreds.
@@ -59,8 +66,8 @@ export default function AdminAudit() {
     <div>
       <h2 style={{ margin: '0 0 4px' }}>Audit trail</h2>
       <p style={{ color: 'var(--muted)', margin: '0 0 18px', fontSize: 13 }}>
-        Every sensitive administrative action, newest first. Records are written by the system and
-        cannot be edited or removed from here.
+        Every sensitive administrative action, and every attendance event imported from U-Panel,
+        newest first. Records are written by the system and cannot be edited or removed from here.
       </p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>

@@ -936,6 +936,8 @@ func New(publicKey *rsa.PublicKey, jwtIssuer, jwtAudience string, rdb *redis.Cli
 			middleware.RoleQADeptRep, middleware.RoleQASchool,
 		)
 		r.With(attendanceReaders).Get("/api/v1/dashboard/qa/student-attendance", handlers.QAStudentAttendance(pool))
+		// U-Panel student / lecturer / admin attendance: fetched, stored in QAAT, returned from this app.
+		r.With(attendanceReaders).Get("/api/v1/dashboard/upanel/attendance", handlers.UPanelAttendance(pool))
 		r.With(attendanceReaders).Get("/api/v1/dashboard/qa/student-attendance/export.xlsx", handlers.QAStudentAttendanceReport(pool, "xlsx"))
 		r.With(attendanceReaders).Get("/api/v1/dashboard/qa/student-attendance/export.csv", handlers.QAStudentAttendanceReport(pool, "csv"))
 		r.With(attendanceReaders).Get("/api/v1/dashboard/qa/student-attendance/export.pdf", handlers.QAStudentAttendanceReport(pool, "pdf"))

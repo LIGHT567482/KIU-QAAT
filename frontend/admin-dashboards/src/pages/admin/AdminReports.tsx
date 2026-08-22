@@ -11,9 +11,9 @@ export default function AdminReports() {
   const t = `/admin`
 
   const cards = [
-    { to: `${t}/student-attendance`, title: 'Student Attendance', desc: 'Per-student attendance and exam eligibility across units, with filters and export.' },
-    { to: `${t}/lecturer-attendance`, title: 'Lecturer Attendance', desc: 'Lecturer contact hours and session start/end confirmations.' },
-    { to: `${t}/employee-attendance`, title: 'Employee Attendance', desc: 'General staff check-in/out from the tablet, with auto-generated comments and days-worked totals.' },
+    { to: `${t}/student-attendance`, title: 'Student Attendance', desc: 'Per-student attendance and exam eligibility across units, built from U-Panel class rolls (present and absent) plus QAAT session logs, with filters and export.' },
+    { to: `${t}/lecturer-attendance`, title: 'Lecturer Attendance', desc: 'Lecturer contact hours from coordinator logs, QA patrol, and U-Panel class sittings.' },
+    { to: `${t}/employee-attendance`, title: 'Employee Attendance', desc: 'General staff check-in/out from the tablet and U-Panel campus arrival/departure.' },
   ]
 
   return (

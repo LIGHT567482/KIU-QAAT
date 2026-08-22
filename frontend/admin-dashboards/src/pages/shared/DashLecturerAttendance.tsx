@@ -6,6 +6,7 @@ import RecordTabs from '../../components/RecordTabs'
 import CompensationTag from '../../components/CompensationTag'
 import ProvisionTag from '../../components/ProvisionTag'
 import MonitorLecturerAttendance from './MonitorLecturerAttendance'
+import UPanelRecords from '../admin/UPanelRecords'
 
 // Lecturer attendance for the oversight dashboards (QA / VC / DQA).
 //
@@ -36,6 +37,7 @@ export default function DashLecturerAttendance() {
     <RecordTabs title="Lecturer Attendance" tabs={[
       { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
       { id: 'monitor',      label: 'QA monitor record',  render: () => <MonitorLecturerAttendance /> },
+      { id: 'upanel', label: 'U-Panel record', hint: 'Lecture sittings fetched from U-Panel and stored in QAAT.', render: () => <UPanelRecords kind="lecturer" /> },
     ]} />
   )
 }

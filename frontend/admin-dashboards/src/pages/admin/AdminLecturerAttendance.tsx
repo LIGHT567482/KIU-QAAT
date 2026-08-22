@@ -7,6 +7,7 @@ import RecordTabs from '../../components/RecordTabs'
 import CompensationTag from '../../components/CompensationTag'
 import ProvisionTag from '../../components/ProvisionTag'
 import MonitorLecturerAttendance from '../shared/MonitorLecturerAttendance'
+import UPanelRecords from './UPanelRecords'
 
 interface SummaryRow {
   lecturer_id:         string
@@ -54,6 +55,7 @@ export default function AdminLecturerAttendance() {
     <RecordTabs title="Lecturer Attendance" tabs={[
       { id: 'coordinator', label: 'Coordinator record', render: () => <CoordinatorRecord /> },
       { id: 'monitor',      label: 'QA monitor record',  render: () => <MonitorLecturerAttendance /> },
+      { id: 'upanel', label: 'U-Panel record', hint: 'Lecture sittings fetched from U-Panel and stored in QAAT.', render: () => <UPanelRecords kind="lecturer" /> },
     ]} />
   )
 }

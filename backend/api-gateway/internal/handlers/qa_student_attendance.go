@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 type studentAttendanceRow struct {
@@ -120,7 +121,63 @@ func queryStudentAttendance(ctx context.Context, pool *pgxpool.Pool, tenantID st
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return mergeUPanelStudentRows(ctx, pool, q, out), nil
+}
+
+func mergeUPanelStudentRows(ctx context.Context, pool *pgxpool.Pool, q map[string]string, native []studentAttendanceRow) []studentAttendanceRow {
+	upanel.RefreshIfEmpty(ctx, pool)
+	rolls, err := upanel.StudentRollups(ctx, pool, upanel.StudentFilter{
+		Course:   q["course_id"],
+		Unit:     q["unit_id"],
+		Session:  q["session"],
+		Year:     q["year"],
+		Semester: q["semester"],
+	})
+	if err != nil || len(rolls) == 0 {
+		return native
+	}
+	nativeHeld := false
+	for _, r := range native {
+		if r.Held > 0 {
+			nativeHeld = true
+			break
+		}
+	}
+	seen := map[string]bool{}
+	out := []studentAttendanceRow{}
+	if nativeHeld {
+		for _, r := range native {
+			if r.Held == 0 {
+				continue
+			}
+			out = append(out, r)
+			seen[r.StudentID+"|"+strings.ToLower(r.Course)] = true
+		}
+	}
+	for _, u := range rolls {
+		key := u.StudentID + "|" + strings.ToLower(u.Course)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		year, _ := strconv.Atoi(u.Year)
+		sem, _ := strconv.Atoi(u.Semester)
+		out = append(out, studentAttendanceRow{
+			StudentID:  u.StudentID,
+			FullName:   u.FullName,
+			Course:     u.Course,
+			Session:    u.Session,
+			Year:       year,
+			Semester:   sem,
+			Held:       u.Held,
+			Attended:   u.Attended,
+			Percentage: u.Percentage,
+		})
+	}
+	return out
 }
 
 func qaFilters(r *http.Request) map[string]string {

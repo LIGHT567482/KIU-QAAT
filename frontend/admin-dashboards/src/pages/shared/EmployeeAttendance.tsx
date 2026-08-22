@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import ExportButtons from '../../components/ExportButtons'
+import RecordTabs from '../../components/RecordTabs'
+import UPanelRecords from '../admin/UPanelRecords'
 
 /**
  * Employee attendance, from the biometric terminal's daily export.
@@ -30,6 +32,25 @@ interface Day {
 }
 
 export default function EmployeeAttendance() {
+  return (
+    <RecordTabs title="Employee Attendance" tabs={[
+      {
+        id: 'terminal',
+        label: 'Terminal sheet',
+        hint: 'From the biometric terminal daily export.',
+        render: () => <TerminalEmployeeDays />,
+      },
+      {
+        id: 'upanel',
+        label: 'U-Panel campus',
+        hint: 'Admin and staff campus arrival/departure fetched from U-Panel and stored in QAAT.',
+        render: () => <UPanelRecords kind="admin" />,
+      },
+    ]} />
+  )
+}
+
+function TerminalEmployeeDays() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [dept, setDept] = useState('')
@@ -63,12 +84,6 @@ export default function EmployeeAttendance() {
 
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: '0 0 2px' }}>Employee Attendance</h2>
-        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
-          From the biometric terminal's daily export. Narrow it, then export exactly what you see.
-        </p>
-      </div>
 
       <div style={{
         display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap',

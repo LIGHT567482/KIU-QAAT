@@ -15,9 +15,11 @@ package handlers
 // done one with a missing line), but it is logged loudly enough to notice.
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 // auditAdmin records one administrative action. `payloadJSON` is stored as JSONB and should be a
@@ -136,18 +139,7 @@ func ListAdminAudit(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type entry struct {
-			AuditID    string `json:"audit_id"`
-			ActorID    string `json:"actor_id"`
-			ActorName  string `json:"actor_name"`
-			ActorRole  string `json:"actor_role"`
-			Action     string `json:"action"`
-			TargetType string `json:"target_type"`
-			TargetID   string `json:"target_id"`
-			Payload    string `json:"payload"`
-			IP         string `json:"ip_address"`
-			OccurredAt string `json:"occurred_at"`
-		}
+		type entry = auditEntry
 		out := []entry{}
 		for rows.Next() {
 			var e entry
@@ -160,8 +152,12 @@ func ListAdminAudit(pool *pgxpool.Pool) http.HandlerFunc {
 			out = append(out, e)
 		}
 
+		out = appendUPanelAudit(r.Context(), pool, out, r.URL.Query().Get("action"), r.URL.Query().Get("actor"),
+			r.URL.Query().Get("from"), r.URL.Query().Get("to"), limit)
+
 		// The distinct actions present, so the filter offers what actually exists rather than a
 		// hardcoded list that drifts as new audited actions are added.
+		actionSet := map[string]bool{}
 		actions := []string{}
 		aRows, _ := pool.Query(r.Context(),
 			`SELECT DISTINCT action FROM admin_audit_log ORDER BY 1`)
@@ -169,12 +165,68 @@ func ListAdminAudit(pool *pgxpool.Pool) http.HandlerFunc {
 			for aRows.Next() {
 				var a string
 				if aRows.Scan(&a) == nil {
+					actionSet[a] = true
 					actions = append(actions, a)
 				}
 			}
 			aRows.Close()
 		}
+		for _, a := range upanel.TrailActions(r.Context(), pool) {
+			if !actionSet[a] {
+				actionSet[a] = true
+				actions = append(actions, a)
+			}
+		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{"entries": out, "actions": actions})
 	}
+}
+
+type auditEntry struct {
+	AuditID    string `json:"audit_id"`
+	ActorID    string `json:"actor_id"`
+	ActorName  string `json:"actor_name"`
+	ActorRole  string `json:"actor_role"`
+	Action     string `json:"action"`
+	TargetType string `json:"target_type"`
+	TargetID   string `json:"target_id"`
+	Payload    string `json:"payload"`
+	IP         string `json:"ip_address"`
+	OccurredAt string `json:"occurred_at"`
+}
+
+func appendUPanelAudit(ctx context.Context, pool *pgxpool.Pool, native []auditEntry, action, actor, from, to string, limit int) []auditEntry {
+	upanel.RefreshIfEmpty(ctx, pool)
+	events, err := upanel.TrailEvents(ctx, pool, action, actor, from, to, limit)
+	if err != nil || len(events) == 0 {
+		return native
+	}
+	out := append([]auditEntry{}, native...)
+	for _, ev := range events {
+		name := strings.TrimSpace(ev.PersonName)
+		if name == "" {
+			name = firstNonEmpty(ev.StaffID, ev.PersonID)
+		}
+		out = append(out, auditEntry{
+			AuditID:    "upanel:" + ev.ID,
+			ActorID:    firstNonEmpty(ev.PersonID, ev.StaffID),
+			ActorName:  name,
+			ActorRole:  "U-PANEL",
+			Action:     ev.Action,
+			TargetType: ev.TargetType,
+			TargetID:   ev.TargetID,
+			Payload: jsonObject(map[string]string{
+				"course":     ev.Course,
+				"unit":       ev.UnitName,
+				"room":       ev.Room,
+				"event_type": ev.EventType,
+			}),
+			OccurredAt: ev.OccurredAt.UTC().Format(time.RFC3339),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].OccurredAt > out[j].OccurredAt })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }

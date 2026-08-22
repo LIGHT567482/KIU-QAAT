@@ -66,6 +66,7 @@ export default function App() {
             <Route path="/vc/lecturer-workload"   element={<VCLecturerWorkload />} />
             <Route path="/vc/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/vc/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/vc/upanel-attendance"   element={<Navigate to="/vc/student-attendance" replace />} />
             {/* Read-only: the VC does not build the schedule, but every figure on the pages
                 above is measured against it, and having to ask someone for it is friction on
                 exactly the question the dashboard exists to answer. */}
@@ -86,6 +87,7 @@ export default function App() {
             <Route path="/dqa/punctuality"  element={<DQAPunctuality />} />
             <Route path="/dqa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/dqa/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/dqa/upanel-attendance"   element={<Navigate to="/dqa/student-attendance" replace />} />
             <Route path="/dqa/qa-reports"          element={<QAReports />} />
             {/* The gateway already authorises these roles to read the timetable; there
                 simply was no page, so oversight could not see the week it was judging. */}
@@ -131,6 +133,7 @@ export default function App() {
             <Route path="/qa/presence-claims"    element={<QAPresenceClaims />} />
             <Route path="/qa/monitor-messages" element={<Navigate to="/qa/messages" replace />} />
             <Route path="/qa/student-attendance"  element={<QAStudentAttendance />} />
+            <Route path="/qa/upanel-attendance"   element={<Navigate to="/qa/student-attendance" replace />} />
             <Route path="/qa/lecturer-attendance" element={<DashLecturerAttendance />} />
             <Route path="/qa/timetable"           element={<Timetable />} />
             <Route path="/qa/free-rooms" element={<FreeRooms />} />
@@ -159,6 +162,7 @@ export default function App() {
             <Route path="/admin/employees"             element={<AdminEmployees />} />
             <Route path="/admin/employee-attendance"   element={<AdminEmployeeAttendance />} />
             <Route path="/admin/student-attendance"    element={<QAStudentAttendance />} />
+            <Route path="/admin/upanel-attendance"     element={<Navigate to="/admin/student-attendance" replace />} />
             <Route path="/admin/reports"                                 element={<AdminReports />} />
             <Route path="/admin/at-risk"                                 element={<AtRisk />} />
             <Route path="/admin/audit"                                   element={<AdminAudit />} />

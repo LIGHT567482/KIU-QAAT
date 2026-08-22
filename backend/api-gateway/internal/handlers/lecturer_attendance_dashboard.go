@@ -5,12 +5,15 @@ package handlers
 // the CALLER's tenant (from the JWT) over the RLS pool, so no {tenant_id} path.
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 // lecturerLogScope renders the caller's own college/department as a SQL condition on the joined
@@ -148,19 +151,9 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type summaryRow struct {
-			LecturerID        string  `json:"lecturer_id"`
-			LecturerName      string  `json:"lecturer_name"`
-			Department        string  `json:"department"`
-			Email             string  `json:"email"`
-			TotalSessions     int     `json:"total_sessions"`
-			TotalContactHours float64 `json:"total_contact_hours"`
-			AvgContactHours   float64 `json:"avg_contact_hours"`
-			LastSessionDate   string  `json:"last_session_date"`
-		}
-		out := []summaryRow{}
+		out := []lecturerSummaryRow{}
 		for rows.Next() {
-			var sr summaryRow
+			var sr lecturerSummaryRow
 			var last *time.Time
 			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.Department, &sr.Email, //nolint:errcheck
 				&sr.TotalSessions, &sr.TotalContactHours, &sr.AvgContactHours, &last)
@@ -169,6 +162,52 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			out = append(out, sr)
 		}
+		out = appendUPanelLecturerSummary(r.Context(), pool, out)
 		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+type lecturerSummaryRow struct {
+	LecturerID        string  `json:"lecturer_id"`
+	LecturerName      string  `json:"lecturer_name"`
+	Department        string  `json:"department"`
+	Email             string  `json:"email"`
+	TotalSessions     int     `json:"total_sessions"`
+	TotalContactHours float64 `json:"total_contact_hours"`
+	AvgContactHours   float64 `json:"avg_contact_hours"`
+	LastSessionDate   string  `json:"last_session_date"`
+}
+
+func appendUPanelLecturerSummary(ctx context.Context, pool *pgxpool.Pool, native []lecturerSummaryRow) []lecturerSummaryRow {
+	upanel.RefreshIfEmpty(ctx, pool)
+	rolls, err := upanel.LecturerRollups(ctx, pool)
+	if err != nil || len(rolls) == 0 {
+		return native
+	}
+	seen := map[string]bool{}
+	out := make([]lecturerSummaryRow, 0, len(native)+len(rolls))
+	for _, sr := range native {
+		out = append(out, sr)
+		seen[strings.ToLower(sr.LecturerID)] = true
+		seen[strings.ToLower(sr.LecturerName)] = true
+	}
+	for _, u := range rolls {
+		if seen[strings.ToLower(u.LecturerID)] || seen[strings.ToLower(u.Name)] {
+			continue
+		}
+		avg := 0.0
+		if u.Sessions > 0 {
+			avg = u.Hours / float64(u.Sessions)
+		}
+		out = append(out, lecturerSummaryRow{
+			LecturerID:        u.LecturerID,
+			LecturerName:      u.Name,
+			Department:        u.UnitName,
+			TotalSessions:     u.Sessions,
+			TotalContactHours: u.Hours,
+			AvgContactHours:   avg,
+			LastSessionDate:   u.LastDate,
+		})
+	}
+	return out
 }

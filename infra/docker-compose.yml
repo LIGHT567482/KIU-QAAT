@@ -106,6 +106,8 @@ services:
       # Where the scheduled jobs send employee alerts (email + WhatsApp). The default
       # in code is the same value; declared here so it is visible and overridable.
       NOTIFICATION_URL: ${NOTIFICATION_URL:-http://notification-service:3004}
+      UPANEL_API_URL: ${UPANEL_API_URL:-https://kiu.orion13.us}
+      UPANEL_API_TOKEN: ${UPANEL_API_TOKEN:-}
       # Guards /internal/cron/*. Blank means that endpoint 401s everything, which is
       # fine — the gateway runs its own in-process scheduler and does not need it.
       CRON_SECRET: ${CRON_SECRET:-}

@@ -17,6 +17,7 @@ package handlers
 // would quietly hand a head of one department the whole institution.
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/policy"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 // orgScope resolves the caller's own org unit and how it filters `courses`.
@@ -239,6 +242,18 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			JOIN courses c ON c.course_id = se.course_id
 			CROSS JOIN tenants t
 			WHERE sas.tenant_id = $1`+s.whereScope(&args), args...).Scan(&o.AvgAttendance, &o.AtRisk, &o.Threshold)
+		if o.Threshold == 0 {
+			o.Threshold = float64(policy.AttendanceThresholdPercent)
+		}
+		if o.AtRisk == 0 {
+			avg, risk := upanel.AvgAndAtRisk(r.Context(), pool, policy.AttendanceThresholdPercent)
+			if risk > 0 {
+				o.AtRisk = risk
+			}
+			if o.AvgAttendance == 0 && avg > 0 {
+				o.AvgAttendance = avg
+			}
+		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"scope": map[string]string{
@@ -323,21 +338,7 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		type risk struct {
-			StudentID  string  `json:"student_id"`
-			FullName   string  `json:"full_name"`
-			Email      string  `json:"email"`
-			Course     string  `json:"course_name"`
-			Department string  `json:"department"`
-			School     string  `json:"school"`
-			UnitID     string  `json:"unit_id"`
-			UnitName   string  `json:"unit_name"`
-			Held       int     `json:"sessions_held"`
-			Attended   int     `json:"sessions_attended"`
-			Pct        float64 `json:"attendance_percentage"`
-			Threshold  float64 `json:"threshold"`
-			Deficit    int     `json:"deficit_sessions"`
-		}
+		type risk = atRiskStudent
 		out := []risk{}
 		for rows.Next() {
 			var x risk
@@ -346,6 +347,8 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 				out = append(out, x)
 			}
 		}
+
+		out = appendUPanelAtRisk(r.Context(), pool, out, strings.TrimSpace(r.URL.Query().Get("course")), limit)
 
 		// Distinct students, not rows: one student failing four units is one person to talk to.
 		seen := map[string]bool{}
@@ -358,4 +361,62 @@ func OrgAtRisk(pool *pgxpool.Pool) http.HandlerFunc {
 			"distinct_students": len(seen),
 		})
 	}
+}
+
+type atRiskStudent struct {
+	StudentID  string  `json:"student_id"`
+	FullName   string  `json:"full_name"`
+	Email      string  `json:"email"`
+	Course     string  `json:"course_name"`
+	Department string  `json:"department"`
+	School     string  `json:"school"`
+	UnitID     string  `json:"unit_id"`
+	UnitName   string  `json:"unit_name"`
+	Held       int     `json:"sessions_held"`
+	Attended   int     `json:"sessions_attended"`
+	Pct        float64 `json:"attendance_percentage"`
+	Threshold  float64 `json:"threshold"`
+	Deficit    int     `json:"deficit_sessions"`
+}
+
+func appendUPanelAtRisk(ctx context.Context, pool *pgxpool.Pool, native []atRiskStudent, course string, limit int) []atRiskStudent {
+	upanel.RefreshIfEmpty(ctx, pool)
+	rolls, err := upanel.StudentRollups(ctx, pool, upanel.StudentFilter{Course: course})
+	if err != nil || len(rolls) == 0 {
+		return native
+	}
+	threshold := policy.AttendanceThresholdPercent
+	seen := map[string]bool{}
+	out := make([]atRiskStudent, 0, len(native)+len(rolls))
+	for _, x := range native {
+		out = append(out, x)
+		seen[x.StudentID+"|"+strings.ToLower(x.UnitID)] = true
+		seen[x.StudentID+"|"+strings.ToLower(x.UnitName)] = true
+	}
+	for _, u := range rolls {
+		if u.Percentage >= float64(threshold) {
+			continue
+		}
+		key := u.StudentID + "|" + strings.ToLower(u.UnitName)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, atRiskStudent{
+			StudentID: u.StudentID,
+			FullName:  u.FullName,
+			Course:    u.Course,
+			UnitID:    u.UnitName,
+			UnitName:  u.UnitName,
+			Held:      u.Held,
+			Attended:  u.Attended,
+			Pct:       u.Percentage,
+			Threshold: float64(threshold),
+			Deficit:   upanel.DeficitSessions(u.Held, u.Attended, threshold),
+		})
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
