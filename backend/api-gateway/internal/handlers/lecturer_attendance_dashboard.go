@@ -135,6 +135,7 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 
 		rows, err := conn.Query(r.Context(), `
 			SELECT lal.lecturer_id, COALESCE(l.full_name, lal.lecturer_id),
+			       COALESCE(l.staff_id,''),
 			       COALESCE(STRING_AGG(DISTINCT c.department, ', ') FILTER (WHERE COALESCE(c.department,'') <> ''), ''),
 			       COALESCE(l.email,''), COUNT(*), COALESCE(SUM(lal.contact_hours),0),
 			       COALESCE(AVG(lal.contact_hours),0), MAX(lal.session_date)
@@ -143,7 +144,7 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
 			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE lal.tenant_id = $1`+scopeSQL+`
-			GROUP BY lal.lecturer_id, l.full_name, l.email
+			GROUP BY lal.lecturer_id, l.full_name, l.email, l.staff_id
 			ORDER BY COUNT(*) DESC`, args...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -155,7 +156,7 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var sr lecturerSummaryRow
 			var last *time.Time
-			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.Department, &sr.Email, //nolint:errcheck
+			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.StaffID, &sr.Department, &sr.Email, //nolint:errcheck
 				&sr.TotalSessions, &sr.TotalContactHours, &sr.AvgContactHours, &last)
 			if last != nil {
 				sr.LastSessionDate = last.Format("2006-01-02")
@@ -170,6 +171,7 @@ func LecturerAttendanceSummaryForCaller(pool *pgxpool.Pool) http.HandlerFunc {
 type lecturerSummaryRow struct {
 	LecturerID        string  `json:"lecturer_id"`
 	LecturerName      string  `json:"lecturer_name"`
+	StaffID           string  `json:"staff_id,omitempty"`
 	Department        string  `json:"department"`
 	Email             string  `json:"email"`
 	TotalSessions     int     `json:"total_sessions"`
@@ -190,6 +192,9 @@ func appendUPanelLecturerSummary(ctx context.Context, pool *pgxpool.Pool, native
 		out = append(out, sr)
 		seen[strings.ToLower(sr.LecturerID)] = true
 		seen[strings.ToLower(sr.LecturerName)] = true
+		if s := strings.ToLower(strings.TrimSpace(sr.StaffID)); s != "" {
+			seen[s] = true
+		}
 	}
 	for _, u := range rolls {
 		if seen[strings.ToLower(u.LecturerID)] || seen[strings.ToLower(u.Name)] {
@@ -202,6 +207,7 @@ func appendUPanelLecturerSummary(ctx context.Context, pool *pgxpool.Pool, native
 		out = append(out, lecturerSummaryRow{
 			LecturerID:        u.LecturerID,
 			LecturerName:      u.Name,
+			StaffID:           u.LecturerID,
 			Department:        u.UnitName,
 			TotalSessions:     u.Sessions,
 			TotalContactHours: u.Hours,

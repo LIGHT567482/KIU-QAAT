@@ -1,7 +1,8 @@
 # QAAT — Deployment Guide
 
 This document covers deploying QAAT in three environments: **local development** (Docker Compose),
-**staging**, and **production** (both Kubernetes via Kustomize).
+**Contabo** (own compose project beside U-Panel — [docs/WEB_DEPLOYMENT.md](docs/WEB_DEPLOYMENT.md), [docs/CONTABO.md](docs/CONTABO.md)),
+**staging**, and **production** (Kubernetes via Kustomize).
 
 > Everything in this guide is driven by files already in the repo:
 > [infra/docker-compose.yml](infra/docker-compose.yml), [infra/k8s/](infra/k8s/),

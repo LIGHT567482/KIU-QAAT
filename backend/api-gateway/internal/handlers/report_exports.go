@@ -266,6 +266,7 @@ func QAStudentAttendanceReport(pool *pgxpool.Pool, format string) http.HandlerFu
 type lecturerSummaryExport struct {
 	LecturerID        string  `json:"lecturer_id"`
 	LecturerName      string  `json:"lecturer_name"`
+	StaffID           string  `json:"staff_id"`
 	Department        string  `json:"department"`
 	Email             string  `json:"email"`
 	TotalSessions     int     `json:"total_sessions"`
@@ -287,12 +288,12 @@ func lecturerAttendanceTable(w http.ResponseWriter, r *http.Request, pool *pgxpo
 	t := reportTable{
 		Title:    "Lecturer Attendance",
 		Subtitle: fmt.Sprintf("%d lecturer(s)", len(rows)),
-		Headers:  []string{"Lecturer", "Department", "Email", "Sessions", "Total hrs", "Avg hrs", "Last session"},
-		Weights:  []float64{3, 2.6, 3, 1.1, 1.2, 1.1, 1.5},
+		Headers:  []string{"Lecturer", "Staff ID", "Department", "Email", "Sessions", "Total hrs", "Avg hrs", "Last session"},
+		Weights:  []float64{2.6, 1.6, 2.4, 2.6, 1.1, 1.2, 1.1, 1.5},
 	}
 	for _, s := range rows {
 		t.Rows = append(t.Rows, []string{
-			s.LecturerName, s.Department, s.Email, itoa(s.TotalSessions),
+			s.LecturerName, s.StaffID, s.Department, s.Email, itoa(s.TotalSessions),
 			fmt.Sprintf("%.1f", s.TotalContactHours), fmt.Sprintf("%.1f", s.AvgContactHours),
 			s.LastSessionDate,
 		})

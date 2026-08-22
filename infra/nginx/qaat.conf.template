@@ -1,0 +1,137 @@
+# Edge proxy for the QAAT Contabo stack.
+# TLS terminates at Cloudflare (Flexible SSL → origin HTTP).
+# Do not bind host :80 or :443 — U-Panel nginx owns :80, SSH owns :443.
+# This container is published on 9080, or reached from U-Panel nginx over
+# the qaat_internal docker network (see docs/CONTABO.md).
+#
+# proxy_pass uses a variable so Docker DNS is re-resolved after recreates
+# (a static upstream IP would 502 until nginx reloads).
+
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+map $http_x_forwarded_proto $qaat_fwd_proto {
+    ""      $scheme;
+    default $http_x_forwarded_proto;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __QAAT_HOST__;
+
+    client_max_body_size 32m;
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_types application/javascript application/json text/css text/plain image/svg+xml;
+
+    location = /health {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location ^~ /api/ {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 30s;
+    }
+
+    location / {
+        set $qaat_dash admin-dashboards:3001;
+        proxy_pass http://$qaat_dash;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+    }
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __QAAT_PORTAL_HOST__;
+
+    client_max_body_size 8m;
+
+    location = /health {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location ^~ /api/ {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
+    }
+
+    location / {
+        set $qaat_portal student-portal:3003;
+        proxy_pass http://$qaat_portal;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+    }
+}
+
+# First-boot / IP access (http://<vps>:9080) before DNS exists.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    client_max_body_size 32m;
+
+    location = /health {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location ^~ /api/ {
+        set $qaat_gw api-gateway:8443;
+        proxy_pass http://$qaat_gw;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
+    }
+
+    location / {
+        set $qaat_dash admin-dashboards:3001;
+        proxy_pass http://$qaat_dash;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $qaat_fwd_proto;
+        proxy_set_header Connection "";
+    }
+}

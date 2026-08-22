@@ -1,0 +1,61 @@
+# After a push to main, sync QAAT onto the Contabo VPS.
+# Dashboards are baked into Docker images on the server — git merge alone does
+# not update https://qaat.kiu.orion13.us/
+#
+# One-time setup (GitHub → Settings → Secrets and variables → Actions):
+#   CONTABO_SSH_PRIVATE_KEY  — private key for root@169.58.135.136 (ed25519)
+# Optional:
+#   CONTABO_HOST             — default 169.58.135.136
+#   CONTABO_SSH_PORT         — default 443
+
+name: Sync web to Contabo server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/admin-dashboards/**'
+      - 'frontend/student-portal/**'
+      - 'backend/**'
+      - 'infra/**'
+      - 'db/**'
+      - 'scripts/contabo/**'
+      - '.github/workflows/sync-contabo-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: contabo-qaat-sync
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require SSH secret
+        id: ssh_check
+        env:
+          HAS_KEY: ${{ secrets.CONTABO_SSH_PRIVATE_KEY != '' }}
+        run: |
+          if [[ "${HAS_KEY}" != "true" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::CONTABO_SSH_PRIVATE_KEY is not set — skipping server sync."
+            echo "main was updated, but qaat.kiu.orion13.us will stay stale"
+            echo "until you SSH to the server and run:"
+            echo "  cd /opt/qaat && bash scripts/contabo/deploy-web-on-server.sh"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Sync QAAT stack on Contabo
+        if: steps.ssh_check.outputs.skip != 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.CONTABO_HOST || '169.58.135.136' }}
+          username: root
+          key: ${{ secrets.CONTABO_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.CONTABO_SSH_PORT || 443 }}
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            cd /opt/qaat
+            bash scripts/contabo/deploy-web-on-server.sh

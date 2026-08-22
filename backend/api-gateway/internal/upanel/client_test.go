@@ -47,6 +47,14 @@ func TestFetch_export(t *testing.T) {
 				"capturedAt": "2026-08-21T08:00:00Z", "displayName": "QA Admin",
 				"staffNumber": "ADM-1",
 			}})
+		case "/api/accounts/lecturers/":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "12", "fullName": "Dr Ada", "staffNumber": "KIU-0001", "email": "ada@kiu.ac.ug",
+			}})
+		case "/api/accounts/staff-numbers/":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "KIU-0001", "uid": "12", "staffNumber": "KIU-0001", "fullName": "Dr Ada",
+			}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -94,6 +102,9 @@ func TestFetch_export(t *testing.T) {
 	if lecturer.PersonName != "Dr Ada" || lecturer.LecturerName != "Dr Ada" || lecturer.Room != "LH1" || lecturer.EventType != "LECTURE" || lecturer.Session != "Day" {
 		t.Fatalf("lecturer %+v", lecturer)
 	}
+	if lecturer.StaffID != "KIU-0001" || lecturer.PersonID != "KIU-0001" {
+		t.Fatalf("lecturer staff id %+v", lecturer)
+	}
 	if admin.StaffID != "ADM-1" || admin.EventType != "IN" || admin.FullName != "QA Admin" {
 		t.Fatalf("admin %+v", admin)
 	}
@@ -124,6 +135,11 @@ func TestFetch_collectionsFallback(t *testing.T) {
 			"capturedAt": "2026-08-21T17:00:00Z", "displayName": "Bursar",
 		}})
 	})
+	mux.HandleFunc("/api/accounts/lecturers/", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "99", "fullName": "Dr Ada", "staffNumber": "KIU-0001",
+		}})
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	t.Setenv("UPANEL_API_URL", srv.URL)
@@ -151,6 +167,9 @@ func TestFetch_collectionsFallback(t *testing.T) {
 	if lecturer.EventType != "LECTURER_SIGN" || lecturer.PersonName != "Dr Ada" {
 		t.Fatalf("lecturer %+v", lecturer)
 	}
+	if lecturer.StaffID != "KIU-0001" || lecturer.PersonID != "KIU-0001" {
+		t.Fatalf("lecturer staff from name %+v", lecturer)
+	}
 	if admin.EventType != "OUT" || admin.PersonID != "9" {
 		t.Fatalf("admin %+v", admin)
 	}
@@ -165,5 +184,24 @@ func TestFetch_missingToken(t *testing.T) {
 	}
 	if got.Configured {
 		t.Fatal("should not be configured")
+	}
+}
+
+func TestLecturerIdentities_uidAndName(t *testing.T) {
+	ids := lecturerIdentities(
+		[]map[string]any{{"id": "12", "fullName": "Dr Ada", "staffNumber": "kiu-0001"}},
+		[]map[string]any{{"id": "KIU-0001", "uid": "12", "staffNumber": "KIU-0001", "fullName": "Dr Ada"}},
+	)
+	staff, name := resolveLecturer("12", "Dr Ada", ids)
+	if staff != "KIU-0001" || name != "Dr Ada" {
+		t.Fatalf("uid lookup staff=%s name=%s", staff, name)
+	}
+	staff, name = resolveLecturer("", "Dr Ada", ids)
+	if staff != "KIU-0001" || name != "Dr Ada" {
+		t.Fatalf("name lookup staff=%s name=%s", staff, name)
+	}
+	staff, name = resolveLecturer("KIU-0001", "", ids)
+	if staff != "KIU-0001" {
+		t.Fatalf("staff-number lookup staff=%s name=%s", staff, name)
 	}
 }

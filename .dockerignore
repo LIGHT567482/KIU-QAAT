@@ -1,0 +1,14 @@
+.git
+.github
+**/.DS_Store
+**/node_modules
+**/dist
+frontend/coordinator-android
+frontend/coordinator-pwa
+tests
+keys
+*.md
+.env
+.env.production
+infra/certs
+infra/k8s

@@ -100,7 +100,7 @@ export default function UPanelRecords({ kind }: { kind?: UPanelKind }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <label style={lab}>
           Search
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="name, id, course, room…" style={inp} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={kind === 'lecturer' ? 'staff id, name, unit, room…' : 'name, id, course, room…'} style={inp} />
         </label>
         {kind !== 'admin' && kind !== 'lecturer' && (
           <label style={lab}>
@@ -158,7 +158,7 @@ export default function UPanelRecords({ kind }: { kind?: UPanelKind }) {
 }
 
 function columnsFor(kind?: UPanelKind) {
-  if (kind === 'lecturer') return ['Lecturer', 'Event', 'Unit', 'Room', 'Session', 'Year', 'Semester', 'Started', 'Ended']
+  if (kind === 'lecturer') return ['Staff ID', 'Lecturer', 'Event', 'Unit', 'Room', 'Session', 'Year', 'Semester', 'Started', 'Ended']
   if (kind === 'admin') return ['Staff ID', 'Name', 'Event', 'Role / title', 'When']
   if (kind === 'student') return ['Reg No.', 'Name', 'Present', 'Course', 'Unit', 'Session', 'Year', 'Semester', 'Lecturer', 'Room', 'When']
   return ['Kind', 'Person', 'Event', 'Course / unit', 'Lecturer', 'Room', 'When']
@@ -168,7 +168,8 @@ function renderCells(kind: UPanelKind | undefined, r: UPanelRow) {
   if (kind === 'lecturer') {
     return (
       <>
-        <td style={td}>{r.lecturer_name || r.person_name || r.lecturer || r.person_id || '—'}</td>
+        <td style={{ ...td, fontFamily: 'monospace', fontSize: 12 }}>{r.staff_id || r.person_id || '—'}</td>
+        <td style={td}>{r.lecturer_name || r.person_name || r.lecturer || '—'}</td>
         <td style={td}>{labelEvent(r.event_type)}</td>
         <td style={td}>{r.unit_name || r.unit || r.course || '—'}</td>
         <td style={td}>{r.room || '—'}</td>

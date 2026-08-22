@@ -1,6 +1,7 @@
-.PHONY: up down build test migrate migrate-status migrate-adopt seed keys tidy install lint help
+.PHONY: up down build test migrate migrate-status migrate-adopt seed keys tidy install lint help contabo-up contabo-down contabo-logs
 
 COMPOSE=docker-compose -f infra/docker-compose.yml --env-file .env
+COMPOSE_PROD=docker compose -f infra/docker-compose.prod.yml --env-file .env.production
 
 # Migrations run as the OWNER role (they create tables, policies and roles), so this is the
 # admin URL, not the RLS-confined qaat_app one. Override for a remote database:
@@ -88,6 +89,18 @@ lint:
 ## ps: Show running containers
 ps:
 	$(COMPOSE) ps
+
+## contabo-up: Build and start the Contabo production stack (needs .env.production)
+contabo-up:
+	bash scripts/contabo/deploy-web-on-server.sh
+
+## contabo-down: Stop the Contabo production stack (keeps volumes)
+contabo-down:
+	$(COMPOSE_PROD) down
+
+## contabo-logs: Tail Contabo production logs
+contabo-logs:
+	$(COMPOSE_PROD) logs -f
 
 ## help: Show this help
 help:

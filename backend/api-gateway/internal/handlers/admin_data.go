@@ -1498,6 +1498,7 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			SELECT
 			    lal.lecturer_id,
 			    COALESCE(l.full_name, lal.lecturer_id)   AS lecturer_name,
+			    COALESCE(l.staff_id, '')                  AS staff_id,
 			    -- Every department this lecturer reaches through the units they taught. Plural,
 			    -- because teaching across two colleges is ordinary rather than an edge case.
 			    COALESCE(STRING_AGG(DISTINCT c.department, ', ')
@@ -1513,7 +1514,7 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 			LEFT JOIN course_units cu ON cu.unit_id = lal.unit_id
 			LEFT JOIN courses c ON c.course_id = cu.course_id
 			WHERE lal.tenant_id = $1
-			GROUP BY lal.lecturer_id, l.full_name, l.email
+			GROUP BY lal.lecturer_id, l.full_name, l.email, l.staff_id
 			ORDER BY total_sessions DESC`, tenantID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errBody("INTERNAL_ERROR", err.Error()))
@@ -1525,7 +1526,7 @@ func GetLecturerAttendanceSummary(adminPool *pgxpool.Pool) http.HandlerFunc {
 		for rows.Next() {
 			var sr lecturerSummaryRow
 			var lastDate *time.Time
-			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.Department, &sr.Email,
+			rows.Scan(&sr.LecturerID, &sr.LecturerName, &sr.StaffID, &sr.Department, &sr.Email,
 				&sr.TotalSessions, &sr.TotalContactHours, &sr.AvgContactHours, &lastDate) //nolint:errcheck
 			if lastDate != nil {
 				sr.LastSessionDate = lastDate.Format("2006-01-02")

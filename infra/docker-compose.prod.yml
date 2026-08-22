@@ -1,0 +1,263 @@
+# QAAT production stack for the Contabo VPS that already runs U-Panel.
+#
+# Own project, own Postgres, own Redis, own containers. Does not bind :80 or :443
+# (U-Panel nginx owns 80; SSH owns 443). Public entry is qaat-proxy on 9080.
+#
+#   cp .env.production.example .env.production   # fill secrets
+#   make keys                                    # once
+#   docker compose -f infra/docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# See docs/CONTABO.md.
+
+name: qaat
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:-qaat}
+      POSTGRES_USER: ${DB_USER:-qaat}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env.production}
+      TZ: ${TZ:-Africa/Kampala}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qaat -d qaat"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [qaat]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: redis-server --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production} --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [qaat]
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/migrate/Dockerfile
+    restart: "no"
+    logging: *logging
+    environment:
+      TZ: ${TZ:-Africa/Kampala}
+      DB_USER: ${DB_USER:-qaat}
+      DB_NAME: ${DB_NAME:-qaat}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env.production}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env.production}
+      ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      SEED_KIU: ${SEED_KIU:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [qaat]
+
+  auth-service:
+    build:
+      context: ../backend/auth-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "8081"
+      TZ: ${TZ:-Africa/Kampala}
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      RSA_PRIVATE_KEY_PATH: /run/secrets/auth_private.pem
+      RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
+      JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
+      JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
+      JWT_TTL_SECONDS: ${AUTH_JWT_TTL_SECONDS:-86400}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?set KEY_ENCRYPTION_KEY in .env.production}
+      DISABLE_MFA: ${DISABLE_MFA:-true}
+      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:?set INTERNAL_SVC_KEY in .env.production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: production
+    volumes:
+      - ../keys/auth_private.pem:/run/secrets/auth_private.pem:ro
+      - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [qaat]
+
+  api-gateway:
+    build:
+      context: ../backend/api-gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "8443"
+      TZ: ${TZ:-Africa/Kampala}
+      INSTITUTION_TZ: ${INSTITUTION_TZ:-Africa/Kampala}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
+      JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
+      JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
+      DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      CORS_ORIGINS: ${API_CORS_ORIGINS:-https://qaat.kiu.orion13.us,https://students.qaat.kiu.orion13.us}
+      STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-https://students.qaat.kiu.orion13.us}
+      INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:?set INTERNAL_SVC_KEY in .env.production}
+      NOTIFICATION_URL: http://notification-service:3004
+      UPANEL_API_URL: ${UPANEL_API_URL:-https://kiu.orion13.us}
+      UPANEL_API_TOKEN: ${UPANEL_API_TOKEN:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-qaat.kiu.orion13.us}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-KIU QAAT}
+      WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-https://qaat.kiu.orion13.us}
+      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.kiu.orion13.us}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ENVIRONMENT: production
+    volumes:
+      - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
+    depends_on:
+      auth-service:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks: [qaat]
+
+  sync-receiver:
+    build:
+      context: ../backend/sync-receiver
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "8083"
+      TZ: ${TZ:-Africa/Kampala}
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
+      JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
+      JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
+      KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?set KEY_ENCRYPTION_KEY in .env.production}
+      SYNC_SIGN_KEY: ${SYNC_SIGN_KEY:?set SYNC_SIGN_KEY in .env.production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks: [qaat]
+
+  session-manager:
+    build:
+      context: ../backend/session-manager
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "8082"
+      TZ: ${TZ:-Africa/Kampala}
+      DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
+      RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
+      JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
+      JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
+      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.kiu.orion13.us}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [qaat]
+
+  notification-service:
+    build:
+      context: ../backend/notification-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "3004"
+      TZ: ${TZ:-Africa/Kampala}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-qaat.kiu.orion13.us}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
+      META_PHONE_NUMBER_ID: ${META_PHONE_NUMBER_ID:-}
+      META_ACCESS_TOKEN: ${META_ACCESS_TOKEN:-}
+    networks: [qaat]
+
+  admin-dashboards:
+    build:
+      context: ../frontend/admin-dashboards
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    restart: unless-stopped
+    logging: *logging
+    networks: [qaat]
+
+  student-portal:
+    build:
+      context: ../frontend/student-portal
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    restart: unless-stopped
+    logging: *logging
+    networks: [qaat]
+
+  proxy:
+    container_name: qaat-proxy
+    build:
+      context: ..
+      dockerfile: infra/nginx/Dockerfile
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      QAAT_HOST: ${QAAT_HOST:-qaat.kiu.orion13.us}
+      QAAT_PORTAL_HOST: ${QAAT_PORTAL_HOST:-students.qaat.kiu.orion13.us}
+    ports:
+      - "${QAAT_PUBLISH_PORT:-9080}:80"
+    depends_on:
+      - api-gateway
+      - admin-dashboards
+      - student-portal
+    networks: [qaat]
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  qaat:
+    name: qaat_internal
+    driver: bridge

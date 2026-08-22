@@ -12,6 +12,7 @@ import UPanelRecords from './UPanelRecords'
 interface SummaryRow {
   lecturer_id:         string
   lecturer_name:       string
+  staff_id?:           string
   department:          string
   email:               string
   total_sessions:      number
@@ -85,7 +86,7 @@ function CoordinatorRecord() {
   const [search, setSearch] = useState('')
   const sq = search.trim().toLowerCase()
   const visibleSummary = (summary ?? []).filter(s =>
-    !sq || [s.lecturer_name, s.department, s.email].some(v => (v || '').toLowerCase().includes(sq)))
+    !sq || [s.lecturer_name, s.department, s.email, s.staff_id].some(v => (v || '').toLowerCase().includes(sq)))
 
   const fmt = (iso: string) => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'
   const fmtDate = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString() : '—'
@@ -143,6 +144,7 @@ function CoordinatorRecord() {
               <tr key={s.lecturer_id} style={{ borderBottom: expanded.has(s.lecturer_id) ? 'none' : '1px solid #f1f5f9' }}>
                 <td style={{ padding: '10px 12px' }}>
                   <div style={{ fontWeight: 700 }}>{s.lecturer_name}</div>
+                  {s.staff_id && <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace' }}>{s.staff_id}</div>}
                   {s.department && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{s.department}</div>}
                 </td>
                 <td style={{ padding: '10px 12px', fontWeight: 700 }}>{s.total_sessions}</td>

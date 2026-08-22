@@ -124,11 +124,22 @@ func Fetch(ctx context.Context) (Payload, error) {
 	if err != nil {
 		return Payload{}, err
 	}
+	// Lecturer sittings only store lecturerUid (Django user pk) and whoTaught.
+	// Staff number lives on accounts/lecturers and accounts/staff-numbers.
+	lecturers, err := fetchDocsOptional(ctx, client, base, token, "accounts/lecturers", "fullName")
+	if err != nil {
+		return Payload{}, err
+	}
+	staffNums, err := fetchDocsOptional(ctx, client, base, token, "accounts/staff-numbers", "staffNumber")
+	if err != nil {
+		return Payload{}, err
+	}
 
 	ids := studentIdentities(students, signIns)
+	lecturerIDs := lecturerIdentities(lecturers, staffNums)
 	out := append([]Record{}, joinStudents(lists, sessions, records, ids)...)
 	out = append(out, absentSessions(lists, sessions, records, signIns, ids)...)
-	out = append(out, joinLecturers(lists, sessions)...)
+	out = append(out, joinLecturers(lists, sessions, lecturerIDs)...)
 	out = append(out, joinAdmins(presence)...)
 	for i := range out {
 		out[i].applyQAATFields()
@@ -243,6 +254,21 @@ func fetchDocs(ctx context.Context, client *http.Client, base, token, collection
 		cursor = last
 	}
 	return all, nil
+}
+
+// fetchDocsOptional treats 401/403 the same as a missing collection so a
+// read-only attendance token still returns sittings when the accounts
+// directory is out of scope.
+func fetchDocsOptional(ctx context.Context, client *http.Client, base, token, collection, orderField string) ([]map[string]any, error) {
+	docs, err := fetchDocs(ctx, client, base, token, collection, orderField)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "HTTP 401") || strings.Contains(msg, "HTTP 403") {
+			return []map[string]any{}, nil
+		}
+		return nil, err
+	}
+	return docs, nil
 }
 
 func get(ctx context.Context, client *http.Client, rawURL, token string, q url.Values) (int, []byte, error) {
@@ -408,7 +434,7 @@ func sessionCompleted(sess map[string]any) bool {
 	return false
 }
 
-func joinLecturers(lists, sessions []map[string]any) []Record {
+func joinLecturers(lists, sessions []map[string]any, ids map[string]lecturerIdent) []Record {
 	listByID := indexByID(lists)
 	out := make([]Record, 0, len(sessions)+len(lists))
 	listedSessions := map[string]bool{}
@@ -417,17 +443,16 @@ func joinLecturers(lists, sessions []map[string]any) []Record {
 		listID := field(sess, "listId", "list_id")
 		list := listByID[listID]
 		listedSessions[listID] = true
-		name := firstNonEmpty(field(list, "whoTaught", "who_taught"), field(sess, "createdByName"))
-		uid := firstNonEmpty(field(list, "lecturerUid", "lecturer_uid"), field(sess, "createdBy", "created_by"), name)
+		staff, name := resolveLecturerFrom(list, sess, ids)
 		start := field(sess, "startTime", "start_time", "createdAt", "created_at")
 		end := field(sess, "endTime", "end_time")
 		out = append(out, Record{
 			ID:           "lecturer:session:" + firstNonEmpty(sessionID, listID+"_"+start),
 			Kind:         KindLecturer,
-			PersonID:     uid,
+			PersonID:     staff,
 			PersonName:   name,
 			FullName:     name,
-			StaffID:      uid,
+			StaffID:      staff,
 			LecturerName: name,
 			Present:      true,
 			EventType:    "LECTURE",
@@ -453,15 +478,14 @@ func joinLecturers(lists, sessions []map[string]any) []Record {
 		if listedSessions[listID] {
 			continue
 		}
-		name := field(list, "whoTaught", "who_taught")
-		uid := firstNonEmpty(field(list, "lecturerUid", "lecturer_uid"), name)
+		staff, name := resolveLecturerFrom(list, nil, ids)
 		out = append(out, Record{
 			ID:           "lecturer:list:" + listID,
 			Kind:         KindLecturer,
-			PersonID:     uid,
+			PersonID:     staff,
 			PersonName:   name,
 			FullName:     name,
-			StaffID:      uid,
+			StaffID:      staff,
 			LecturerName: name,
 			Present:      true,
 			EventType:    "LECTURER_SIGN",
@@ -639,6 +663,113 @@ func resolveStudent(rawID string, ids map[string]identity) (reg, name string) {
 	return rawID, ""
 }
 
+type lecturerIdent struct {
+	staff string
+	name  string
+	uid   string
+}
+
+func normalizeStaff(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
+}
+
+func normPersonName(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+func lecturerIdentities(lecturers, staffNums []map[string]any) map[string]lecturerIdent {
+	out := map[string]lecturerIdent{}
+	put := func(key, staff, name, uid string) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		cur := out[key]
+		if cur.staff == "" {
+			cur.staff = normalizeStaff(staff)
+		}
+		if cur.name == "" {
+			cur.name = strings.TrimSpace(name)
+		}
+		if cur.uid == "" {
+			cur.uid = strings.TrimSpace(uid)
+		}
+		out[key] = cur
+	}
+	index := func(uid, staff, name string) {
+		staff = normalizeStaff(staff)
+		uid = strings.TrimSpace(uid)
+		name = strings.TrimSpace(name)
+		put(uid, staff, name, uid)
+		put(strings.ToUpper(uid), staff, name, uid)
+		if staff != "" {
+			put(staff, staff, name, uid)
+		}
+		if n := normPersonName(name); n != "" {
+			put(n, staff, name, uid)
+		}
+	}
+	for _, d := range lecturers {
+		index(
+			field(d, "id", "uid", "userId", "user_id"),
+			field(d, "staffNumber", "staff_number", "staffId", "staff_id"),
+			field(d, "fullName", "full_name", "name"),
+		)
+	}
+	for _, d := range staffNums {
+		index(
+			field(d, "uid", "userId", "user_id"),
+			firstNonEmpty(field(d, "staffNumber", "staff_number", "staffId", "staff_id"), field(d, "id")),
+			field(d, "fullName", "full_name", "name"),
+		)
+	}
+	return out
+}
+
+func resolveLecturer(uid, name string, ids map[string]lecturerIdent) (staff, display string) {
+	uid = strings.TrimSpace(uid)
+	name = strings.TrimSpace(name)
+	lookup := func(key string) (lecturerIdent, bool) {
+		if key == "" {
+			return lecturerIdent{}, false
+		}
+		if ident, ok := ids[key]; ok {
+			return ident, true
+		}
+		if ident, ok := ids[strings.ToUpper(key)]; ok {
+			return ident, true
+		}
+		return lecturerIdent{}, false
+	}
+	ident, ok := lookup(uid)
+	if !ok {
+		ident, ok = lookup(normalizeStaff(uid))
+	}
+	if !ok {
+		ident, ok = lookup(normPersonName(name))
+	}
+	if ok {
+		return firstNonEmpty(ident.staff, uid, name), firstNonEmpty(ident.name, name)
+	}
+	return firstNonEmpty(uid, name), name
+}
+
+func resolveLecturerFrom(list, sess map[string]any, ids map[string]lecturerIdent) (staff, name string) {
+	name = firstNonEmpty(field(list, "whoTaught", "who_taught"), field(sess, "createdByName", "created_by_name"))
+	uid := firstNonEmpty(
+		field(list, "lecturerUid", "lecturer_uid"),
+		field(sess, "createdBy", "created_by"),
+	)
+	listed := firstNonEmpty(
+		field(list, "staffNumber", "staff_number", "lecturerStaffNumber", "lecturer_staff_number", "staffId", "staff_id"),
+		field(sess, "staffNumber", "staff_number", "staffId", "staff_id"),
+	)
+	staff, name = resolveLecturer(uid, name, ids)
+	staff = firstNonEmpty(normalizeStaff(listed), staff)
+	name = firstNonEmpty(name, field(list, "whoTaught", "who_taught"))
+	return staff, name
+}
+
 func firstCourse(list map[string]any) string {
 	if list == nil {
 		return ""
@@ -703,8 +834,8 @@ func (r *Record) applyQAATFields() {
 		r.StudentID = firstNonEmpty(r.StudentID, r.PersonID)
 		r.PersonID = r.StudentID
 	}
-	if r.Kind == KindAdmin {
-		r.StaffID = firstNonEmpty(r.StaffID, r.PersonID)
+	if r.Kind == KindLecturer || r.Kind == KindAdmin {
+		r.StaffID = firstNonEmpty(normalizeStaff(r.StaffID), r.PersonID)
 		r.PersonID = firstNonEmpty(r.StaffID, r.PersonID)
 	}
 	if r.SessionDate == "" {
