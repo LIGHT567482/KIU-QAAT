@@ -119,17 +119,17 @@ services:
       DB_URL: postgres://${APP_DB_USER:-qaat_app}:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
       ADMIN_DB_URL: postgres://${DB_USER:-qaat}:${DB_PASSWORD:?set DB_PASSWORD in .env.production}@postgres:5432/${DB_NAME:-qaat}?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}@redis:6379/0
-      CORS_ORIGINS: ${API_CORS_ORIGINS:-https://qaat.kiu.orion13.us,https://students.qaat.kiu.orion13.us}
-      STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-https://students.qaat.kiu.orion13.us}
+      CORS_ORIGINS: ${API_CORS_ORIGINS:-https://qaat.orion13.us,https://students.orion13.us}
+      STUDENT_CHECKIN_BASE_URL: ${STUDENT_CHECKIN_BASE_URL:-https://students.orion13.us}
       INTERNAL_SVC_KEY: ${INTERNAL_SVC_KEY:?set INTERNAL_SVC_KEY in .env.production}
       NOTIFICATION_URL: http://notification-service:3004
       UPANEL_API_URL: ${UPANEL_API_URL:-https://kiu.orion13.us}
       UPANEL_API_TOKEN: ${UPANEL_API_TOKEN:-}
       CRON_SECRET: ${CRON_SECRET:-}
-      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-qaat.kiu.orion13.us}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-qaat.orion13.us}
       WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-KIU QAAT}
-      WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-https://qaat.kiu.orion13.us}
-      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.kiu.orion13.us}
+      WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-https://qaat.orion13.us}
+      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.orion13.us}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       ENVIRONMENT: production
     volumes:
@@ -181,7 +181,7 @@ services:
       RSA_PUBLIC_KEY_PATH: /run/secrets/auth_public.pem
       JWT_ISSUER: ${AUTH_JWT_ISSUER:-qaat-auth}
       JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-qaat-api}
-      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.kiu.orion13.us}
+      WARDEN_BASE_URL: ${WARDEN_BASE_URL:-https://qaat.orion13.us}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ../keys/auth_public.pem:/run/secrets/auth_public.pem:ro
@@ -204,7 +204,7 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-qaat.kiu.orion13.us}
+      PLATFORM_DOMAIN: ${PLATFORM_DOMAIN:-qaat.orion13.us}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-}
@@ -243,8 +243,8 @@ services:
     restart: unless-stopped
     logging: *logging
     environment:
-      QAAT_HOST: ${QAAT_HOST:-qaat.kiu.orion13.us}
-      QAAT_PORTAL_HOST: ${QAAT_PORTAL_HOST:-students.qaat.kiu.orion13.us}
+      QAAT_HOST: ${QAAT_HOST:-qaat.orion13.us}
+      QAAT_PORTAL_HOST: ${QAAT_PORTAL_HOST:-students.orion13.us}
     ports:
       - "${QAAT_PUBLISH_PORT:-9080}:80"
     depends_on:

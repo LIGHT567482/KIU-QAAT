@@ -1,6 +1,6 @@
 # After a push to main, sync QAAT onto the Contabo VPS.
 # Dashboards are baked into Docker images on the server — git merge alone does
-# not update https://qaat.kiu.orion13.us/
+# not update https://qaat.orion13.us/
 #
 # One-time setup (GitHub → Settings → Secrets and variables → Actions):
 #   CONTABO_SSH_PRIVATE_KEY  — private key for root@169.58.135.136 (ed25519)
@@ -39,7 +39,7 @@ jobs:
           if [[ "${HAS_KEY}" != "true" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "::warning::CONTABO_SSH_PRIVATE_KEY is not set — skipping server sync."
-            echo "main was updated, but qaat.kiu.orion13.us will stay stale"
+            echo "main was updated, but qaat.orion13.us will stay stale"
             echo "until you SSH to the server and run:"
             echo "  cd /opt/qaat && bash scripts/contabo/deploy-web-on-server.sh"
             exit 0

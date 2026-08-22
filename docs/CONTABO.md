@@ -9,8 +9,8 @@ Redis, and app containers. It does not join U-Panel's compose file.
 | Host | App |
 |------|-----|
 | `https://kiu.orion13.us` | U-Panel |
-| `https://qaat.kiu.orion13.us` | QAAT dashboards + `/api` |
-| `https://students.qaat.kiu.orion13.us` | Student portal + `/api` |
+| `https://qaat.orion13.us` | QAAT dashboards + `/api` |
+| `https://students.orion13.us` | Student portal + `/api` |
 
 Public HTTP for QAAT is **qaat-proxy** on host port **9080**. Cloudflare Flexible SSL
 still talks HTTPS to browsers; the origin is HTTP, same pattern as U-Panel.
@@ -39,12 +39,12 @@ In the `orion13.us` zone:
 
 | Type | Name | Content | Proxy |
 |------|------|---------|-------|
-| A | `qaat.kiu` | `169.58.135.136` | Proxied |
-| A | `students.qaat.kiu` | `169.58.135.136` | Proxied |
+| A | `qaat` | `169.58.135.136` | Proxied |
+| A | `students` | `169.58.135.136` | Proxied |
 
 SSL/TLS mode stays **Flexible**. Add an **Origin Rule** (or Transform → origin port):
 
-- If hostname is `qaat.kiu.orion13.us` **or** `students.qaat.kiu.orion13.us`
+- If hostname is `qaat.orion13.us` **or** `students.orion13.us`
 - Then destination port **9080**
 
 Without that rule Cloudflare will hit U-Panel on :80 and QAAT never sees the request.

@@ -16,8 +16,8 @@ set -euo pipefail
 # shellcheck disable=SC1091
 . "$(cd "$(dirname "$0")" && pwd)/env.sh"
 
-DASH_ORIGIN="${QAAT_WEB_ORIGIN:-https://qaat.kiu.orion13.us}"
-PORTAL_ORIGIN="${QAAT_PORTAL_ORIGIN:-https://students.qaat.kiu.orion13.us}"
+DASH_ORIGIN="${QAAT_WEB_ORIGIN:-https://qaat.orion13.us}"
+PORTAL_ORIGIN="${QAAT_PORTAL_ORIGIN:-https://students.orion13.us}"
 TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 ZONE="${CLOUDFLARE_ZONE_ID:-}"
 

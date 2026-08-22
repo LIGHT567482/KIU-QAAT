@@ -2,11 +2,38 @@
 
 | What | URL |
 |------|-----|
-| **Dashboards** | https://qaat.kiu.orion13.us/ |
-| **Student portal** | https://students.qaat.kiu.orion13.us/ |
-| **API** | https://qaat.kiu.orion13.us/api/ |
+| **Dashboards** | https://qaat.orion13.us/ |
+| **Student portal** | https://students.orion13.us/ |
+| **API** | https://qaat.orion13.us/api/ |
 | **U-Panel (same VPS)** | https://kiu.orion13.us/ |
 
+## SSL (read this if the browser says ERR_SSL_VERSION_OR_CIPHER_MISMATCH)
+
+This VPS has **SSH on port 443** and **HTTP on port 80**. QAAT itself speaks
+plain HTTP on **9080**. HTTPS exists only at Cloudflare, same as U-Panel.
+
+Two things will produce `ERR_SSL_VERSION_OR_CIPHER_MISMATCH`:
+
+1. **DNS-only (grey cloud)** — the browser talks TLS to `:443`, which is SSH, not nginx.
+2. **Hostname `qaat.kiu.orion13.us`** — Cloudflare Universal SSL covers `*.orion13.us`
+   (`kiu.orion13.us`, `qaat.orion13.us`) but **not** `*.kiu.orion13.us`. There is no
+   certificate for that name.
+
+Use **`https://qaat.orion13.us`** (one label under the zone). In Cloudflare:
+
+| Setting | Value |
+|---------|--------|
+| A record `qaat` | `169.58.135.136`, **Proxied** (orange cloud) |
+| A record `students` | `169.58.135.136`, **Proxied** |
+| SSL/TLS | **Flexible** (Cloudflare HTTPS → origin HTTP) |
+| Origin Rule | hostname `qaat.orion13.us` or `students.orion13.us` → destination port **9080** |
+
+Origin without Cloudflare (from the VPS): `curl -sf http://127.0.0.1:9080/health`
+
+Do not open `https://169.58.135.136` or `https://qaat.orion13.us:443` against the
+server itself — that is SSH.
+
+```
 QAAT is a **separate Compose project** at `/opt/qaat`. It does not share U-Panel's
 Postgres or bind :80 / :443 (U-Panel nginx owns 80; SSH owns 443). Public HTTP
 is **qaat-proxy** on host port **9080**.
@@ -14,7 +41,7 @@ is **qaat-proxy** on host port **9080**.
 ## How production updates (two steps)
 
 Merging to `main` only **lands the code in git**. It does **not** update
-https://qaat.kiu.orion13.us by itself.
+https://qaat.orion13.us by itself.
 
 The dashboards are a Vite build **baked into the `admin-dashboards` Docker image**
 at image-build time (same idea as U-Panel baking `main.dart.js` into nginx).
@@ -49,7 +76,7 @@ Verify the origin is up:
 ```bash
 curl -sf http://127.0.0.1:9080/health
 curl -sI http://127.0.0.1:9080/ | head
-curl -sI https://qaat.kiu.orion13.us/ | grep -iE 'HTTP/|content-length'
+curl -sI https://qaat.orion13.us/ | grep -iE 'HTTP/|content-length'
 ```
 
 Hard-refresh the browser (Ctrl+Shift+R) after deploy.
@@ -71,13 +98,13 @@ CLOUDFLARE_ZONE_ID=your-zone-id
 
 **Manual purge:** Cloudflare dashboard → **Caching** → **Purge by URL**:
 
-- `https://qaat.kiu.orion13.us/`
-- `https://qaat.kiu.orion13.us/index.html`
-- `https://students.qaat.kiu.orion13.us/`
-- `https://students.qaat.kiu.orion13.us/index.html`
+- `https://qaat.orion13.us/`
+- `https://qaat.orion13.us/index.html`
+- `https://students.orion13.us/`
+- `https://students.orion13.us/index.html`
 
 **On your device:** hard refresh (Ctrl+Shift+R) or clear site data for
-`qaat.kiu.orion13.us`.
+`qaat.orion13.us`.
 
 ## First-time VPS
 
@@ -124,11 +151,11 @@ DNS (Cloudflare, same VPS IP as U-Panel, **Proxied**):
 
 | Type | Name | Content |
 |------|------|---------|
-| A | `qaat.kiu` | `169.58.135.136` |
-| A | `students.qaat.kiu` | `169.58.135.136` |
+| A | `qaat` | `169.58.135.136` |
+| A | `students` | `169.58.135.136` |
 
 SSL/TLS stays **Flexible**. Add an **Origin Rule**: if hostname is
-`qaat.kiu.orion13.us` **or** `students.qaat.kiu.orion13.us` → destination port
+`qaat.orion13.us` **or** `students.orion13.us` → destination port
 **9080**. Without that rule Cloudflare hits U-Panel on :80 and QAAT never sees
 the request.
 
@@ -176,7 +203,7 @@ Push to `main`, then run step 2 on Contabo.
 In `/opt/qaat/.env.production`:
 
 ```env
-API_CORS_ORIGINS=https://qaat.kiu.orion13.us,https://students.qaat.kiu.orion13.us,http://169.58.135.136:9080
+API_CORS_ORIGINS=https://qaat.orion13.us,https://students.orion13.us,http://169.58.135.136:9080
 ```
 
 Empty `VITE_API_URL` means the browser calls `/api` on the same host, so CORS
