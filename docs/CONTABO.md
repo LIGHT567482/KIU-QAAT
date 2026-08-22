@@ -42,24 +42,19 @@ In the `orion13.us` zone:
 | A | `qaat` | `169.58.135.136` | Proxied |
 | A | `students` | `169.58.135.136` | Proxied |
 
-SSL/TLS mode stays **Flexible**. Add an **Origin Rule** (or Transform → origin port):
+SSL/TLS mode stays **Flexible**. Cloudflare should hit origin **80**. Deploy
+installs a U-Panel nginx drop-in (`attach-upanel-nginx.sh`) so those hostnames
+are proxied to QAAT on **9080**. Do not skip that step: U-Panel's default vhost
+matches `_` and redirects `/` to `/download/`.
 
-- If hostname is `qaat.orion13.us` **or** `students.orion13.us`
-- Then destination port **9080**
-
-Without that rule Cloudflare will hit U-Panel on :80 and QAAT never sees the request.
-
-## 3. Optional: serve QAAT on :80 via U-Panel nginx
-
-Avoids the origin-port rule. After QAAT is up:
+## 3. Re-attach after U-Panel nginx is recreated
 
 ```bash
-docker network connect qaat_internal "$(docker ps -qf name=upanel-nginx)"
+cd /opt/qaat && bash scripts/contabo/attach-upanel-nginx.sh
 ```
 
-Append `infra/nginx/upanel-qaat-vhost.conf` to U-Panel's
-`config/nginx/upanel-docker.conf`, rebuild U-Panel nginx, and reload. Cloudflare
-can then keep origin **80** and route by `Host`.
+`deploy-web-on-server.sh` already does this. The drop-in is inside the running
+container only, so an U-Panel nginx rebuild needs the attach script again.
 
 ## 4. Day-two commands
 

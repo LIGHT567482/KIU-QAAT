@@ -80,6 +80,9 @@ if ! curl -sf "http://127.0.0.1:${ORIGIN_PORT}/health" >/dev/null; then
 fi
 echo " /health OK"
 
+echo "==> Route qaat.orion13.us through U-Panel nginx (:80) so Cloudflare Flexible does not hit /download/"
+bash scripts/contabo/attach-upanel-nginx.sh
+
 DASH_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${ORIGIN_PORT}/")
 echo " / HTTP ${DASH_STATUS}"
 if [[ "${DASH_STATUS}" != "200" ]]; then

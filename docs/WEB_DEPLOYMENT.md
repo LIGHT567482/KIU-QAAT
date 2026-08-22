@@ -26,7 +26,9 @@ Use **`https://qaat.orion13.us`** (one label under the zone). In Cloudflare:
 | A record `qaat` | `169.58.135.136`, **Proxied** (orange cloud) |
 | A record `students` | `169.58.135.136`, **Proxied** |
 | SSL/TLS | **Flexible** (Cloudflare HTTPS → origin HTTP) |
-| Origin Rule | hostname `qaat.orion13.us` or `students.orion13.us` → destination port **9080** |
+| Origin | port **80** is enough — U-Panel nginx routes `qaat.orion13.us` to QAAT |
+
+If `/` opens the **U-Panel download / APK page**, Cloudflare is hitting U-Panel's catch-all (`location = /` → `/download/`). Re-run `bash scripts/contabo/attach-upanel-nginx.sh` on the VPS (deploy does this automatically).
 
 Origin without Cloudflare (from the VPS): `curl -sf http://127.0.0.1:9080/health`
 
@@ -153,13 +155,11 @@ DNS (Cloudflare, same VPS IP as U-Panel, **Proxied**):
 | A | `qaat` | `169.58.135.136` |
 | A | `students` | `169.58.135.136` |
 
-SSL/TLS stays **Flexible**. Add an **Origin Rule**: if hostname is
-`qaat.orion13.us` **or** `students.orion13.us` → destination port
-**9080**. Without that rule Cloudflare hits U-Panel on :80 and QAAT never sees
-the request.
+SSL/TLS stays **Flexible**. Deploy runs `attach-upanel-nginx.sh` so U-Panel
+nginx on :80 sends `qaat.orion13.us` / `students.orion13.us` to QAAT. Without
+that drop-in, U-Panel's catch-all redirects `/` to `/download/` (the APK page).
 
-Optional: skip the origin-port rule by attaching U-Panel nginx to `qaat_internal`
-and including `infra/nginx/upanel-qaat-vhost.conf` — see [docs/CONTABO.md](CONTABO.md).
+See [docs/CONTABO.md](CONTABO.md).
 
 ## Windows (push main — optional)
 
