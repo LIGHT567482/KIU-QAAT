@@ -42,6 +42,9 @@ fi
 ORIGIN_PORT="$(env_get QAAT_PUBLISH_PORT)"
 ORIGIN_PORT="${ORIGIN_PORT:-9080}"
 
+echo "==> Filling any empty secrets in .env.production (keeps UPANEL_API_TOKEN)"
+bash scripts/contabo/gen-env.sh --ensure .env.production
+
 if [[ ! -f keys/auth_private.pem || ! -f keys/auth_public.pem ]]; then
   echo "==> Generating RSA key pair into keys/"
   mkdir -p keys
