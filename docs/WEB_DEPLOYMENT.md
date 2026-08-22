@@ -98,6 +98,8 @@ That clones https://github.com/LIGHT567482/KIU-QAAT.git into `/opt/qaat`, writes
 
 ```bash
 nano /opt/qaat/.env.production
+# UPANEL_API_TOKEN=thetoken   ← no space after =
+
 cd /opt/qaat && bash scripts/contabo/deploy-web-on-server.sh
 ```
 

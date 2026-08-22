@@ -19,13 +19,13 @@ hex32() { openssl rand -hex 32; }
 
 umask 077
 sed \
-  -e "s/^DB_PASSWORD=.*/DB_PASSWORD=$(hex32)/" \
-  -e "s/^APP_DB_PASSWORD=.*/APP_DB_PASSWORD=$(hex32)/" \
-  -e "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=$(hex32)/" \
-  -e "s/^KEY_ENCRYPTION_KEY=.*/KEY_ENCRYPTION_KEY=$(hex32)/" \
-  -e "s/^INTERNAL_SVC_KEY=.*/INTERNAL_SVC_KEY=$(hex32)/" \
-  -e "s/^SYNC_SIGN_KEY=.*/SYNC_SIGN_KEY=$(hex32)/" \
-  -e "s/^CRON_SECRET=.*/CRON_SECRET=$(hex32)/" \
+  -e "s/^DB_PASSWORD=.*/DB_PASSWORD='$(hex32)'/" \
+  -e "s/^APP_DB_PASSWORD=.*/APP_DB_PASSWORD='$(hex32)'/" \
+  -e "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD='$(hex32)'/" \
+  -e "s/^KEY_ENCRYPTION_KEY=.*/KEY_ENCRYPTION_KEY='$(hex32)'/" \
+  -e "s/^INTERNAL_SVC_KEY=.*/INTERNAL_SVC_KEY='$(hex32)'/" \
+  -e "s/^SYNC_SIGN_KEY=.*/SYNC_SIGN_KEY='$(hex32)'/" \
+  -e "s/^CRON_SECRET=.*/CRON_SECRET='$(hex32)'/" \
   "$EXAMPLE" > "$DEST"
 
-echo "wrote $DEST — add UPANEL_API_TOKEN and SMTP_*, then deploy"
+echo "wrote $DEST — set UPANEL_API_TOKEN=yourtoken with NO space after the equals sign"

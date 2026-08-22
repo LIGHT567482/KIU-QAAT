@@ -31,15 +31,16 @@ cd "${APP_DIR}"
 if [[ ! -f .env.production ]]; then
   echo "ERROR: ${APP_DIR}/.env.production is missing." >&2
   echo "  bash scripts/contabo/gen-env.sh" >&2
-  echo "  nano .env.production   # set UPANEL_API_TOKEN" >&2
+  echo "  nano .env.production   # set UPANEL_API_TOKEN=... with NO space after =" >&2
   exit 1
 fi
 
+# Do not `source` .env.production — a space after "=" makes bash run the value
+# as a command ("6cc9…: command not found"). Compose reads it via --env-file.
 # shellcheck disable=SC1091
-set -a
-source .env.production
-set +a
-ORIGIN_PORT="${QAAT_PUBLISH_PORT:-$ORIGIN_PORT}"
+. scripts/contabo/env.sh
+ORIGIN_PORT="$(env_get QAAT_PUBLISH_PORT)"
+ORIGIN_PORT="${ORIGIN_PORT:-9080}"
 
 if [[ ! -f keys/auth_private.pem || ! -f keys/auth_public.pem ]]; then
   echo "==> Generating RSA key pair into keys/"

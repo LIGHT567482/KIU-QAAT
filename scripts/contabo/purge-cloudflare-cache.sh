@@ -13,20 +13,21 @@
 
 set -euo pipefail
 
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/env.sh"
+
 DASH_ORIGIN="${QAAT_WEB_ORIGIN:-https://qaat.kiu.orion13.us}"
 PORTAL_ORIGIN="${QAAT_PORTAL_ORIGIN:-https://students.qaat.kiu.orion13.us}"
 TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 ZONE="${CLOUDFLARE_ZONE_ID:-}"
 
 if [[ -f .env.production ]]; then
-  # shellcheck disable=SC1091
-  set -a
-  source .env.production
-  set +a
-  TOKEN="${CLOUDFLARE_API_TOKEN:-$TOKEN}"
-  ZONE="${CLOUDFLARE_ZONE_ID:-$ZONE}"
-  DASH_ORIGIN="${QAAT_WEB_ORIGIN:-https://${QAAT_HOST:-qaat.kiu.orion13.us}}"
-  PORTAL_ORIGIN="${QAAT_PORTAL_ORIGIN:-https://${QAAT_PORTAL_HOST:-students.qaat.kiu.orion13.us}}"
+  TOKEN="${TOKEN:-$(env_get CLOUDFLARE_API_TOKEN)}"
+  ZONE="${ZONE:-$(env_get CLOUDFLARE_ZONE_ID)}"
+  host="$(env_get QAAT_HOST)"
+  portal="$(env_get QAAT_PORTAL_HOST)"
+  [[ -n "$host" ]] && DASH_ORIGIN="https://${host}"
+  [[ -n "$portal" ]] && PORTAL_ORIGIN="https://${portal}"
 fi
 
 if [[ -z "$TOKEN" || -z "$ZONE" ]]; then
