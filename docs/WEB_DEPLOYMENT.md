@@ -33,7 +33,6 @@ Origin without Cloudflare (from the VPS): `curl -sf http://127.0.0.1:9080/health
 Do not open `https://169.58.135.136` or `https://qaat.orion13.us:443` against the
 server itself — that is SSH.
 
-```
 QAAT is a **separate Compose project** at `/opt/qaat`. It does not share U-Panel's
 Postgres or bind :80 / :443 (U-Panel nginx owns 80; SSH owns 443). Public HTTP
 is **qaat-proxy** on host port **9080**.
