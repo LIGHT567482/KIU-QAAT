@@ -1,6 +1,6 @@
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
-import { Kpi, KpiRow, Section } from '../../components/Kpi'
+import OrgKpiHeader from '../../components/OrgKpiHeader'
 import OverviewAnalytics from '../../components/OverviewAnalytics'
 import DQATrends from './DQATrends'
 
@@ -24,19 +24,8 @@ interface TenantInfo {
   active_semester: number
 }
 
-interface Overview {
-  total_students?: number
-  total_units?: number
-  sessions_held?: number
-  below_threshold?: number
-  attendance_rate?: number
-}
-
 export default function DQAHome() {
   const { data: info } = useQuery<TenantInfo>(() => api.get('/api/v1/branding'))
-  // The same institution-wide rollup the course-health page reads; showing it here
-  // means the director sees the number before choosing which report explains it.
-  const { data: ov, status } = useQuery<Overview>(() => api.get('/api/v1/org/overview'))
 
   const links: { label: string; href: string; desc: string }[] = [
     { label: 'Reports',            href: '/dqa/reports',             desc: 'Every report the directorate can generate' },
@@ -66,16 +55,9 @@ export default function DQAHome() {
         {info?.active_semester ? ` · Semester ${info.active_semester}` : ''}
       </div>
 
-      <Section title="The institution right now">
-        <KpiRow>
-          <Kpi label="Students"        value={status === 'ok' ? (ov?.total_students ?? 0) : '—'} />
-          <Kpi label="Units"           value={status === 'ok' ? (ov?.total_units ?? 0) : '—'} />
-          <Kpi label="Sessions held"   value={status === 'ok' ? (ov?.sessions_held ?? 0) : '—'} />
-          <Kpi label="Below 75%"       value={status === 'ok' ? (ov?.below_threshold ?? 0) : '—'} />
-        </KpiRow>
-      </Section>
+      <OrgKpiHeader atRiskPath="/dqa/at-risk" />
 
-      {/* Direction and location, beneath the four scalars that say only "what". The directorate's
+      {/* Direction and location, beneath the scalars that say only "what". The directorate's
           scope is the institution, so these cover every college. */}
       <OverviewAnalytics />
 

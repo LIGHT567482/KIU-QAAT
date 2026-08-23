@@ -1,6 +1,8 @@
 import { api } from '../../lib/api'
 import { useQuery } from '../../lib/useApi'
 import { Kpi, KpiRow, Section } from '../../components/Kpi'
+import OrgKpiHeader from '../../components/OrgKpiHeader'
+import OverviewAnalytics from '../../components/OverviewAnalytics'
 
 // Tenant ADMIN home — scoped to the admin's OWN institution (tenant_id from JWT).
 // The academic period control lives on the Administration page (less accidental
@@ -50,6 +52,11 @@ export default function AdminHome() {
           : <span style={{ color: '#b45309' }}>not set</span>} · advanced by semester under <strong>Administration</strong>.
       </div>
 
+      {/* Live attendance / teaching figures from /org/overview (includes U-Panel
+          when native QAAT session summaries are empty). */}
+      <OrgKpiHeader atRiskPath="/admin/at-risk" />
+      <OverviewAnalytics />
+
       {/* The state of the institution, not just links to the screens that manage it. */}
       <AdminPulse />
 
@@ -88,9 +95,19 @@ interface Overview {
  * anywhere — they just do nothing — so the only way anyone finds them is by being shown them.
  */
 function AdminPulse() {
-  const { status, data } = useQuery<Overview>(() => api.get('/api/v1/admin/overview'))
+  const { status, data, message, refetch } = useQuery<Overview>(() => api.get('/api/v1/admin/overview'))
   if (status === 'loading') return <p style={{ color: 'var(--muted)', fontSize: 13 }}>Loading institution status…</p>
-  if (status === 'error' || !data) return null
+  if (status === 'error' || !data) {
+    return (
+      <p style={{ color: '#b91c1c', fontSize: 13 }}>
+        Could not load institution status{message ? `: ${message}` : ''}.{' '}
+        <button type="button" onClick={refetch} style={{
+          border: 'none', background: 'transparent', color: 'var(--brand)',
+          cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: 0,
+        }}>Retry</button>
+      </p>
+    )
+  }
 
   const g = data.gaps ?? {}
   const a = data.activity ?? {}
@@ -123,6 +140,15 @@ function AdminPulse() {
           <Kpi label="Lecturer gate-ins today" value={a.lecturer_gates_today ?? 0} sub="lecturers who started a class" />
           <Kpi label="Sessions this week" value={a.sessions_week ?? 0} />
           <Kpi label="Monitor visits this week" value={a.patrols_week ?? 0} sub="QA spot-checks" />
+        </KpiRow>
+      </Section>
+
+      <Section title="U-Panel" hint="class rolls, lecture sittings and campus punches stored in QAAT">
+        <KpiRow>
+          <Kpi label="Student marks today" value={a.upanel_students_today ?? 0} sub="present on a U-Panel roll" />
+          <Kpi label="Lecture sittings today" value={a.upanel_lectures_today ?? 0} sub="lecturer class records" />
+          <Kpi label="Staff punches today" value={a.upanel_staff_today ?? 0} sub="campus in/out" />
+          <Kpi label="Stored events" value={a.upanel_stored ?? 0} sub="all kinds, all time" />
         </KpiRow>
       </Section>
 
@@ -162,6 +188,18 @@ function AdminPulse() {
           <Kpi label="Timetable slots" value={s.timetable_slots ?? 0} sub={`${s.rooms ?? 0} rooms`} />
         </KpiRow>
       </Section>
+
+      {Object.keys(data.accounts_by_role ?? {}).length > 0 && (
+        <Section title="Accounts" hint="logins by role">
+          <KpiRow>
+            {Object.entries(data.accounts_by_role)
+              .sort((a, b) => b[1] - a[1])
+              .map(([role, n]) => (
+                <Kpi key={role} label={role.replace(/_/g, ' ')} value={n} />
+              ))}
+          </KpiRow>
+        </Section>
+      )}
     </>
   )
 }

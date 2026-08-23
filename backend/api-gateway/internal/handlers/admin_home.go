@@ -28,6 +28,7 @@ import (
 
 	"github.com/qaat/api-gateway/internal/clock"
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 // AdminOverview — GET /api/v1/admin/overview
@@ -49,6 +50,16 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 
 		today := clock.Today()
 		weekAgo := clock.Now().AddDate(0, 0, -7).Format("2006-01-02")
+
+		// U-Panel rows have no tenant_id (single-institution import). Do not use one().
+		raw := func(sql string, args ...interface{}) int {
+			var n int
+			if pool.QueryRow(ctx, sql, args...).Scan(&n) != nil {
+				return 0
+			}
+			return n
+		}
+		upanel.RefreshIfEmpty(ctx, pool)
 
 		// ── Roll call ────────────────────────────────────────────────────────
 		byRole := map[string]int{}
@@ -79,12 +90,16 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 
 		// ── Is it running? ───────────────────────────────────────────────────
 		activity := map[string]int{
-			"sessions_today":       one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date = $2::date`, today),
-			"sessions_week":        one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
-			"sessions_live":        one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_status = 'OPEN'`),
-			"checkins_today":       one(`SELECT COUNT(*) FROM attendance_logs al JOIN sessions s ON s.session_id = al.session_id WHERE s.tenant_id=$1 AND s.session_date = $2::date`, today),
-			"lecturer_gates_today": one(`SELECT COUNT(*) FROM lecturer_attendance_logs WHERE tenant_id=$1 AND session_date = $2::date`, today),
-			"patrols_week":         one(`SELECT COUNT(*) FROM lecturer_patrol_logs WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
+			"sessions_today":        one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date = $2::date`, today),
+			"sessions_week":         one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
+			"sessions_live":         one(`SELECT COUNT(*) FROM sessions WHERE tenant_id=$1 AND session_status = 'OPEN'`),
+			"checkins_today":        one(`SELECT COUNT(*) FROM attendance_logs al JOIN sessions s ON s.session_id = al.session_id WHERE s.tenant_id=$1 AND s.session_date = $2::date`, today),
+			"lecturer_gates_today":  one(`SELECT COUNT(*) FROM lecturer_attendance_logs WHERE tenant_id=$1 AND session_date = $2::date`, today),
+			"patrols_week":          one(`SELECT COUNT(*) FROM lecturer_patrol_logs WHERE tenant_id=$1 AND session_date >= $2::date`, weekAgo),
+			"upanel_students_today": raw(`SELECT COUNT(*) FROM upanel_attendance WHERE kind = 'student' AND present AND occurred_at::date = $1::date`, today),
+			"upanel_lectures_today": raw(`SELECT COUNT(*) FROM upanel_attendance WHERE kind = 'lecturer' AND occurred_at::date = $1::date`, today),
+			"upanel_staff_today":    raw(`SELECT COUNT(*) FROM upanel_attendance WHERE kind = 'admin' AND occurred_at::date = $1::date`, today),
+			"upanel_stored":         raw(`SELECT COUNT(*) FROM upanel_attendance`),
 		}
 
 		// ── What is quietly broken ───────────────────────────────────────────

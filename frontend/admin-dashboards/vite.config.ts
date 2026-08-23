@@ -46,4 +46,5 @@ export default defineConfig({
   ],
   server: { port: 3001, host: true },
   build: { target: 'es2020', sourcemap: true },
+  test: { environment: 'node', include: ['src/**/*.test.ts'] },
 })
