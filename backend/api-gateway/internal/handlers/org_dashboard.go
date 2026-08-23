@@ -255,6 +255,14 @@ func OrgOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 		}
 
+		// Contabo often has U-Panel rows and an empty native registry. Institution-wide
+		// roles (ADMIN, DQA, VC) must not open Home to a page of zeroes.
+		if s.Unbounded {
+			upanel.RefreshIfEmpty(r.Context(), pool)
+			c := upanel.LoadCensus(r.Context(), pool)
+			upanel.FillEmptyKpis(&o.Students, &o.Lecturers, &o.Courses, &o.Units, &o.SessionsHeld, &o.SessionsPlanned, &o.TaughtRate, c)
+		}
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"scope": map[string]string{
 				"department": s.Department, "school": s.School,

@@ -299,6 +299,73 @@ func AvgAndAtRisk(ctx context.Context, pool *pgxpool.Pool, threshold int) (avg f
 	return avg, atRisk
 }
 
+// Census is the institution-wide roll-up of stored U-Panel rows. Native QAAT
+// tables (students_extended, sessions, …) can be empty on a Contabo install that
+// only imports U-Panel, and the home tiles then read as "the API is dead"
+// rather than "the registry was never filled".
+type Census struct {
+	Students, Lecturers, Admins          int
+	StudentMarks, Lectures, StaffPunches int
+	Stored, Sessions, Courses, Units     int
+}
+
+func LoadCensus(ctx context.Context, pool *pgxpool.Pool) Census {
+	var c Census
+	if pool == nil {
+		return c
+	}
+	_ = pool.QueryRow(ctx, `
+		SELECT
+		  COUNT(*) FILTER (WHERE kind = 'student')::int,
+		  COUNT(*) FILTER (WHERE kind = 'lecturer')::int,
+		  COUNT(*) FILTER (WHERE kind = 'admin')::int,
+		  COUNT(*)::int,
+		  COUNT(DISTINCT person_id) FILTER (WHERE kind = 'student' AND btrim(person_id) <> '')::int,
+		  COUNT(DISTINCT COALESCE(NULLIF(btrim(staff_id), ''), NULLIF(btrim(person_id), '')))
+		      FILTER (WHERE kind = 'lecturer')::int,
+		  COUNT(DISTINCT COALESCE(NULLIF(btrim(session_id), ''), occurred_at::text))
+		      FILTER (WHERE kind IN ('student', 'lecturer'))::int,
+		  COUNT(DISTINCT NULLIF(btrim(course), ''))::int,
+		  COUNT(DISTINCT NULLIF(btrim(unit_name), ''))::int
+		FROM upanel_attendance`).Scan(
+		&c.StudentMarks, &c.Lectures, &c.StaffPunches, &c.Stored,
+		&c.Students, &c.Lecturers, &c.Sessions, &c.Courses, &c.Units,
+	)
+	_ = pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT COALESCE(NULLIF(btrim(staff_id), ''), NULLIF(btrim(person_id), '')))
+		FROM upanel_attendance WHERE kind = 'admin'`).Scan(&c.Admins)
+	return c
+}
+
+// FillEmptyKpis copies U-Panel census into zero KPI slots so Home is not a
+// page of zeroes when the only attendance QAAT has is the U-Panel import.
+func FillEmptyKpis(students, lecturers, courses, units, held, planned *int, taught *float64, c Census) {
+	if students != nil && *students == 0 {
+		*students = c.Students
+	}
+	if lecturers != nil && *lecturers == 0 {
+		*lecturers = c.Lecturers
+	}
+	if courses != nil && *courses == 0 {
+		*courses = c.Courses
+	}
+	if units != nil && *units == 0 {
+		*units = c.Units
+	}
+	if held != nil && *held == 0 && c.Sessions > 0 {
+		*held = c.Sessions
+		if planned != nil && *planned == 0 {
+			*planned = c.Sessions
+			if taught != nil {
+				*taught = AttendancePct(c.Sessions, c.Lectures)
+				if *taught > 100 {
+					*taught = 100
+				}
+			}
+		}
+	}
+}
+
 func trailActionSQL() string {
 	return `CASE
 		WHEN kind = 'student' AND present THEN 'UPANEL_STUDENT_PRESENT'

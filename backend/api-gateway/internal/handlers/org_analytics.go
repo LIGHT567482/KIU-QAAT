@@ -19,6 +19,7 @@ package handlers
 // dashboards without a role branch in the SQL.
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/qaat/api-gateway/internal/middleware"
+	"github.com/qaat/api-gateway/internal/upanel"
 )
 
 type analyticsWeek struct {
@@ -155,6 +157,15 @@ func OrgAnalytics(pool *pgxpool.Pool) http.HandlerFunc {
 			       COUNT(*) FILTER (WHERE NOT has_record)
 			FROM sess`, args...).Scan(&taught, &notTaught, &noRecord)
 
+		if taught+notTaught+noRecord == 0 {
+			upanel.RefreshIfEmpty(r.Context(), pool)
+			if uTrend, uGroups, uTaught, uMiss, uNone, uTotal := upanelChart(r.Context(), pool, weeks); uTotal > 0 {
+				trend, groups = uTrend, uGroups
+				taught, notTaught, noRecord = uTaught, uMiss, uNone
+				groupCol = "course"
+			}
+		}
+
 		// ── Employee time accuracy, by support department ────────────────────
 		//
 		// The terminal records four things about a working day and they are not degrees of the
@@ -241,4 +252,85 @@ func pct1(part, whole int) float64 {
 		return 0
 	}
 	return float64(int(float64(part)/float64(whole)*1000+0.5)) / 10
+}
+
+// upanelChart is the overview charts when QAAT has no native sessions — only
+// the U-Panel import. Grouped by course name because U-Panel rows have no
+// department column.
+func upanelChart(ctx context.Context, pool *pgxpool.Pool, weeks int) (
+	trend []analyticsWeek, groups []analyticsGroup, taught, notTaught, noRecord, total int,
+) {
+	trend = []analyticsWeek{}
+	groups = []analyticsGroup{}
+	if pool == nil {
+		return
+	}
+	if rows, err := pool.Query(ctx, `
+		SELECT date_trunc('week', occurred_at)::date,
+		       COUNT(DISTINCT COALESCE(NULLIF(btrim(session_id), ''), occurred_at::text))
+		           FILTER (WHERE kind IN ('student', 'lecturer')),
+		       COUNT(*) FILTER (WHERE kind = 'lecturer'),
+		       COUNT(*) FILTER (WHERE kind = 'student' AND present),
+		       COUNT(*) FILTER (WHERE kind = 'student')
+		FROM upanel_attendance
+		WHERE occurred_at >= CURRENT_DATE - ($1::int * 7 - 1)
+		GROUP BY 1
+		ORDER BY 1`, weeks); err == nil {
+		for rows.Next() {
+			var wk time.Time
+			var sessions, lectured, present, studentMarks int
+			if rows.Scan(&wk, &sessions, &lectured, &present, &studentMarks) != nil {
+				continue
+			}
+			a := analyticsWeek{WeekStart: wk.Format("2006-01-02"), Sessions: sessions, Taught: lectured}
+			a.AttendancePct = pct1(present, studentMarks)
+			a.TaughtPct = pct1(lectured, sessions)
+			if a.TaughtPct > 100 {
+				a.TaughtPct = 100
+			}
+			trend = append(trend, a)
+		}
+		rows.Close()
+	}
+	if rows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(btrim(course), ''), NULLIF(btrim(unit_name), ''), 'Unassigned'),
+		       COUNT(DISTINCT COALESCE(NULLIF(btrim(session_id), ''), occurred_at::text)),
+		       COUNT(*) FILTER (WHERE kind = 'student' AND present),
+		       COUNT(*) FILTER (WHERE kind = 'student')
+		FROM upanel_attendance
+		WHERE occurred_at >= CURRENT_DATE - ($1::int * 7 - 1)
+		  AND kind IN ('student', 'lecturer')
+		GROUP BY 1
+		ORDER BY COUNT(*) DESC
+		LIMIT 12`, weeks); err == nil {
+		for rows.Next() {
+			var g analyticsGroup
+			var present, marks int
+			if rows.Scan(&g.Name, &g.Sessions, &present, &marks) != nil {
+				continue
+			}
+			g.AttendancePct = pct1(present, marks)
+			groups = append(groups, g)
+		}
+		rows.Close()
+	}
+	var lecturerSess, allSess int
+	_ = pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT COALESCE(NULLIF(btrim(session_id), ''), occurred_at::text))
+		           FILTER (WHERE kind = 'lecturer'),
+		       COUNT(DISTINCT COALESCE(NULLIF(btrim(session_id), ''), occurred_at::text))
+		           FILTER (WHERE kind IN ('student', 'lecturer'))
+		FROM upanel_attendance
+		WHERE occurred_at >= CURRENT_DATE - ($1::int * 7 - 1)`, weeks).Scan(&lecturerSess, &allSess)
+	taught = lecturerSess
+	if allSess > lecturerSess {
+		noRecord = allSess - lecturerSess
+	}
+	total = taught + notTaught + noRecord
+	if total == 0 {
+		c := upanel.LoadCensus(ctx, pool)
+		total = c.Sessions
+		taught = c.Lectures
+	}
+	return
 }

@@ -102,6 +102,29 @@ func AdminOverview(pool *pgxpool.Pool) http.HandlerFunc {
 			"upanel_stored":         raw(`SELECT COUNT(*) FROM upanel_attendance`),
 		}
 
+		// Contabo often has U-Panel rows and an empty native registry.
+		{
+			c := upanel.LoadCensus(ctx, pool)
+			if setup["students"] == 0 {
+				setup["students"] = c.Students
+			}
+			if setup["lecturers"] == 0 {
+				setup["lecturers"] = c.Lecturers
+			}
+			if setup["employees"] == 0 {
+				setup["employees"] = c.Admins
+			}
+			if setup["courses"] == 0 {
+				setup["courses"] = c.Courses
+			}
+			if setup["units"] == 0 {
+				setup["units"] = c.Units
+			}
+			if activity["upanel_stored"] == 0 {
+				activity["upanel_stored"] = c.Stored
+			}
+		}
+
 		// ── What is quietly broken ───────────────────────────────────────────
 		// Each of these is a real, silent failure somewhere else in the system.
 		gaps := map[string]int{
